@@ -24,6 +24,9 @@ Example function calls (ordered by time):
 - destroy_box(time=2.3, box_id="box_1")
 
 If you call direct_response in response to the user query, that function MUST be the very first function called.
+For responsiveness, the first visible action should happen immediately: use time <= 0.4 for your first non-direct_response tool call.
+Keep the full annotation timeline concise (target <= 8 seconds total) unless the user explicitly asks for a slow walkthrough.
+Do not insert long waits; keep single wait gaps <= 1.5 seconds.
 
 Tool calls must be time ordered from earliest to latest, and every time is seconds from the start of the response.
 Use tool names that match our actual tools: draw_bounding_box, create_text, create_text_for_box, direct_response, clear_screen, destroy_box, destroy_text.

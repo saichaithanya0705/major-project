@@ -23,12 +23,19 @@ const DIRECT_RESPONSE_BOTTOM_MARGIN = 24;
 const DIRECT_RESPONSE_MIN_MAX_HEIGHT = 140;
 const OVERLAY_TEXT_VIEWPORT_MARGIN = 8;
 const OVERLAY_TEXT_MIN_MAX_HEIGHT = 96;
+const INPUT_HIT_SLOP = 10;
+const THINKING_STATUS_TEXT = 'Assistant is thinking...';
+const STOPPED_STATUS_TEXT = 'Assistant stopped responding';
+const NEUTRAL_RING_COLOR = '#AEB4BF';
+const NEUTRAL_ACCENT_COLOR = '#BCC3CF';
+const platform = window.api.getPlatform();
 let canvasBackgroundColor = null;
 let lastHoverState = false;
 let lastHitTestState = false;
 let isOverlayTextSelectionDragging = false;
-let overlayModelName = 'CLOVIS';
+let overlayModelName = 'Agent';
 let lastDirectResponseTheme = null;
+let lastMouseSyncTs = 0;
 
 function applyDirectResponseHeightCap(el, bubble) {
   if (!el || !bubble) return;
@@ -139,7 +146,7 @@ function drawAll() {
     }
 
     const ringRadius = dot.ringRadius || DOT_RING_RADIUS;
-    const ringColor = dot.ringColor || dot.color || '#66B7FF';
+    const ringColor = dot.ringColor || dot.color || NEUTRAL_RING_COLOR;
     ctx.beginPath();
     ctx.strokeStyle = ringColor;
     ctx.lineWidth = DOT_RING_WIDTH;
@@ -286,7 +293,7 @@ function updateTextElement(el, text) {
 }
 
 function toRgba(color, alpha) {
-  const fallback = `rgba(135, 206, 235, ${alpha})`;
+  const fallback = `rgba(158, 166, 178, ${alpha})`;
   if (!color || typeof color !== 'string') return fallback;
   const value = color.trim();
   if (value.startsWith('#')) {
@@ -382,16 +389,46 @@ function checkHit(x, y) {
 }
 
 function isOverOverlayElement(x, y) {
+  const overlayInputActive = window.overlayInputActiveFlag === true;
+  const inputWrap = document.querySelector('.command-input-wrap');
+  const activeEl = document.activeElement;
+  const inputFocused = activeEl instanceof Element && !!activeEl.closest('#command-overlay');
+
+  // While command overlay is open, only the command input strip should
+  // capture interaction. Everything else stays click-through.
+  if (overlayInputActive) {
+    // Keep interaction locked while the input (or send button) has focus so
+    // pointer jitter cannot repeatedly drop focus during typing.
+    if (inputFocused) {
+      return true;
+    }
+    if (isOverlayTextSelectionDragging) {
+      isOverlayTextSelectionDragging = false;
+    }
+    if (inputWrap) {
+      const rect = inputWrap.getBoundingClientRect();
+      if (x >= (rect.left - INPUT_HIT_SLOP) &&
+          x <= (rect.right + INPUT_HIT_SLOP) &&
+          y >= (rect.top - INPUT_HIT_SLOP) &&
+          y <= (rect.bottom + INPUT_HIT_SLOP)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   if (isOverlayTextSelectionDragging) {
     return true;
   }
 
   if (checkHit(x, y)) return true;
 
-  const inputWrap = document.querySelector('.command-input-wrap');
   if (inputWrap) {
     const rect = inputWrap.getBoundingClientRect();
-    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+    if (x >= (rect.left - INPUT_HIT_SLOP) &&
+        x <= (rect.right + INPUT_HIT_SLOP) &&
+        y >= (rect.top - INPUT_HIT_SLOP) &&
+        y <= (rect.bottom + INPUT_HIT_SLOP)) {
       return true;
     }
   }
@@ -421,6 +458,19 @@ function isOverOverlayElement(x, y) {
   }
 
   return false;
+}
+
+function syncWindowInteractivity(isOver) {
+  if (platform === 'win32') {
+    if (isOver === lastHoverState) return;
+    lastHoverState = isOver;
+    window.api.setWindowInteractive(isOver);
+    return;
+  }
+
+  if (isOver === lastHitTestState) return;
+  lastHitTestState = isOver;
+  window.api.reportHitTest(isOver);
 }
 
 function upsertDot(dot) {
@@ -477,7 +527,7 @@ function upsertText(text) {
   }
   updateTextElement(entry.el, text);
 
-  if (entry.el.classList.contains('ai-thinking') && text.text !== 'Gemini is thinking...') {
+  if (entry.el.classList.contains('ai-thinking') && text.text !== THINKING_STATUS_TEXT) {
     entry.el.classList.remove('ai-thinking');
     entry.el.classList.add('ai-reveal');
     const textEl = entry.el.querySelector('.ai-ar-text');
@@ -489,7 +539,7 @@ function upsertText(text) {
     }, 450);
   }
 
-  if (text.id === DIRECT_RESPONSE_ID && text.text && text.text !== 'Gemini is thinking...') {
+  if (text.id === DIRECT_RESPONSE_ID && text.text && text.text !== THINKING_STATUS_TEXT) {
     if (entry.lastText !== text.text) {
       entry.lastText = text.text;
       startFlush(entry, text.text);
@@ -523,7 +573,7 @@ function clearAll() {
 
 function showStopStatusBubble() {
   if (!window.showStatusBubble) return;
-  window.showStatusBubble('Gemini has stopped responding', {
+  window.showStatusBubble(STOPPED_STATUS_TEXT, {
     icon: 'stop',
     statusBg: 'rgba(64, 16, 16, 0.96)',
     statusBorder: 'rgba(255, 120, 120, 0.32)',
@@ -541,8 +591,8 @@ function showThinkingAt(x, y, theme = null) {
     id: DIRECT_RESPONSE_ID,
     x,
     y,
-    text: 'Gemini is thinking...',
-    color: resolvedTheme?.accent || '#8BE9FD',
+    text: THINKING_STATUS_TEXT,
+    color: resolvedTheme?.accent || NEUTRAL_ACCENT_COLOR,
     theme: resolvedTheme || undefined,
     align: 'left',
     baseline: 'top'
@@ -558,7 +608,7 @@ function showThinkingAt(x, y, theme = null) {
     }
     const textEl = entry.el.querySelector('.ai-ar-text');
     if (textEl) {
-      textEl.dataset.text = 'Gemini is thinking...';
+      textEl.dataset.text = THINKING_STATUS_TEXT;
     }
   }
 
@@ -569,7 +619,7 @@ function showThinkingAt(x, y, theme = null) {
     id: DIRECT_RESPONSE_ID,
     x,
     y,
-    text: 'Gemini is thinking...',
+    text: THINKING_STATUS_TEXT,
     align: 'left',
     baseline: 'top',
     source: 'overlay',
@@ -593,7 +643,7 @@ window.overlayShowDirectResponse = function(text, source = 'unknown', theme = nu
       x: Math.round(window.innerWidth * 0.5),
       y: Math.round(window.innerHeight * 0.5) + 42,
       text: value,
-      color: resolvedTheme?.accent || '#8BE9FD',
+      color: resolvedTheme?.accent || NEUTRAL_ACCENT_COLOR,
       theme: resolvedTheme || undefined,
       align: 'left',
       baseline: 'top'
@@ -697,7 +747,7 @@ async function connectSocket() {
         radius: payload.radius || 6,
         color: payload.color,
         dotColor: payload.dotColor || '#ffffff',
-        ringColor: payload.ringColor || payload.color || '#66B7FF',
+        ringColor: payload.ringColor || payload.color || NEUTRAL_RING_COLOR,
         ringRadius: payload.ringRadius,
         lineTo: payload.lineTo,
         lineTargetTextId: payload.lineTargetTextId,
@@ -809,6 +859,7 @@ function isSelectableOverlayTextTarget(target) {
 }
 
 document.addEventListener('mousedown', (event) => {
+  if (window.overlayInputActiveFlag === true) return;
   if (event.button !== 0) return;
   if (!isSelectableOverlayTextTarget(event.target)) return;
   isOverlayTextSelectionDragging = true;
@@ -818,22 +869,32 @@ document.addEventListener('mousedown', (event) => {
 }, true);
 
 document.addEventListener('mouseup', (event) => {
+  if (window.overlayInputActiveFlag === true) {
+    isOverlayTextSelectionDragging = false;
+    return;
+  }
   if (!isOverlayTextSelectionDragging) return;
   isOverlayTextSelectionDragging = false;
 
   const x = typeof event.clientX === 'number' ? event.clientX : 0;
   const y = typeof event.clientY === 'number' ? event.clientY : 0;
-  const isOver = isOverOverlayElement(x, y);
+  syncWindowInteractivity(isOverOverlayElement(x, y));
+}, true);
 
-  if (platform === 'win32') {
-    if (isOver !== lastHoverState) {
-      lastHoverState = isOver;
-      window.api.setWindowInteractive(isOver);
-    }
-  } else if (isOver !== lastHitTestState) {
-    lastHitTestState = isOver;
-    window.api.reportHitTest(isOver);
+document.addEventListener('mousemove', (event) => {
+  if (window.setCursorStatusPosition) {
+    window.setCursorStatusPosition(event.clientX, event.clientY);
   }
+  if (platform !== 'win32') return;
+  if (window.overlayInputFocusedFlag === true) {
+    // Hold interactive mode while typing.
+    syncWindowInteractivity(true);
+    return;
+  }
+  const now = performance.now();
+  if ((now - lastMouseSyncTs) < 12) return;
+  lastMouseSyncTs = now;
+  syncWindowInteractivity(isOverOverlayElement(event.clientX, event.clientY));
 }, true);
 
 canvas.addEventListener('click', (event) => {
@@ -856,28 +917,21 @@ window.addEventListener('resize', () => {
   });
 });
 
-const platform = window.api.getPlatform();
-if (platform === 'win32') {
-  window.addEventListener('mousemove', (event) => {
-    if (window.setCursorStatusPosition) {
-      window.setCursorStatusPosition(event.clientX, event.clientY);
+window.api.onCursorPosition((point) => {
+  if (window.setCursorStatusPosition) {
+    window.setCursorStatusPosition(point.x, point.y);
+  }
+  if (platform === 'win32') {
+    // During active input mode on Windows, rely on forwarded mousemove
+    // hit-testing instead of cross-process cursor polling.
+    if (window.overlayInputActiveFlag === true || window.overlayInputFocusedFlag === true) {
+      return;
     }
-    const isOver = isOverOverlayElement(event.clientX, event.clientY);
-    if (isOver === lastHoverState) return;
-    lastHoverState = isOver;
-    window.api.setWindowInteractive(isOver);
-  });
-} else {
-  window.api.onCursorPosition((point) => {
-    if (window.setCursorStatusPosition) {
-      window.setCursorStatusPosition(point.x, point.y);
-    }
-    const isOver = isOverOverlayElement(point.x, point.y);
-    if (isOver === lastHitTestState) return;
-    lastHitTestState = isOver;
-    window.api.reportHitTest(isOver);
-  });
-}
+    syncWindowInteractivity(isOverOverlayElement(point.x, point.y));
+    return;
+  }
+  syncWindowInteractivity(isOverOverlayElement(point.x, point.y));
+});
 
 window.api.onResetConfigure(() => {
   clearAll();

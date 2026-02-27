@@ -19,8 +19,12 @@ load_dotenv()
 
 # Configuration
 CHUNK_SIZE = 1024
-ELEVENLABS_URL = os.getenv("ELEVENLABS_URL")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_BASE = str(os.getenv("ELEVENLABS_API_BASE") or "https://api.elevenlabs.io").rstrip("/")
+ELEVENLABS_URL = str(os.getenv("ELEVENLABS_URL") or "").strip()
+ELEVENLABS_API_KEY = str(os.getenv("ELEVENLABS_API_KEY") or "").strip()
+ELEVENLABS_VOICE_ID = str(os.getenv("ELEVENLABS_VOICE_ID") or "JBFqnCBsd6RMkjVDRZzb").strip()
+ELEVENLABS_MODEL_ID = str(os.getenv("ELEVENLABS_MODEL_ID") or "eleven_multilingual_v2").strip()
+ELEVENLABS_OUTPUT_FORMAT = str(os.getenv("ELEVENLABS_OUTPUT_FORMAT") or "mp3_44100_128").strip()
 
 # Audio output file
 AUDIO_FILE = "clovis_audio.mp3"
@@ -28,13 +32,16 @@ AUDIO_FILE = "clovis_audio.mp3"
 # Audio player instance (global for stop functionality)
 _audio_player = None
 
-# Check if vlc is available
+# Check if VLC python bindings and native runtime are available.
+# On Windows, python-vlc may import successfully but still fail when libvlc.dll
+# is missing. We treat any import/runtime exception as "VLC unavailable".
 try:
     import vlc
     VLC_AVAILABLE = True
-except ImportError:
+except Exception as exc:
+    vlc = None
     VLC_AVAILABLE = False
-    print("[TTS] VLC not available - TTS will print to console only")
+    print(f"[TTS] VLC unavailable ({type(exc).__name__}: {exc}) - TTS will print to console only")
 
 
 def _get_headers():
@@ -44,6 +51,22 @@ def _get_headers():
         "Content-Type": "application/json",
         "xi-api-key": ELEVENLABS_API_KEY
     }
+
+
+def _get_tts_url() -> str:
+    """
+    Resolve TTS endpoint URL.
+
+    Current ElevenLabs docs support API-key auth with voice-id path:
+    POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}
+    """
+    if ELEVENLABS_URL:
+        return ELEVENLABS_URL
+
+    if not ELEVENLABS_VOICE_ID:
+        raise ValueError("ELEVENLABS_VOICE_ID is required when ELEVENLABS_URL is not set")
+
+    return f"{ELEVENLABS_API_BASE}/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
 
 def _play_audio():
@@ -84,26 +107,38 @@ def tts_speak(text: str):
     print(f'[TTS] Speaking: {text}')
 
     # If ElevenLabs is not configured, just print
-    if not ELEVENLABS_URL or not ELEVENLABS_API_KEY:
+    if not ELEVENLABS_API_KEY:
         print("[TTS] ElevenLabs not configured - skipping audio")
         return
 
     # Prepare the API request
     data = {
         "text": text,
-        "model_id": "eleven_monolingual_v1",
+        "model_id": ELEVENLABS_MODEL_ID,
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.5
         }
     }
 
+    params = {}
+    if ELEVENLABS_OUTPUT_FORMAT:
+        params["output_format"] = ELEVENLABS_OUTPUT_FORMAT
+
+    try:
+        url = _get_tts_url()
+    except ValueError as e:
+        print(f"[TTS] Config error: {e}")
+        return
+
     try:
         response = requests.post(
-            ELEVENLABS_URL,
+            url,
             json=data,
+            params=params,
             headers=_get_headers(),
-            stream=True
+            stream=True,
+            timeout=45
         )
 
         if response.status_code == 200:

@@ -63,7 +63,12 @@ async def _run_backend_reuse_check() -> None:
         calls.append(f"browser_use:{task}")
         return {"success": True, "result": task, "error": None}
 
-    async def _fake_execute_playwright(task: str, bootstrap_error: str, close_when_done: bool):
+    async def _fake_execute_playwright(
+        task: str,
+        bootstrap_error: str,
+        close_when_done: bool,
+        pre_extracted_url: str | None = None,
+    ):
         calls.append(f"playwright:{task}")
         return {"success": True, "result": task, "error": None}
 
@@ -158,8 +163,8 @@ def run_checks() -> None:
         "On the currently open ScopeGrade page, upload ECE_131A_HW5.zip"
     )
     assert "do not perform web search" in steered.lower()
-    assert "currently open localhost page" in steered.lower()
-    assert "temporary hard constraint" in steered.lower()
+    assert "currently open local-server page" in steered.lower()
+    assert "hard constraint (local-site mode)" in steered.lower()
     assert "do not type the full task sentence" in steered.lower()
     plain = BrowserAgent._steer_task_for_existing_page("Open youtube.com")
     assert plain == "Open youtube.com"

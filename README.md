@@ -28,8 +28,21 @@ cd ../agents/cua_cli/gemini-cli && npm install && npm run build
 ```
 GEMINI_API_KEY = "YOUR_API_KEY"
 
-ELEVENLABS_URL = "YOUR_API_KEY"
+# Optional Gemini quota/rate-limit fallback via OpenRouter (Nemotron 30B free)
+OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
+OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
+# Optional overrides:
+# OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# OPENROUTER_SITE_URL = "https://your-app-url.example"
+# OPENROUTER_SITE_NAME = "CLOVIS"
+# OPENROUTER_TIMEOUT_SECONDS = "45"
+
 ELEVENLABS_API_KEY = "YOUR_API_KEY"
+ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"   # Optional
+ELEVENLABS_MODEL_ID = "eleven_multilingual_v2" # Optional
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
+# Optional full URL override (legacy/advanced):
+# ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
 ```
 
 ## Running Clovis
@@ -48,6 +61,7 @@ python app.py
 ## Clovis Commands
 
 * `Cmd + Shift + Space` opens the CLOVIS input bar
+* `Cmd + Shift + X` closes the CLOVIS input bar
 * `Cmd + Shift + C` stops active actions and clears overlay state
 
 ---

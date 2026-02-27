@@ -70,14 +70,14 @@
 #status-bubble-icon svg {
   width: 100%;
   height: 100%;
-  stroke: var(--status-check, rgba(130, 200, 130, 0.9));
+  stroke: var(--status-check, rgba(170, 178, 190, 0.9));
   stroke-width: 2.5;
   fill: none;
 }
 
 #status-bubble-icon .status-icon--stop {
   display: none;
-  fill: var(--status-check, rgba(130, 200, 130, 0.9));
+  fill: var(--status-check, rgba(170, 178, 190, 0.9));
   stroke: none;
 }
 
@@ -149,7 +149,7 @@
   background-image: linear-gradient(
     120deg,
     rgba(255, 255, 255, 0) 0%,
-    var(--status-shimmer, rgba(160, 200, 255, 0.6)) 50%,
+    var(--status-shimmer, rgba(192, 199, 210, 0.6)) 50%,
     rgba(255, 255, 255, 0) 60%
   );
   background-size: 200% 100%;
@@ -183,23 +183,23 @@
 }
 
 #status-bubble-dismiss:hover {
-  background: rgba(102, 183, 255, 0.3);
+  background: rgba(171, 178, 190, 0.3);
 }
 
 #status-bubble-text::selection {
-  background: rgba(102, 183, 255, 0.34);
+  background: rgba(171, 178, 190, 0.34);
   color: #ffffff;
 }
 
 @keyframes status-bubble-pulse {
   0% {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(102, 183, 255, 0);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(171, 178, 190, 0);
   }
   50% {
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.42), 0 0 0 8px rgba(102, 183, 255, 0.28);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.42), 0 0 0 8px rgba(171, 178, 190, 0.28);
   }
   100% {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(102, 183, 255, 0);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(171, 178, 190, 0);
   }
 }
 

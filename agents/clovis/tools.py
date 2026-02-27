@@ -33,6 +33,8 @@ _VIEWPORT_SIZE = None
 _LAST_DIRECT_RESPONSE = None
 _WAITED_AFTER_DIRECT_RESPONSE = True
 _ACTIVE_TEXT_RECTS = {}
+_MAX_INITIAL_ACTION_DELAY_SECONDS = 0.6
+_MAX_INTER_ACTION_DELAY_SECONDS = 2.0
 
 # Approximate runtime layout model for `.ai-ar-panel` in `overlay_text.css`.
 _TEXT_PANEL_MAX_WIDTH_PX = 320
@@ -141,6 +143,7 @@ async def _run_queue_async():
             continue
 
         time_s, func, args, kwargs = ACTION_QUEUE.popleft()
+        action_time_s = float(time_s)
 
         # Handle direct_response delay
         if _LAST_DIRECT_RESPONSE and not _WAITED_AFTER_DIRECT_RESPONSE:
@@ -150,11 +153,24 @@ async def _run_queue_async():
             await _hide_command_overlay()
             _WAITED_AFTER_DIRECT_RESPONSE = True
 
-        delay = max(0.0, float(time_s) - last_time)
+        if last_time == 0.0 and action_time_s > _MAX_INITIAL_ACTION_DELAY_SECONDS:
+            print(
+                f"[CLOVIS][queue] clamping initial action time from "
+                f"{action_time_s:.2f}s to {_MAX_INITIAL_ACTION_DELAY_SECONDS:.2f}s"
+            )
+            action_time_s = _MAX_INITIAL_ACTION_DELAY_SECONDS
+
+        delay = max(0.0, action_time_s - last_time)
+        if delay > _MAX_INTER_ACTION_DELAY_SECONDS:
+            print(
+                f"[CLOVIS][queue] clamping inter-action delay from "
+                f"{delay:.2f}s to {_MAX_INTER_ACTION_DELAY_SECONDS:.2f}s"
+            )
+            delay = _MAX_INTER_ACTION_DELAY_SECONDS
         if delay:
             await asyncio.sleep(delay)
         await func(*args, **kwargs)
-        last_time = float(time_s)
+        last_time = action_time_s
 
 
 def _dispatch_now(coro):
@@ -649,7 +665,7 @@ def draw_bounding_box(
     y_max: int,
     x_max: int,
     box_id: str = None,
-    stroke: str | None = "#66B7FF",
+    stroke: str | None = "#AEB4BF",
     stroke_width: int = 5,
     opacity: float = 0.8,
     auto_contrast: bool = False,
@@ -674,7 +690,7 @@ def draw_pointer_to_object(
     text_y: int,
     point_id: str = None,
     dot_color: str = "#ffffff",
-    ring_color: str = "#66B7FF",
+    ring_color: str = "#AEB4BF",
     ring_radius: int = None,
 ):
     """
@@ -717,7 +733,7 @@ draw_bounding_box_declaration = {
             "y_max": {"type": "integer", "description": "Bottom edge coordinate in pixels."},
             "x_max": {"type": "integer", "description": "Right edge coordinate in pixels."},
             "box_id": {"type": "string", "description": "Optional unique ID for the box."},
-            "stroke": {"type": "string", "description": "Stroke color hex code.", "default": "#66B7FF"},
+            "stroke": {"type": "string", "description": "Stroke color hex code.", "default": "#AEB4BF"},
             "stroke_width": {"type": "integer", "description": "Border width in pixels.", "default": 5},
             "opacity": {"type": "number", "description": "Opacity from 0 to 1.", "default": 0.8},
             "auto_contrast": {"type": "boolean", "description": "Choose stroke color based on background contrast.", "default": False},
@@ -741,7 +757,7 @@ draw_point_declaration = {
             "text_y": {"type": "integer", "description": "Y position of the text label in pixels."},
             "point_id": {"type": "string", "description": "Optional unique ID for the pointer."},
             "dot_color": {"type": "string", "description": "Dot fill color.", "default": "#ffffff"},
-            "ring_color": {"type": "string", "description": "Ring color.", "default": "#66B7FF"},
+            "ring_color": {"type": "string", "description": "Ring color.", "default": "#AEB4BF"},
             "ring_radius": {"type": "integer", "description": "Optional ring radius in pixels."},
         },
         "required": ["time", "x_pos", "y_pos", "text", "text_x", "text_y"],

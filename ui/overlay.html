@@ -2,7 +2,6 @@
 <html>
 <head>
   <title>Overlay</title>
-  <link rel="stylesheet" href="animations/command_overlay.css">
   <link rel="stylesheet" href="animations/screen_glow.css">
   <link rel="stylesheet" href="animations/overlay_box.css">
   <link rel="stylesheet" href="animations/overlay_text.css">
@@ -31,22 +30,6 @@
   <canvas id="overlay"></canvas>
   <div id="box-layer" aria-hidden="true"></div>
   <div id="text-layer" aria-hidden="true"></div>
-  <div id="command-overlay" aria-hidden="true">
-      <div id="command-logo">
-      <div id="command-logo-spin">
-        <img src="assets/assistant_mark.svg" alt="Assistant">
-      </div>
-    </div>
-    <div id="command-bar">
-      <div class="command-input-wrap">
-        <textarea id="command-input" rows="1" placeholder="Assistant here. How can I help?" autocomplete="off"></textarea>
-        <button id="command-send" type="button" aria-label="Send">
-          <span class="command-send-icon">&#8594;</span>
-        </button>
-        <span id="command-sizer" aria-hidden="true"></span>
-      </div>
-    </div>
-  </div>
   <div id="screen-glow" aria-hidden="true"></div>
   <div id="status-bubble" role="status" aria-live="polite" aria-hidden="true">
     <span id="status-bubble-icon" data-icon="check">
@@ -62,7 +45,6 @@
     <span id="cursor-status-text">Analyzing...</span>
   </div>
   <script type="module" src="renderer.js"></script>
-  <script src="animations/command_overlay.js"></script>
   <script src="animations/screen_glow.js"></script>
   <script src="animations/status_bubble.js"></script>
   <script src="animations/cursor_status.js"></script>

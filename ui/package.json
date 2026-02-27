@@ -5,8 +5,8 @@
   "description": "CLOVIS-frontend",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
+    "start": "node scripts/start-electron.js",
+    "dev": "node scripts/start-electron.js",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",

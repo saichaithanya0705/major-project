@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { wasmLoader } from 'esbuild-plugin-wasm';
 
 let esbuild;
@@ -22,6 +22,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 const pkg = require(path.resolve(__dirname, 'package.json'));
+
+function ensureGeneratedGitCommitFile() {
+  const generatedDir = path.resolve(__dirname, 'packages/core/src/generated');
+  const generatedFile = path.join(generatedDir, 'git-commit.js');
+
+  if (existsSync(generatedFile)) {
+    return;
+  }
+
+  mkdirSync(generatedDir, { recursive: true });
+  const fallback = [
+    '/**',
+    ' * Auto-generated fallback metadata for local CLOVIS builds.',
+    ' * Upstream typically generates this from git state in CI.',
+    ' */',
+    `export const GIT_COMMIT_INFO = process.env['GIT_COMMIT_INFO'] || 'unknown';`,
+    `export const CLI_VERSION = process.env['CLI_VERSION'] || ${JSON.stringify(pkg.version)};`,
+    '',
+  ].join('\n');
+  writeFileSync(generatedFile, fallback, 'utf8');
+  console.log(`[esbuild] created fallback metadata at ${generatedFile}`);
+}
 
 function createWasmPlugins() {
   const wasmBinaryPlugin = {
@@ -90,6 +112,8 @@ const cliConfig = {
   },
   metafile: true,
 };
+
+ensureGeneratedGitCommitFile();
 
 esbuild.build(cliConfig).then(({ metafile }) => {
   if (process.env.DEV === 'true') {

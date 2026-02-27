@@ -53,7 +53,7 @@
   background-image: linear-gradient(
     120deg,
     rgba(255, 255, 255, 0) 0%,
-    var(--cursor-shimmer, rgba(160, 200, 255, 0.55)) 50%,
+    var(--cursor-shimmer, rgba(192, 199, 210, 0.55)) 50%,
     rgba(255, 255, 255, 0) 60%
   );
   background-size: 200% 100%;

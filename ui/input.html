@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CLOVIS Chat</title>
+  <link rel="stylesheet" href="input_window.css">
+</head>
+<body>
+  <div id="chat-shell" role="dialog" aria-label="Assistant chat">
+    <div id="chat-header">
+      <div id="chat-brand">
+        <span id="chat-logo" aria-hidden="true">
+          <img src="assets/assistant_mark.svg" alt="">
+        </span>
+        <span id="chat-title">CLOVIS Assistant</span>
+      </div>
+      <div id="chat-actions">
+        <button id="chat-stop" type="button" aria-label="Stop all agents">Stop</button>
+        <button id="chat-hide" type="button" aria-label="Hide chat">×</button>
+      </div>
+    </div>
+    <div id="chat-status" aria-live="polite">Ready</div>
+    <div id="chat-messages" aria-live="polite"></div>
+    <div id="input-row">
+      <textarea id="command-input" rows="1" placeholder="Ask about your screen or give a task..." autocomplete="off"></textarea>
+      <button id="command-send" type="button" aria-label="Send message">
+        <span class="send-icon">&#8594;</span>
+      </button>
+    </div>
+  </div>
+  <script type="module" src="input_window.js"></script>
+</body>
+</html>

@@ -1,8 +1,8 @@
 {
     "host": "127.0.0.1",
     "port": 58870,
-    "screen_width": 1470,
-    "screen_height": 956,
+    "screen_width": 1536,
+    "screen_height": 816,
     "viewport_width": 0,
     "viewport_height": 0,
     "rapid_response_model": "gemini-flash-lite-latest",

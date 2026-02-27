@@ -9,11 +9,13 @@ This module handles:
 import asyncio
 import json
 import os
+import time
 from collections import deque
 from typing import Any, Optional
 
 from PIL import Image, ImageGrab
 from dotenv import load_dotenv
+import requests
 
 from models.function_calls import (
     ROUTER_TOOLS, ROUTER_TOOL_MAP,
@@ -54,6 +56,37 @@ _stored_screenshot = None
 _RAPID_CONVERSATION_HISTORY = deque(maxlen=32)
 _MAX_ROUTER_CHAIN_STEPS = 6
 _REPEATED_STEP_LIMIT = 3
+_VISUAL_EXPLAIN_MARKERS = (
+    "what do you see",
+    "what do u see",
+    "what's on my screen",
+    "what is on my screen",
+    "what am i looking at",
+    "describe my screen",
+    "describe what you see",
+    "explain what you see",
+    "tell me what you see",
+    "can you see my screen",
+)
+_EXECUTION_INTENT_MARKERS = (
+    "click ",
+    "open ",
+    "run ",
+    "type ",
+    "install ",
+    "clone ",
+    "start ",
+    "stop ",
+    "search ",
+    "go to ",
+    "create ",
+    "delete ",
+    "move ",
+    "copy ",
+    "paste ",
+    "scroll ",
+    "press ",
+)
 
 
 def store_screenshot():
@@ -289,6 +322,27 @@ def _looks_like_repeat_artifact(text: str) -> bool:
     return any(pattern in lowered for pattern in patterns)
 
 
+def _is_visual_explanation_request(user_prompt: str) -> bool:
+    lowered = (user_prompt or "").lower().strip()
+    if not lowered:
+        return False
+
+    if any(marker in lowered for marker in _EXECUTION_INTENT_MARKERS):
+        return False
+
+    if any(marker in lowered for marker in _VISUAL_EXPLAIN_MARKERS):
+        return True
+
+    # Treat simple "what is this/that/here" questions as visual explanation.
+    if lowered.startswith("what is this") or lowered.startswith("what's this"):
+        return True
+    if lowered.startswith("what is that") or lowered.startswith("what's that"):
+        return True
+    if "on my screen" in lowered and lowered.endswith("?"):
+        return True
+    return False
+
+
 def _summarize_completed_steps(chain_steps: list[dict[str, Any]]) -> str:
     successful = [step for step in chain_steps if step.get("success")]
     if not successful:
@@ -426,6 +480,8 @@ async def _run_routed_agent_step(
     agent_name = routing_result.get("agent")
 
     if agent_name == "clovis":
+        await _start_non_rapid_status("Analyzing current screen...", source="clovis")
+        started = time.monotonic()
         screenshot = get_stored_screenshot()
         clovis_prompt = CLOVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{routing_result.get('query', '')}"
         try:
@@ -435,6 +491,13 @@ async def _run_routed_agent_step(
                 "CLOVIS completed the visual guidance task.",
                 max_len=420,
             )
+            elapsed = time.monotonic() - started
+            print(f"[CLOVIS] Completed in {elapsed:.2f}s")
+            await _finish_non_rapid_status(
+                clovis_summary,
+                True,
+                source="clovis",
+            )
             return {
                 "agent": "clovis",
                 "task": _routing_task_text(routing_result),
@@ -443,11 +506,17 @@ async def _run_routed_agent_step(
                 "source": "clovis",
             }
         except Exception as exc:
+            error_message = _clean_text(str(exc), "CLOVIS task failed.", max_len=420)
+            await _finish_non_rapid_status(
+                error_message,
+                False,
+                source="clovis",
+            )
             return {
                 "agent": "clovis",
                 "task": _routing_task_text(routing_result),
                 "success": False,
-                "message": _clean_text(str(exc), "CLOVIS task failed.", max_len=420),
+                "message": error_message,
                 "source": "clovis",
             }
 
@@ -581,6 +650,33 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model:
     )
 
     _append_rapid_history("user", user_prompt, "user")
+
+    # Fast path: pure visual understanding queries should avoid extra router +
+    # screen-context hops to reduce latency.
+    if _is_visual_explanation_request(user_prompt):
+        print("[Router][FastPath] Directly invoking CLOVIS for visual explanation.")
+        step_result = await _run_routed_agent_step(
+            model=model,
+            routing_result={"agent": "clovis", "query": user_prompt},
+            clovis_model=clovis_model,
+        )
+        _append_rapid_history(
+            "assistant",
+            step_result.get("message", ""),
+            step_result.get("source", "clovis"),
+        )
+        if not step_result.get("success"):
+            tool = ROUTER_TOOL_MAP.get("direct_response")
+            if tool:
+                tool(
+                    text=_clean_text(
+                        f"CLOVIS failed: {step_result.get('message')}",
+                        "CLOVIS task failed.",
+                        max_len=420,
+                    ),
+                    source="rapid_response",
+                )
+        return
 
     chain_steps: list[dict[str, Any]] = []
     seen_step_signatures: dict[tuple[str, str], int] = {}
@@ -743,6 +839,25 @@ class GeminiModel:
         self.clovis_model = clovis_model
         self.rapid_response_model = rapid_response_model
         self.screen_judge_model = "gemini-3-flash-preview"
+        try:
+            thinking_budget = int(os.getenv("CLOVIS_THINKING_BUDGET", "256"))
+        except ValueError:
+            thinking_budget = 256
+        self.clovis_thinking_budget = max(0, min(2048, thinking_budget))
+        self.openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        self.openrouter_model = (
+            os.getenv("OPENROUTER_MODEL") or "nvidia/nemotron-3-nano-30b-a3b:free"
+        ).strip()
+        self.openrouter_url = (
+            os.getenv("OPENROUTER_URL") or "https://openrouter.ai/api/v1/chat/completions"
+        ).strip()
+        self.openrouter_site_url = (os.getenv("OPENROUTER_SITE_URL") or "").strip()
+        self.openrouter_site_name = (os.getenv("OPENROUTER_SITE_NAME") or "CLOVIS").strip()
+        try:
+            timeout_seconds = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "45"))
+        except ValueError:
+            timeout_seconds = 45
+        self.openrouter_timeout_seconds = max(10, min(180, timeout_seconds))
 
         # Config for router model (lightweight, no thinking)
         self.router_config = types.GenerateContentConfig(
@@ -758,7 +873,7 @@ class GeminiModel:
             top_p=0.95,
             top_k=64,
             max_output_tokens=3000,
-            thinking_config=types.ThinkingConfig(thinking_budget=1024),
+            thinking_config=types.ThinkingConfig(thinking_budget=self.clovis_thinking_budget),
             tools=CLOVIS_TOOLS,
             tool_config=TOOL_CONFIG,
         )
@@ -772,6 +887,137 @@ class GeminiModel:
             response_mime_type="application/json",
         )
 
+    @staticmethod
+    def _is_gemini_quota_error(exc: Exception) -> bool:
+        text = f"{type(exc).__name__}: {exc}".lower()
+        markers = (
+            "429",
+            "resource_exhausted",
+            "quota",
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+        )
+        return any(marker in text for marker in markers)
+
+    @staticmethod
+    def _extract_latest_request(prompt: str) -> str:
+        markers = (
+            "# User's Latest Request:\n",
+            "# User's Request:\n",
+        )
+        for marker in markers:
+            if marker in prompt:
+                tail = prompt.rsplit(marker, 1)[-1].strip()
+                if tail:
+                    return tail
+        return _clean_text(prompt, "", max_len=1800)
+
+    def _openrouter_enabled(self) -> bool:
+        return bool(self.openrouter_api_key and self.openrouter_model and self.openrouter_url)
+
+    def _call_openrouter_text_sync(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        if not self._openrouter_enabled():
+            raise RuntimeError("OpenRouter fallback is not configured.")
+
+        headers = {
+            "Authorization": f"Bearer {self.openrouter_api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.openrouter_site_url:
+            headers["HTTP-Referer"] = self.openrouter_site_url
+        if self.openrouter_site_name:
+            headers["X-Title"] = self.openrouter_site_name
+
+        payload = {
+            "model": self.openrouter_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        response = requests.post(
+            self.openrouter_url,
+            headers=headers,
+            json=payload,
+            timeout=self.openrouter_timeout_seconds,
+        )
+        if response.status_code >= 400:
+            body = _clean_text(response.text, "", max_len=320)
+            raise RuntimeError(f"OpenRouter HTTP {response.status_code}: {body}")
+
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("OpenRouter returned a non-object response.")
+
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("OpenRouter returned no choices.")
+
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        message = first.get("message") if isinstance(first.get("message"), dict) else {}
+        content = message.get("content")
+
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            parts = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                piece = item.get("text")
+                if isinstance(piece, str) and piece.strip():
+                    parts.append(piece.strip())
+            text = "\n".join(parts).strip()
+        else:
+            text = ""
+
+        if not text:
+            raise RuntimeError("OpenRouter returned empty message content.")
+
+        return text
+
+    async def _try_openrouter_text_fallback(
+        self,
+        *,
+        label: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        max_tokens: int = 700,
+    ) -> Optional[str]:
+        if not self._openrouter_enabled():
+            print(f"[{label}] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
+            return None
+
+        try:
+            await set_model_name(f"{self.openrouter_model} (OpenRouter)")
+        except Exception as exc:
+            print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
+
+        try:
+            text = await asyncio.to_thread(
+                self._call_openrouter_text_sync,
+                system_prompt,
+                user_prompt,
+                temperature,
+                max_tokens,
+            )
+            print(f"[{label}] OpenRouter fallback succeeded with model {self.openrouter_model}")
+            return text
+        except Exception as fallback_exc:
+            print(f"[{label}] OpenRouter fallback failed: {fallback_exc}")
+            return None
+
     async def route_request(self, prompt: str) -> dict:
         """
         Use the router model to decide how to handle the request.
@@ -784,6 +1030,7 @@ class GeminiModel:
                 - Additional agent-specific params
         """
         print("[Router] Processing...")
+        started = time.monotonic()
         await set_model_name(self.rapid_response_model)
 
         try:
@@ -792,7 +1039,32 @@ class GeminiModel:
                 contents=[prompt],
                 config=self.router_config
             )
+            elapsed = time.monotonic() - started
+            print(f"[Router] Completed in {elapsed:.2f}s")
         except Exception as exc:
+            if self._is_gemini_quota_error(exc):
+                latest_request = self._extract_latest_request(prompt)
+                fallback_text = await self._try_openrouter_text_fallback(
+                    label="Router",
+                    system_prompt=(
+                        "You are CLOVIS text fallback. Gemini hit quota/rate limits.\n"
+                        "Reply directly and concisely. If the request requires live screen"
+                        " perception or desktop actions, clearly say that is unavailable in"
+                        " fallback mode and ask the user to retry in a moment."
+                    ),
+                    user_prompt=latest_request,
+                    temperature=0.2,
+                    max_tokens=500,
+                )
+                if fallback_text:
+                    return {
+                        "agent": "direct",
+                        "response_text": _clean_text(
+                            fallback_text,
+                            "Gemini is rate-limited. Please retry shortly.",
+                            max_len=420,
+                        ),
+                    }
             return {
                 "agent": "direct",
                 "response_text": _clean_text(
@@ -884,6 +1156,7 @@ class GeminiModel:
         Run one multimodal pass to extract concrete screen context for routing.
         """
         print("[ScreenJudge] Capturing context from screenshot...")
+        started = time.monotonic()
         focus_text = _clean_text(focus, "", max_len=200)
         judge_prompt = (
             "You are Screen Judge for a computer-use orchestrator.\n"
@@ -907,11 +1180,45 @@ class GeminiModel:
         if image is not None:
             contents.append(image)
 
-        response = await self.client.aio.models.generate_content(
-            model=self.screen_judge_model,
-            contents=contents,
-            config=self.screen_judge_config,
-        )
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.screen_judge_model,
+                contents=contents,
+                config=self.screen_judge_config,
+            )
+        except Exception as exc:
+            if self._is_gemini_quota_error(exc):
+                fallback_text = await self._try_openrouter_text_fallback(
+                    label="ScreenJudge",
+                    system_prompt=(
+                        "You are Screen Judge fallback without image access.\n"
+                        "Return JSON only with fields: summary, repo_url, local_url,"
+                        " recommended_agent, recommended_task, hints.\n"
+                        "If you are uncertain, keep fields empty and explain uncertainty in"
+                        " summary."
+                    ),
+                    user_prompt=(
+                        f"User request: {user_request}\n"
+                        f"Focus: {focus_text if focus_text else 'general execution context'}\n"
+                        "No screenshot is available in fallback mode."
+                    ),
+                    temperature=0.1,
+                    max_tokens=420,
+                )
+                if fallback_text:
+                    parsed = _parse_json_object_from_text(fallback_text)
+                    normalized = _normalize_screen_context_payload(parsed, user_request=user_request)
+                    if not normalized.get("summary"):
+                        normalized["summary"] = _clean_text(
+                            fallback_text,
+                            "Gemini screen context hit quota. Used text-only fallback.",
+                            max_len=420,
+                        )
+                    normalized["model"] = f"{self.openrouter_model} (openrouter_fallback)"
+                    return normalized
+            raise
+        elapsed = time.monotonic() - started
+        print(f"[ScreenJudge] Completed in {elapsed:.2f}s")
 
         raw_text = ""
         if hasattr(response, "text") and response.text:
@@ -934,16 +1241,47 @@ class GeminiModel:
         Call the CLOVIS model with full screen annotation capabilities.
         """
         print("[CLOVIS] Processing with screenshot...")
+        started = time.monotonic()
         await set_model_name(self.clovis_model)
 
         contents = [prompt]
         if image:
             contents.append(image)
 
-        response = await self.client.aio.models.generate_content(
-            model=self.clovis_model,
-            contents=contents,
-            config=self.clovis_config
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.clovis_model,
+                contents=contents,
+                config=self.clovis_config
+            )
+        except Exception as exc:
+            if self._is_gemini_quota_error(exc):
+                fallback_text = await self._try_openrouter_text_fallback(
+                    label="CLOVIS",
+                    system_prompt=(
+                        "You are CLOVIS fallback without screenshot access.\n"
+                        "Give a concise response to the user request. If the request depends on"
+                        " seeing the current screen, be explicit that visual analysis is"
+                        " unavailable in fallback mode and ask them to retry shortly."
+                    ),
+                    user_prompt=self._extract_latest_request(prompt),
+                    temperature=0.2,
+                    max_tokens=700,
+                )
+                if fallback_text:
+                    return {
+                        "response": None,
+                        "summary": _clean_text(
+                            f"Gemini quota reached. {fallback_text}",
+                            "Gemini quota reached. Please retry shortly.",
+                            max_len=420,
+                        ),
+                    }
+            raise
+        elapsed = time.monotonic() - started
+        print(
+            f"[CLOVIS] Model call completed in {elapsed:.2f}s "
+            f"(thinking_budget={self.clovis_thinking_budget})"
         )
 
         parts = response.candidates[0].content.parts

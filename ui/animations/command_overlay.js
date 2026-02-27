@@ -6,6 +6,7 @@ const commandLogoSpin = document.getElementById('command-logo-spin');
 const commandBar = document.getElementById('command-bar');
 const commandInputWrap = commandOverlay?.querySelector('.command-input-wrap');
 const MAX_INPUT_HEIGHT = 180;
+const INPUT_FOCUS_RECOVERY_SLOP = 14;
 let overlayActive = false;
 let overlayClosing = false;
 let inputFocused = false;
@@ -14,6 +15,8 @@ let lastSubmittedAt = 0;
 let hideOverlayTimeout = null;
 let logoSyncRaf = null;
 let logoSyncUntil = 0;
+let lastPointerX = Number.NaN;
+let lastPointerY = Number.NaN;
 
 function getElementTranslateY(el) {
   if (!el) return 0;
@@ -117,6 +120,53 @@ function setInputMode(enabled) {
   }
 }
 
+function isPointerNearCommandInput(slop = INPUT_FOCUS_RECOVERY_SLOP) {
+  if (!commandInputWrap || !Number.isFinite(lastPointerX) || !Number.isFinite(lastPointerY)) {
+    return false;
+  }
+  const rect = commandInputWrap.getBoundingClientRect();
+  return (
+    lastPointerX >= (rect.left - slop) &&
+    lastPointerX <= (rect.right + slop) &&
+    lastPointerY >= (rect.top - slop) &&
+    lastPointerY <= (rect.bottom + slop)
+  );
+}
+
+function focusCommandInput(delayMs = 0) {
+  const run = () => {
+    if (!overlayActive || overlayClosing || !commandInput) return;
+    setInputMode(true);
+    commandInput.focus();
+    const end = commandInput.value.length;
+    commandInput.setSelectionRange(end, end);
+  };
+  if (delayMs > 0) {
+    window.setTimeout(run, delayMs);
+    return;
+  }
+  run();
+}
+
+function isPlainTextKey(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  return typeof event.key === 'string' && event.key.length === 1;
+}
+
+function recoverInputFocusFromKeystroke(event) {
+  if (!commandInput || event.defaultPrevented || event.isComposing) return false;
+  if (!isPlainTextKey(event)) return false;
+  if (document.activeElement === commandInput) return false;
+
+  const start = Number.isInteger(commandInput.selectionStart) ? commandInput.selectionStart : commandInput.value.length;
+  const end = Number.isInteger(commandInput.selectionEnd) ? commandInput.selectionEnd : start;
+  event.preventDefault();
+  focusCommandInput();
+  commandInput.setRangeText(event.key, start, end, 'end');
+  resizeInput();
+  return true;
+}
+
 function showCommandOverlay() {
   if (!commandOverlay) return;
   if (overlayActive && !overlayClosing) return;
@@ -166,9 +216,11 @@ function showCommandOverlay() {
   }
   commandInput.value = '';
   resizeInput();
-  setInputMode(false);
+  setInputMode(true);
   startLogoSyncLoop(1800);
-  setTimeout(() => commandInput.focus(), 20);
+  focusCommandInput(20);
+  // Retry focus once after intro animations in case another app temporarily steals focus.
+  focusCommandInput(180);
 }
 
 function collapseCommandBar() {
@@ -376,6 +428,17 @@ window.overlayCollapseCommandBar = collapseCommandBar;
 window.overlayForceResetCommandOverlay = forceResetCommandOverlay;
 
 commandInput?.addEventListener('input', resizeInput);
+commandBar?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !overlayActive) return;
+  setInputMode(true);
+  const target = event.target;
+  const clickedSend = target instanceof Element && !!target.closest('#command-send');
+  if (!clickedSend) {
+    requestAnimationFrame(() => {
+      focusCommandInput();
+    });
+  }
+});
 commandInput?.addEventListener('focus', () => {
   inputFocused = true;
   window.overlayInputFocusedFlag = true;
@@ -384,7 +447,21 @@ commandInput?.addEventListener('focus', () => {
 commandInput?.addEventListener('blur', () => {
   inputFocused = false;
   window.overlayInputFocusedFlag = false;
-  setInputMode(false);
+  window.setTimeout(() => {
+    if (!overlayActive || overlayClosing) {
+      setInputMode(false);
+      return;
+    }
+    const activeEl = document.activeElement;
+    const focusInsideOverlay = activeEl instanceof Element && !!activeEl.closest('#command-overlay');
+    if (!focusInsideOverlay && isPointerNearCommandInput()) {
+      // On Windows transparent overlays, focus can briefly drop while hover
+      // state flips. Recover immediately if pointer is still on the input bar.
+      focusCommandInput();
+      return;
+    }
+    setInputMode(focusInsideOverlay);
+  }, 0);
 });
 commandSend?.addEventListener('click', () => sendCommand());
 commandInput?.addEventListener('keydown', (event) => {
@@ -399,8 +476,15 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
     hideCommandOverlay();
+    return;
   }
+  recoverInputFocusFromKeystroke(event);
 });
+
+document.addEventListener('mousemove', (event) => {
+  lastPointerX = event.clientX;
+  lastPointerY = event.clientY;
+}, true);
 
 window.addEventListener('resize', () => {
   if (!overlayActive) return;
@@ -417,6 +501,12 @@ if (window.api?.onOverlayImage) {
     setTimeout(() => {
       showCommandOverlay();
     }, 50);
+  });
+}
+
+if (window.api?.onHideOverlayImage) {
+  window.api.onHideOverlayImage(() => {
+    hideCommandOverlay();
   });
 }
 
