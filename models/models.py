@@ -1,14 +1,15 @@
 """
-CLOVIS Model Integration - Gemini API and routing logic.
+JARVIS Model Integration - Local router + Gemini vision agent logic.
 
 This module handles:
 - Screenshot capture and storage
-- Two-tier model routing (rapid response → specialized agents)
-- Gemini API configuration
+- Two-tier model routing (Ollama router -> specialized agents)
+- Gemini/OpenRouter model configuration for screen tasks
 """
 import asyncio
 import json
 import os
+import re
 import time
 from collections import deque
 from typing import Any, Optional
@@ -17,15 +18,12 @@ from PIL import Image, ImageGrab
 from dotenv import load_dotenv
 import requests
 
-from models.function_calls import (
-    ROUTER_TOOLS, ROUTER_TOOL_MAP,
-    TOOL_CONFIG,
-)
-from models.prompts import RAPID_RESPONSE_SYSTEM_PROMPT
+from models.function_calls import ROUTER_TOOL_MAP, TOOL_CONFIG
+from models.prompts import RAPID_RESPONSE_SYSTEM_PROMPT, OLLAMA_ROUTER_SYSTEM_PROMPT
 
-# Import CLOVIS agent components
-from agents.clovis.tools import CLOVIS_TOOLS, CLOVIS_TOOL_MAP, set_model_name
-from agents.clovis.prompts import CLOVIS_SYSTEM_PROMPT
+# Import JARVIS agent components
+from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
+from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
 
 # Import Vision Agent
 from agents.cua_vision.agent import VisionAgent
@@ -69,24 +67,87 @@ _VISUAL_EXPLAIN_MARKERS = (
     "can you see my screen",
 )
 _EXECUTION_INTENT_MARKERS = (
-    "click ",
-    "open ",
-    "run ",
-    "type ",
-    "install ",
-    "clone ",
-    "start ",
-    "stop ",
-    "search ",
-    "go to ",
-    "create ",
-    "delete ",
-    "move ",
-    "copy ",
-    "paste ",
-    "scroll ",
-    "press ",
+    "click",
+    "open",
+    "run",
+    "type",
+    "install",
+    "clone",
+    "start",
+    "stop",
+    "search",
+    "go to",
+    "create",
+    "delete",
+    "move",
+    "copy",
+    "paste",
+    "scroll",
+    "press",
+    "launch",
+    "execute",
+    "debug",
+    "fix",
+    "build",
+    "deploy",
+    "test",
+    "edit",
+    "update",
 )
+_BROWSER_EXECUTION_MARKERS = (
+    "http://",
+    "https://",
+    "www.",
+    "browser",
+    "website",
+    "web site",
+    "webpage",
+    "tab",
+    "url",
+    ".com",
+    ".org",
+    ".net",
+)
+_VISION_EXECUTION_MARKERS = (
+    "click",
+    "button",
+    "menu",
+    "dropdown",
+    "checkbox",
+    "radio button",
+    "icon",
+    "drag",
+    "drop",
+    "cursor",
+    "on screen",
+    "desktop app",
+    "window",
+    "dialog",
+)
+_CLI_EXECUTION_MARKERS = (
+    "terminal",
+    "shell",
+    "command",
+    "powershell",
+    "bash",
+    "zsh",
+    "cmd",
+    "git",
+    "npm",
+    "pnpm",
+    "yarn",
+    "pip",
+    "python",
+    "node",
+    "repo",
+    "repository",
+    "file",
+    "folder",
+    "directory",
+    "localhost",
+    "127.0.0.1",
+)
+_ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
 
 
 def store_screenshot():
@@ -128,7 +189,7 @@ def _format_rapid_history_for_prompt() -> str:
 
         if role == "user":
             label = "User"
-        elif source in {"browser_use", "cua_cli", "cua_vision", "clovis", "screen_judge"}:
+        elif source in {"browser_use", "cua_cli", "cua_vision", "jarvis", "screen_judge"}:
             label = "Agent"
         else:
             label = "Rapid Assistant"
@@ -198,8 +259,8 @@ def _format_chain_state_for_prompt(
             "This task may require multiple delegated tools.\n"
             "Pick the best first tool call, and treat this as step 1 of a multi-step execution.\n"
             "If the request depends on currently visible UI context, call `request_screen_context` first.\n"
-            "For action/execution requests ('do X for me', clone/run/open/click/type), do NOT use `invoke_clovis`.\n"
-            "Use `invoke_clovis` only for explanation/annotation requests.\n"
+            "For action/execution requests ('do X for me', clone/run/open/click/type), do NOT use `invoke_jarvis`.\n"
+            "Use `invoke_jarvis` only for explanation/annotation requests.\n"
             "When the overall user request is fully complete, call `direct_response`.\n"
             + context_lines +
             f"Never exceed {max_steps} delegated steps.\n"
@@ -218,7 +279,7 @@ def _format_chain_state_for_prompt(
         "If the original request is complete, call `direct_response` now.\n"
         "Avoid repeating the exact same delegated step unless something materially changed.\n"
         "If you still need visible context, call `request_screen_context` again.\n"
-        "For action/execution requests, do NOT use `invoke_clovis`.\n"
+        "For action/execution requests, do NOT use `invoke_jarvis`.\n"
         f"Original request: {user_prompt}\n"
         f"Completed delegated steps ({len(chain_steps)}/{max_steps}):\n"
         + "\n".join(lines)
@@ -258,7 +319,7 @@ def _normalize_screen_context_payload(
     user_request: str,
 ) -> dict[str, Any]:
     recommended_agent = str(payload.get("recommended_agent") or "").strip().lower()
-    if recommended_agent not in {"cua_cli", "cua_vision", "browser", "clovis", "direct"}:
+    if recommended_agent not in {"cua_cli", "cua_vision", "browser", "jarvis", "direct"}:
         recommended_agent = ""
 
     recommended_task = _clean_text(payload.get("recommended_task"), "", max_len=420)
@@ -327,7 +388,7 @@ def _is_visual_explanation_request(user_prompt: str) -> bool:
     if not lowered:
         return False
 
-    if any(marker in lowered for marker in _EXECUTION_INTENT_MARKERS):
+    if _is_execution_request(lowered):
         return False
 
     if any(marker in lowered for marker in _VISUAL_EXPLAIN_MARKERS):
@@ -341,6 +402,84 @@ def _is_visual_explanation_request(user_prompt: str) -> bool:
     if "on my screen" in lowered and lowered.endswith("?"):
         return True
     return False
+
+
+def _contains_phrase_or_word(text: str, marker: str) -> bool:
+    if " " in marker:
+        return marker in text
+    return bool(re.search(rf"\b{re.escape(marker)}\b", text))
+
+
+def _matches_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return False
+    return any(_contains_phrase_or_word(lowered, marker) for marker in markers)
+
+
+def _is_execution_request(text: str) -> bool:
+    return _matches_any_marker(text, _EXECUTION_INTENT_MARKERS)
+
+
+def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dict[str, Any]]) -> str:
+    recommended = ""
+    if latest_screen_context:
+        recommended = str(latest_screen_context.get("recommended_agent") or "").strip().lower()
+    if recommended in {"cua_cli", "cua_vision", "browser"}:
+        return recommended
+
+    lowered = (task_text or "").lower()
+    if _matches_any_marker(lowered, _BROWSER_EXECUTION_MARKERS):
+        return "browser"
+    if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS):
+        return "cua_vision"
+    if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
+        return "cua_cli"
+    return "cua_cli"
+
+
+def _apply_routing_guardrails(
+    user_prompt: str,
+    routing_result: dict[str, Any],
+    latest_screen_context: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    agent = str(routing_result.get("agent") or "").strip().lower()
+    execution_request = _is_execution_request(user_prompt)
+
+    if (
+        execution_request
+        and agent == "screen_context"
+        and latest_screen_context
+    ):
+        recommended_agent = str(latest_screen_context.get("recommended_agent") or "").strip().lower()
+        if recommended_agent in {"cua_cli", "cua_vision", "browser"}:
+            task_text = _clean_text(
+                latest_screen_context.get("recommended_task"),
+                "",
+                max_len=420,
+            ) or _clean_text(user_prompt, "", max_len=420)
+            print(
+                f"[Router][Guardrail] Promoting repeated screen_context to actionable agent: {recommended_agent}"
+            )
+            return {
+                "agent": recommended_agent,
+                "task": task_text,
+            }
+
+    if execution_request and agent == "jarvis":
+        task_text = _routing_task_text(routing_result)
+        if not task_text:
+            task_text = _clean_text(user_prompt, "", max_len=420)
+        actionable_agent = _choose_actionable_agent(task_text, latest_screen_context)
+        print(
+            f"[Router][Guardrail] Re-routing execution request away from jarvis -> {actionable_agent}"
+        )
+        return {
+            "agent": actionable_agent,
+            "task": task_text,
+        }
+
+    return routing_result
 
 
 def _summarize_completed_steps(chain_steps: list[dict[str, Any]]) -> str:
@@ -475,49 +614,49 @@ async def _finish_non_rapid_status(message: str, success: bool, source: str):
 async def _run_routed_agent_step(
     model: "GeminiModel",
     routing_result: dict[str, Any],
-    clovis_model: str,
+    jarvis_model: str,
 ) -> dict[str, Any]:
     agent_name = routing_result.get("agent")
 
-    if agent_name == "clovis":
-        await _start_non_rapid_status("Analyzing current screen...", source="clovis")
+    if agent_name == "jarvis":
+        await _start_non_rapid_status("Analyzing current screen...", source="jarvis")
         started = time.monotonic()
         screenshot = get_stored_screenshot()
-        clovis_prompt = CLOVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{routing_result.get('query', '')}"
+        jarvis_prompt = JARVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{routing_result.get('query', '')}"
         try:
-            clovis_result = await model.generate_clovis_response(clovis_prompt, screenshot)
-            clovis_summary = _clean_text(
-                clovis_result.get("summary"),
-                "CLOVIS completed the visual guidance task.",
+            jarvis_result = await model.generate_jarvis_response(jarvis_prompt, screenshot)
+            jarvis_summary = _clean_text(
+                jarvis_result.get("summary"),
+                "JARVIS completed the visual guidance task.",
                 max_len=420,
             )
             elapsed = time.monotonic() - started
-            print(f"[CLOVIS] Completed in {elapsed:.2f}s")
+            print(f"[JARVIS] Completed in {elapsed:.2f}s")
             await _finish_non_rapid_status(
-                clovis_summary,
+                jarvis_summary,
                 True,
-                source="clovis",
+                source="jarvis",
             )
             return {
-                "agent": "clovis",
+                "agent": "jarvis",
                 "task": _routing_task_text(routing_result),
                 "success": True,
-                "message": clovis_summary,
-                "source": "clovis",
+                "message": jarvis_summary,
+                "source": "jarvis",
             }
         except Exception as exc:
-            error_message = _clean_text(str(exc), "CLOVIS task failed.", max_len=420)
+            error_message = _clean_text(str(exc), "JARVIS task failed.", max_len=420)
             await _finish_non_rapid_status(
                 error_message,
                 False,
-                source="clovis",
+                source="jarvis",
             )
             return {
-                "agent": "clovis",
+                "agent": "jarvis",
                 "task": _routing_task_text(routing_result),
                 "success": False,
                 "message": error_message,
-                "source": "clovis",
+                "source": "jarvis",
             }
 
     if agent_name == "browser":
@@ -526,7 +665,7 @@ async def _run_routed_agent_step(
 
         task = routing_result.get("task", "")
         print(f"[Router] Browser Agent starting. Task: {task}")
-        browser_agent = BrowserAgent(model_name=clovis_model)
+        browser_agent = BrowserAgent(model_name=jarvis_model)
         try:
             result = await browser_agent.execute(task)
         except asyncio.CancelledError:
@@ -603,7 +742,7 @@ async def _run_routed_agent_step(
     if agent_name == "cua_vision":
         await _start_non_rapid_status("Running computer-use task...", source="cua_vision")
         screenshot = get_stored_screenshot()
-        vision_agent = VisionAgent(model_name=clovis_model)
+        vision_agent = VisionAgent(model_name=jarvis_model)
         task = routing_result.get("task", "")
         try:
             result = await vision_agent.execute(task, screenshot)
@@ -638,14 +777,14 @@ async def _run_routed_agent_step(
 # MAIN ENTRY POINT
 # ================================================================================
 
-async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model: str):
+async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model: str):
     """
     Main entry point - uses two-tier model system:
     1. Rapid response model (router) decides how to handle the request
-    2. Routes to appropriate agent: CLOVIS, Browser, or Desktop
+    2. Routes to appropriate agent: JARVIS, Browser, or Desktop
     """
     model = GeminiModel(
-        clovis_model=clovis_model,
+        jarvis_model=jarvis_model,
         rapid_response_model=rapid_response_model
     )
 
@@ -654,24 +793,24 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model:
     # Fast path: pure visual understanding queries should avoid extra router +
     # screen-context hops to reduce latency.
     if _is_visual_explanation_request(user_prompt):
-        print("[Router][FastPath] Directly invoking CLOVIS for visual explanation.")
+        print("[Router][FastPath] Directly invoking JARVIS for visual explanation.")
         step_result = await _run_routed_agent_step(
             model=model,
-            routing_result={"agent": "clovis", "query": user_prompt},
-            clovis_model=clovis_model,
+            routing_result={"agent": "jarvis", "query": user_prompt},
+            jarvis_model=jarvis_model,
         )
         _append_rapid_history(
             "assistant",
             step_result.get("message", ""),
-            step_result.get("source", "clovis"),
+            step_result.get("source", "jarvis"),
         )
         if not step_result.get("success"):
             tool = ROUTER_TOOL_MAP.get("direct_response")
             if tool:
                 tool(
                     text=_clean_text(
-                        f"CLOVIS failed: {step_result.get('message')}",
-                        "CLOVIS task failed.",
+                        f"JARVIS failed: {step_result.get('message')}",
+                        "JARVIS task failed.",
                         max_len=420,
                     ),
                     source="rapid_response",
@@ -702,6 +841,12 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model:
                 "agent": "direct",
                 "response_text": "Router returned an invalid response shape.",
             }
+        else:
+            routing_result = _apply_routing_guardrails(
+                user_prompt=user_prompt,
+                routing_result=routing_result,
+                latest_screen_context=latest_screen_context,
+            )
 
         if routing_result.get("agent") == "direct":
             direct_args = routing_result.get("direct_response_args")
@@ -790,7 +935,7 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model:
         step_result = await _run_routed_agent_step(
             model=model,
             routing_result=routing_result,
-            clovis_model=clovis_model,
+            jarvis_model=jarvis_model,
         )
         chain_steps.append(step_result)
         _append_rapid_history(
@@ -820,30 +965,30 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, clovis_model:
 
 
 # ================================================================================
-# GEMINI MODEL CLASS
+# MODEL ORCHESTRATOR CLASS
 # ================================================================================
 
 class GeminiModel:
     """
-    Gemini model wrapper with routing and CLOVIS capabilities.
+    Model orchestrator with local Ollama routing and Gemini screen capabilities.
 
     Two-tier system:
-    - Router model: Fast, no image, decides where to route requests
-    - CLOVIS model: Full capabilities, with screenshot, for screen annotations
+    - Router model: Local Ollama text model, no image, decides where to route requests
+    - JARVIS model: Gemini with screenshot, for screen annotations and screen context
 
     Documentation Reference: https://github.com/googleapis/python-genai
     """
 
-    def __init__(self, clovis_model='gemini-3-flash-preview', rapid_response_model='gemini-flash-lite-latest'):
+    def __init__(self, jarvis_model='gemini-3-flash-preview', rapid_response_model='qwen3.5:4b-q4_K_M'):
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        self.clovis_model = clovis_model
+        self.jarvis_model = jarvis_model
         self.rapid_response_model = rapid_response_model
         self.screen_judge_model = "gemini-3-flash-preview"
         try:
-            thinking_budget = int(os.getenv("CLOVIS_THINKING_BUDGET", "256"))
+            thinking_budget = int(os.getenv("JARVIS_THINKING_BUDGET", "256"))
         except ValueError:
             thinking_budget = 256
-        self.clovis_thinking_budget = max(0, min(2048, thinking_budget))
+        self.jarvis_thinking_budget = max(0, min(2048, thinking_budget))
         self.openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
         self.openrouter_model = (
             os.getenv("OPENROUTER_MODEL") or "nvidia/nemotron-3-nano-30b-a3b:free"
@@ -852,29 +997,50 @@ class GeminiModel:
             os.getenv("OPENROUTER_URL") or "https://openrouter.ai/api/v1/chat/completions"
         ).strip()
         self.openrouter_site_url = (os.getenv("OPENROUTER_SITE_URL") or "").strip()
-        self.openrouter_site_name = (os.getenv("OPENROUTER_SITE_NAME") or "CLOVIS").strip()
+        self.openrouter_site_name = (os.getenv("OPENROUTER_SITE_NAME") or "JARVIS").strip()
         try:
             timeout_seconds = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "45"))
         except ValueError:
             timeout_seconds = 45
         self.openrouter_timeout_seconds = max(10, min(180, timeout_seconds))
 
-        # Config for router model (lightweight, no thinking)
-        self.router_config = types.GenerateContentConfig(
-            temperature=0.7,
-            max_output_tokens=1000,
-            tools=ROUTER_TOOLS,
-            tool_config=TOOL_CONFIG,
-        )
+        configured_router_model = (
+            os.getenv("OLLAMA_ROUTER_MODEL")
+            or self.rapid_response_model
+            or ""
+        ).strip()
+        # Prevent legacy Gemini router defaults from being used as Ollama model names.
+        if not configured_router_model or "gemini" in configured_router_model.lower():
+            configured_router_model = "qwen3.5:4b-q4_K_M"
+        self.ollama_router_model = configured_router_model
+        self.ollama_base_url = (
+            os.getenv("OLLAMA_BASE_URL") or "http://127.0.0.1:11434"
+        ).strip().rstrip("/")
+        self.ollama_keep_alive = (os.getenv("OLLAMA_KEEP_ALIVE") or "10m").strip()
+        try:
+            ollama_timeout_seconds = int(os.getenv("OLLAMA_ROUTER_TIMEOUT_SECONDS", "90"))
+        except ValueError:
+            ollama_timeout_seconds = 90
+        self.ollama_router_timeout_seconds = max(5, min(180, ollama_timeout_seconds))
+        try:
+            ollama_num_ctx = int(os.getenv("OLLAMA_ROUTER_NUM_CTX", "2048"))
+        except ValueError:
+            ollama_num_ctx = 2048
+        self.ollama_router_num_ctx = max(512, min(8192, ollama_num_ctx))
+        try:
+            ollama_num_predict = int(os.getenv("OLLAMA_ROUTER_NUM_PREDICT", "220"))
+        except ValueError:
+            ollama_num_predict = 220
+        self.ollama_router_num_predict = max(80, min(800, ollama_num_predict))
 
-        # Config for CLOVIS model (full capabilities)
-        self.clovis_config = types.GenerateContentConfig(
+        # Config for JARVIS model (full capabilities)
+        self.jarvis_config = types.GenerateContentConfig(
             temperature=1.2,
             top_p=0.95,
             top_k=64,
             max_output_tokens=3000,
-            thinking_config=types.ThinkingConfig(thinking_budget=self.clovis_thinking_budget),
-            tools=CLOVIS_TOOLS,
+            thinking_config=types.ThinkingConfig(thinking_budget=self.jarvis_thinking_budget),
+            tools=JARVIS_TOOLS,
             tool_config=TOOL_CONFIG,
         )
 
@@ -1018,133 +1184,140 @@ class GeminiModel:
             print(f"[{label}] OpenRouter fallback failed: {fallback_exc}")
             return None
 
+    def _call_ollama_router_sync(self, prompt: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self.ollama_router_model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": OLLAMA_ROUTER_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "options": {
+                "temperature": 0.1,
+                "num_predict": self.ollama_router_num_predict,
+                "num_ctx": self.ollama_router_num_ctx,
+            },
+        }
+        if self.ollama_keep_alive:
+            payload["keep_alive"] = self.ollama_keep_alive
+
+        url = f"{self.ollama_base_url}/api/chat"
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=self.ollama_router_timeout_seconds,
+        )
+        if response.status_code >= 400:
+            body = _clean_text(response.text, "", max_len=400)
+            raise RuntimeError(f"Ollama HTTP {response.status_code}: {body}")
+
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("Ollama returned a non-object response.")
+
+        message = data.get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError("Ollama response missing message object.")
+
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("Ollama response contained empty content.")
+
+        parsed = _parse_json_object_from_text(content)
+        if not isinstance(parsed, dict) or not parsed:
+            raise RuntimeError(f"Ollama router returned non-JSON payload: {content}")
+        return parsed
+
+    def _normalize_ollama_router_decision(
+        self,
+        payload: dict[str, Any],
+        prompt: str,
+    ) -> dict[str, Any]:
+        latest_request = self._extract_latest_request(prompt)
+        agent = str(payload.get("agent") or "").strip().lower()
+        if agent not in _ROUTER_AGENT_CHOICES:
+            return {
+                "agent": "direct",
+                "response_text": _clean_text(
+                    f"Router returned invalid agent '{agent}'.",
+                    "Router returned invalid agent.",
+                    max_len=420,
+                ),
+            }
+
+        if agent == "direct":
+            return {
+                "agent": "direct",
+                "response_text": _clean_text(
+                    payload.get("response_text") or payload.get("text"),
+                    "Routing complete.",
+                    max_len=420,
+                ),
+            }
+
+        if agent == "jarvis":
+            return {
+                "agent": "jarvis",
+                "query": _clean_text(
+                    payload.get("query") or payload.get("task"),
+                    latest_request,
+                    max_len=420,
+                ),
+            }
+
+        if agent in {"browser", "cua_cli", "cua_vision"}:
+            return {
+                "agent": agent,
+                "task": _clean_text(
+                    payload.get("task") or payload.get("query"),
+                    latest_request,
+                    max_len=420,
+                ),
+            }
+
+        return {
+            "agent": "screen_context",
+            "task": _clean_text(
+                payload.get("task") or payload.get("query"),
+                latest_request,
+                max_len=420,
+            ),
+            "focus": _clean_text(payload.get("focus"), "", max_len=220),
+        }
+
     async def route_request(self, prompt: str) -> dict:
         """
         Use the router model to decide how to handle the request.
 
         Returns:
             dict with keys:
-                - agent: "direct" | "clovis" | "browser" | "cua_cli" | "cua_vision" | "screen_context"
+                - agent: "direct" | "jarvis" | "browser" | "cua_cli" | "cua_vision" | "screen_context"
                 - query/task: The query or task to pass to the agent
                 - response_text: direct response text when agent == "direct"
                 - Additional agent-specific params
         """
-        print("[Router] Processing...")
+        print("[Router] Processing via Ollama...")
         started = time.monotonic()
-        await set_model_name(self.rapid_response_model)
+        await set_model_name(f"{self.ollama_router_model} (Ollama)")
 
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.rapid_response_model,
-                contents=[prompt],
-                config=self.router_config
-            )
+            payload = await asyncio.to_thread(self._call_ollama_router_sync, prompt)
+            routed = self._normalize_ollama_router_decision(payload, prompt)
             elapsed = time.monotonic() - started
-            print(f"[Router] Completed in {elapsed:.2f}s")
+            print(f"[Router] Completed in {elapsed:.2f}s with agent={routed.get('agent')}")
+            return routed
         except Exception as exc:
-            if self._is_gemini_quota_error(exc):
-                latest_request = self._extract_latest_request(prompt)
-                fallback_text = await self._try_openrouter_text_fallback(
-                    label="Router",
-                    system_prompt=(
-                        "You are CLOVIS text fallback. Gemini hit quota/rate limits.\n"
-                        "Reply directly and concisely. If the request requires live screen"
-                        " perception or desktop actions, clearly say that is unavailable in"
-                        " fallback mode and ask the user to retry in a moment."
-                    ),
-                    user_prompt=latest_request,
-                    temperature=0.2,
-                    max_tokens=500,
-                )
-                if fallback_text:
-                    return {
-                        "agent": "direct",
-                        "response_text": _clean_text(
-                            fallback_text,
-                            "Gemini is rate-limited. Please retry shortly.",
-                            max_len=420,
-                        ),
-                    }
+            error = _clean_text(str(exc), "Router generation failed.", max_len=420)
+            print(f"[Router] Ollama routing failed: {error}")
             return {
                 "agent": "direct",
                 "response_text": _clean_text(
-                    f"Router generation failed: {exc}",
+                    f"Router generation failed: {error}",
                     "Router generation failed.",
                     max_len=420,
                 ),
             }
-
-        candidates = getattr(response, "candidates", None)
-        if not candidates:
-            fallback_text = _clean_text(
-                getattr(response, "text", None),
-                "Router returned no candidates.",
-                max_len=420,
-            )
-            return {"agent": "direct", "response_text": fallback_text}
-
-        first_candidate = candidates[0] if len(candidates) > 0 else None
-        if first_candidate is None:
-            return {"agent": "direct", "response_text": "Router returned an empty candidate."}
-
-        content = getattr(first_candidate, "content", None)
-        parts = getattr(content, "parts", None) if content is not None else None
-        if not parts:
-            fallback_text = _clean_text(
-                getattr(response, "text", None),
-                "Router returned no callable parts.",
-                max_len=420,
-            )
-            return {"agent": "direct", "response_text": fallback_text}
-
-        function_calls = [part.function_call for part in parts if getattr(part, "function_call", None)]
-
-        for function_call in function_calls:
-            print(f"\n[Router] Function: {function_call.name}")
-            print(f"[Router] Arguments: {function_call.args}")
-            args = function_call.args if isinstance(function_call.args, dict) else {}
-
-            if function_call.name == "invoke_clovis":
-                return {
-                    "agent": "clovis",
-                    "query": args.get("query", "")
-                }
-
-            elif function_call.name == "invoke_browser":
-                return {
-                    "agent": "browser",
-                    "task": args.get("task", "")
-                }
-
-            elif function_call.name == "invoke_cua_cli":
-                return {
-                    "agent": "cua_cli",
-                    "task": args.get("task", "")
-                }
-
-            elif function_call.name == "invoke_cua_vision":
-                return {
-                    "agent": "cua_vision",
-                    "task": args.get("task", "")
-                }
-
-            elif function_call.name == "request_screen_context":
-                return {
-                    "agent": "screen_context",
-                    "task": args.get("task", ""),
-                    "focus": args.get("focus", ""),
-                }
-
-            elif function_call.name == "direct_response":
-                return {
-                    "agent": "direct",
-                    "response_text": args.get("text", ""),
-                    "direct_response_args": args,
-                }
-
-        # No function call - shouldn't happen with mode="ANY"
-        print("[Router] No function call in response")
-        return {"agent": "direct"}
 
     async def generate_screen_context(
         self,
@@ -1167,7 +1340,7 @@ class GeminiModel:
             '  "summary": "short factual summary",\n'
             '  "repo_url": "github/git url if visible else empty string",\n'
             '  "local_url": "localhost/127.0.0.1 URL if visible else empty string",\n'
-            '  "recommended_agent": "cua_cli|cua_vision|browser|clovis|direct",\n'
+            '  "recommended_agent": "cua_cli|cua_vision|browser|jarvis|direct",\n'
             '  "recommended_task": "single concrete next step task",\n'
             '  "hints": "short extra details useful for routing"\n'
             "}\n\n"
@@ -1236,13 +1409,13 @@ class GeminiModel:
         normalized["model"] = self.screen_judge_model
         return normalized
 
-    async def generate_clovis_response(self, prompt: str, image: Image = None) -> dict[str, Any]:
+    async def generate_jarvis_response(self, prompt: str, image: Image = None) -> dict[str, Any]:
         """
-        Call the CLOVIS model with full screen annotation capabilities.
+        Call the JARVIS model with full screen annotation capabilities.
         """
-        print("[CLOVIS] Processing with screenshot...")
+        print("[JARVIS] Processing with screenshot...")
         started = time.monotonic()
-        await set_model_name(self.clovis_model)
+        await set_model_name(self.jarvis_model)
 
         contents = [prompt]
         if image:
@@ -1250,16 +1423,16 @@ class GeminiModel:
 
         try:
             response = await self.client.aio.models.generate_content(
-                model=self.clovis_model,
+                model=self.jarvis_model,
                 contents=contents,
-                config=self.clovis_config
+                config=self.jarvis_config
             )
         except Exception as exc:
             if self._is_gemini_quota_error(exc):
                 fallback_text = await self._try_openrouter_text_fallback(
-                    label="CLOVIS",
+                    label="JARVIS",
                     system_prompt=(
-                        "You are CLOVIS fallback without screenshot access.\n"
+                        "You are JARVIS fallback without screenshot access.\n"
                         "Give a concise response to the user request. If the request depends on"
                         " seeing the current screen, be explicit that visual analysis is"
                         " unavailable in fallback mode and ask them to retry shortly."
@@ -1280,8 +1453,8 @@ class GeminiModel:
             raise
         elapsed = time.monotonic() - started
         print(
-            f"[CLOVIS] Model call completed in {elapsed:.2f}s "
-            f"(thinking_budget={self.clovis_thinking_budget})"
+            f"[JARVIS] Model call completed in {elapsed:.2f}s "
+            f"(thinking_budget={self.jarvis_thinking_budget})"
         )
 
         parts = response.candidates[0].content.parts
@@ -1290,19 +1463,19 @@ class GeminiModel:
 
         if function_calls:
             for function_call in function_calls:
-                print(f"\n[CLOVIS] Function: {function_call.name}")
-                print(f"[CLOVIS] Arguments: {function_call.args}")
+                print(f"\n[JARVIS] Function: {function_call.name}")
+                print(f"[JARVIS] Arguments: {function_call.args}")
 
                 if function_call.name == "direct_response":
                     summary_text = function_call.args.get("text") or summary_text
 
-                tool = CLOVIS_TOOL_MAP.get(function_call.name)
+                tool = JARVIS_TOOL_MAP.get(function_call.name)
                 if tool:
                     tool(**function_call.args)
                 else:
-                    raise Exception(f"[CLOVIS] Invalid tool: {function_call.name}")
+                    raise Exception(f"[JARVIS] Invalid tool: {function_call.name}")
         else:
-            print("[CLOVIS] No function call in response")
+            print("[JARVIS] No function call in response")
             if response.text:
                 print(response.text)
                 summary_text = response.text

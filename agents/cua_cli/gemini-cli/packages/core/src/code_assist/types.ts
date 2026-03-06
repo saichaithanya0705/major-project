@@ -6,7 +6,7 @@
 
 /**
  * Stub: Types for code_assist server.
- * Code assist functionality removed for CLOVIS integration.
+ * Code assist functionality removed for JARVIS integration.
  */
 
 export type UserTierId = 'free' | 'paid' | 'enterprise';

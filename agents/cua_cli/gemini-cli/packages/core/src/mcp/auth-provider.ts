@@ -6,7 +6,7 @@
 
 /**
  * Stub: Minimal auth provider interface for MCP servers.
- * OAuth functionality removed for CLOVIS integration - API key only.
+ * OAuth functionality removed for JARVIS integration - API key only.
  */
 export interface McpAuthProvider {
   getRequestHeaders?(): Promise<Record<string, string>>;

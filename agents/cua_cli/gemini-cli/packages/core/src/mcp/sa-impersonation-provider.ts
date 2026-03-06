@@ -6,7 +6,7 @@
 
 /**
  * Stub: Service account impersonation provider for MCP servers.
- * Service account auth functionality removed for CLOVIS integration.
+ * Service account auth functionality removed for JARVIS integration.
  */
 
 import type { MCPServerConfig } from '../config/config.js';

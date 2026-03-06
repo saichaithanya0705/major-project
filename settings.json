@@ -5,8 +5,8 @@
     "screen_height": 816,
     "viewport_width": 0,
     "viewport_height": 0,
-    "rapid_response_model": "gemini-flash-lite-latest",
-    "clovis_model": "gemini-3-flash-preview",
+    "rapid_response_model": "qwen3.5:4b-q4_K_M",
+    "jarvis_model": "gemini-3-flash-preview",
     "tts": true,
     "personalization": "You're just a chill guy"
 }

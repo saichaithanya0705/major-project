@@ -283,8 +283,8 @@ function submitCommand() {
   clearPendingAssistant();
   lastAssistantText = '';
   appendMessage('user', text, { pending: false, persist: true });
-  pendingAssistantEl = appendMessage('assistant', 'Analyzing your screen...', { pending: true, persist: false });
-  setStatus('Analyzing current screen...');
+  pendingAssistantEl = appendMessage('assistant', 'Working on your request...', { pending: true, persist: false });
+  setStatus('Planning and executing...');
 
   sendMessage({ event: 'capture_screenshot' });
   sendMessage({

@@ -27,7 +27,7 @@ ELEVENLABS_MODEL_ID = str(os.getenv("ELEVENLABS_MODEL_ID") or "eleven_multilingu
 ELEVENLABS_OUTPUT_FORMAT = str(os.getenv("ELEVENLABS_OUTPUT_FORMAT") or "mp3_44100_128").strip()
 
 # Audio output file
-AUDIO_FILE = "clovis_audio.mp3"
+AUDIO_FILE = "jarvis_audio.mp3"
 
 # Audio player instance (global for stop functionality)
 _audio_player = None

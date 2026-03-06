@@ -6,7 +6,7 @@
 
 /**
  * Stub: OAuth2 event emitter for auth events.
- * OAuth functionality removed for CLOVIS integration.
+ * OAuth functionality removed for JARVIS integration.
  */
 
 import { EventEmitter } from 'node:events';

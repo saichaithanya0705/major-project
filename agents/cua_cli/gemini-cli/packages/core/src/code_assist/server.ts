@@ -6,7 +6,7 @@
 
 /**
  * Stub: Code assist server for Google's internal code assist API.
- * Code assist functionality removed for CLOVIS integration.
+ * Code assist functionality removed for JARVIS integration.
  */
 
 export class CodeAssistServer {

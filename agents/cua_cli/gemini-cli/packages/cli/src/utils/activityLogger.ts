@@ -6,11 +6,11 @@
 
 /**
  * Stub: Activity logger for CLI sessions.
- * Activity logging functionality simplified for CLOVIS integration.
+ * Activity logging functionality simplified for JARVIS integration.
  */
 
 import type { Config } from '@google/gemini-cli-core';
 
 export function registerActivityLogger(_config: Config): void {
-  // No-op: Activity logging disabled for CLOVIS integration
+  // No-op: Activity logging disabled for JARVIS integration
 }

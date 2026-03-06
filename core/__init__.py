@@ -1,5 +1,5 @@
 """
-Core utilities and settings for CLOVIS.
+Core utilities and settings for JARVIS.
 """
 from core.settings import (
     get_host,
@@ -11,7 +11,7 @@ from core.settings import (
     set_viewport_size,
     get_model_configs,
     get_rapid_response_model,
-    get_clovis_model,
+    get_jarvis_model,
 )
 from core.registry import (
     register_box,

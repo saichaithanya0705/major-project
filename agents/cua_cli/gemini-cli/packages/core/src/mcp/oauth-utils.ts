@@ -6,7 +6,7 @@
 
 /**
  * Stub: OAuth utilities for MCP servers.
- * OAuth functionality removed for CLOVIS integration.
+ * OAuth functionality removed for JARVIS integration.
  */
 
 export interface OAuthAuthorizationServerMetadata {

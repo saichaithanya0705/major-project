@@ -1,5 +1,5 @@
 """
-CLOVIS Integrations - External service integrations.
+JARVIS Integrations - External service integrations.
 
 Available integrations:
 - audio: Text-to-speech and speech-to-text (ElevenLabs)

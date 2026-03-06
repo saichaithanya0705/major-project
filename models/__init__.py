@@ -1,5 +1,5 @@
 """
-CLOVIS Models - LLM integration and routing.
+JARVIS Models - LLM integration and routing.
 """
 from models.models import call_gemini, store_screenshot, get_stored_screenshot, GeminiModel
 from models.function_calls import (

@@ -122,14 +122,14 @@ class CLIAgent:
                 "GEMINI_API_KEY not found in environment. "
                 "Please set it in your .env file."
             )
-        # Enable permissive policy for CLOVIS CLI sessions:
+        # Enable permissive policy for JARVIS CLI sessions:
         # allow all tools by default while still blocking dangerous shell commands.
-        env["CLOVIS_CLI_PERMISSIVE_POLICY"] = "1"
+        env["JARVIS_CLI_PERMISSIVE_POLICY"] = "1"
         # Trust this workspace so Gemini CLI does not downgrade approval mode.
         env["GEMINI_CLI_TRUSTED_FOLDERS_PATH"] = self._trusted_folders_path
         # Use a writable Gemini CLI home directory for sessions/tmp storage.
         env["GEMINI_CLI_HOME"] = self._gemini_cli_home
-        # Disable sandbox for maximum tool/file access in CLOVIS CLI sessions.
+        # Disable sandbox for maximum tool/file access in JARVIS CLI sessions.
         env["GEMINI_SANDBOX"] = "false"
         return env
 
@@ -147,7 +147,7 @@ class CLIAgent:
         Gemini CLI downgrades approval mode to default in untrusted folders.
         This file marks our working directories as TRUST_FOLDER so YOLO can apply.
         """
-        trusted_file = Path(tempfile.gettempdir()) / "clovis_gemini_trusted_folders.json"
+        trusted_file = Path(tempfile.gettempdir()) / "jarvis_gemini_trusted_folders.json"
         entries = {
             str(Path(self.gemini_cli_path).resolve()): "TRUST_FOLDER",
             str(Path(self.gemini_cli_path).resolve().parent.parent.parent): "TRUST_FOLDER",
@@ -161,7 +161,7 @@ class CLIAgent:
         """
         Ensure a writable Gemini CLI home directory.
         """
-        gemini_home = Path(self.gemini_cli_path).resolve() / ".clovis_gemini_home"
+        gemini_home = Path(self.gemini_cli_path).resolve() / ".jarvis_gemini_home"
         gemini_home.mkdir(parents=True, exist_ok=True)
         return str(gemini_home)
 
@@ -190,7 +190,7 @@ class CLIAgent:
         only describing commands.
         """
         instruction = (
-            "You are running inside CLOVIS with tool access enabled. "
+            "You are running inside JARVIS with tool access enabled. "
             "Execute the request directly using tools/shell commands instead of giving manual instructions. "
             "Do not claim you cannot access the system. "
             "If a command is blocked by policy or fails, report the exact command and exact error. "
@@ -450,7 +450,7 @@ class CLIAgent:
         task: str,
     ) -> dict:
         process_id = uuid.uuid4().hex[:8]
-        log_path = os.path.join(tempfile.gettempdir(), f"clovis_cli_bg_{process_id}.log")
+        log_path = os.path.join(tempfile.gettempdir(), f"jarvis_cli_bg_{process_id}.log")
         log_file = open(log_path, "ab")
         process = await asyncio.create_subprocess_exec(
             "/bin/zsh",

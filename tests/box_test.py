@@ -8,7 +8,7 @@ sys.path.insert(0, ROOT_DIR)
 
 from core.settings import set_host_and_port
 from ui.server import VisualizationServer
-from agents.clovis.tools import (
+from agents.jarvis.tools import (
     clear_screen,
     create_text,
     create_text_for_box,

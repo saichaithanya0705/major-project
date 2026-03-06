@@ -21,7 +21,7 @@ class _FakeRouterModel:
     screen_context_payload: dict[str, Any] = {}
     screen_context_calls: int = 0
 
-    def __init__(self, clovis_model: str, rapid_response_model: str):
+    def __init__(self, jarvis_model: str, rapid_response_model: str):
         self._idx = 0
 
     async def route_request(self, prompt: str) -> dict[str, Any]:
@@ -51,7 +51,7 @@ async def test_chains_multiple_agents_then_finishes() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, clovis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -77,7 +77,7 @@ async def test_chains_multiple_agents_then_finishes() -> None:
     model_module._run_routed_agent_step = _fake_run_step
     model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
     try:
-        await model_module.call_gemini("clone this repo and open locally", "rapid", "clovis")
+        await model_module.call_gemini("clone this repo and open locally", "rapid", "jarvis")
         assert executed_agents == ["cua_vision", "cua_cli", "browser"], executed_agents
         assert direct_messages, "Expected final direct response"
         assert direct_messages[-1] == "All done", direct_messages
@@ -96,7 +96,7 @@ async def test_stops_on_repeated_step_loop() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, clovis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -121,7 +121,7 @@ async def test_stops_on_repeated_step_loop() -> None:
     model_module._run_routed_agent_step = _fake_run_step
     model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
     try:
-        await model_module.call_gemini("clone this repo and open locally", "rapid", "clovis")
+        await model_module.call_gemini("clone this repo and open locally", "rapid", "jarvis")
         assert executed_agents == ["cua_cli", "cua_cli"], executed_agents
         assert direct_messages, "Expected repeat-loop stop message"
         assert "kept repeating" in direct_messages[-1].lower(), direct_messages[-1]
@@ -149,7 +149,7 @@ async def test_invalid_route_result_falls_back_to_direct() -> None:
     model_module.GeminiModel = _InvalidRouterModel
     model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
     try:
-        await model_module.call_gemini("open localhost 3000", "rapid", "clovis")
+        await model_module.call_gemini("open localhost 3000", "rapid", "jarvis")
         history_entries = list(model_module._RAPID_CONVERSATION_HISTORY)
         assert history_entries, "Expected rapid history entry after fallback"
         assert any("invalid response shape" in str(entry.get("text", "")).lower() for entry in history_entries), history_entries
@@ -166,7 +166,7 @@ async def test_direct_response_repeat_artifact_is_sanitized() -> None:
 
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, clovis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model):
         agent = routing_result.get("agent", "unknown")
         return {
             "agent": agent,
@@ -199,7 +199,7 @@ async def test_direct_response_repeat_artifact_is_sanitized() -> None:
         await model_module.call_gemini(
             "create a folder hw on desktop and move cs 173 hw into it",
             "rapid",
-            "clovis",
+            "jarvis",
         )
         assert direct_messages, "Expected sanitized final direct response"
         lowered = direct_messages[-1].lower()
@@ -221,7 +221,7 @@ async def test_screen_context_then_actionable_agent() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, clovis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -258,7 +258,7 @@ async def test_screen_context_then_actionable_agent() -> None:
         await model_module.call_gemini(
             "clone this repository for me and open it up on localhost",
             "rapid",
-            "clovis",
+            "jarvis",
         )
         assert _FakeRouterModel.screen_context_calls == 1, _FakeRouterModel.screen_context_calls
         assert executed_agents == ["cua_cli"], executed_agents
@@ -272,12 +272,106 @@ async def test_screen_context_then_actionable_agent() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_execution_request_reroutes_jarvis_to_cli() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+
+    async def _fake_run_step(model, routing_result, jarvis_model):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "message": f"{agent} step completed",
+            "source": "rapid",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "jarvis", "query": "clone this repo and run tests"},
+        {"agent": "direct", "response_text": "done"},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "clone this repo and run tests",
+            "rapid",
+            "jarvis",
+        )
+        assert executed_agents == ["cua_cli"], executed_agents
+        assert direct_messages and direct_messages[-1] == "done", direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+
+    async def _fake_run_step(model, routing_result, jarvis_model):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "message": f"{agent} step completed",
+            "source": "rapid",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "jarvis", "query": "open https://example.com and submit the form"},
+        {"agent": "direct", "response_text": "done"},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "open https://example.com and submit the form",
+            "rapid",
+            "jarvis",
+        )
+        assert executed_agents == ["browser"], executed_agents
+        assert direct_messages and direct_messages[-1] == "done", direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
 async def run_checks() -> None:
     await test_chains_multiple_agents_then_finishes()
     await test_stops_on_repeated_step_loop()
     await test_invalid_route_result_falls_back_to_direct()
     await test_direct_response_repeat_artifact_is_sanitized()
     await test_screen_context_then_actionable_agent()
+    await test_execution_request_reroutes_jarvis_to_cli()
+    await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
 
 
 if __name__ == "__main__":

@@ -92,25 +92,25 @@ def get_viewport_size(settings_path: str = DEFAULT_SETTINGS_PATH) -> tuple[int, 
 # ================================================================================================
 
 def get_model_configs(settings_path: str = DEFAULT_SETTINGS_PATH) -> tuple[str, str]:
-    """Get both model configurations: (rapid_response_model, clovis_model)"""
+    """Get both model configurations: (rapid_response_model, jarvis_model)"""
     with open(settings_path, "r", encoding="utf-8") as handle:
         settings = json.load(handle)
     return (
-        settings.get("rapid_response_model", "gemini-flash-lite-latest"),
-        settings.get("clovis_model", "gemini-3-flash-preview")
+        settings.get("rapid_response_model", "qwen3.5:4b-q4_K_M"),
+        settings.get("jarvis_model", "gemini-3-flash-preview")
     )
 
 
 def get_rapid_response_model(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
     with open(settings_path, "r", encoding="utf-8") as handle:
         settings = json.load(handle)
-    return settings.get("rapid_response_model", "gemini-flash-lite-latest")
+    return settings.get("rapid_response_model", "qwen3.5:4b-q4_K_M")
 
 
-def get_clovis_model(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
+def get_jarvis_model(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
     with open(settings_path, "r", encoding="utf-8") as handle:
         settings = json.load(handle)
-    return settings.get("clovis_model", "gemini-3-flash-preview")
+    return settings.get("jarvis_model", "gemini-3-flash-preview")
 
 
 # ================================================================================================

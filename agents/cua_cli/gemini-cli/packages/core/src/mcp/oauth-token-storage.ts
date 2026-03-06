@@ -6,7 +6,7 @@
 
 /**
  * Stub: OAuth token storage for MCP servers.
- * OAuth functionality removed for CLOVIS integration.
+ * OAuth functionality removed for JARVIS integration.
  */
 
 export { MCPOAuthTokenStorage } from './oauth-provider.js';

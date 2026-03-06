@@ -18,7 +18,7 @@ import {
 } from '@google/gemini-cli-core';
 import { type Settings } from './settings.js';
 
-const CLOVIS_PERMISSIVE_POLICY_ENV = 'CLOVIS_CLI_PERMISSIVE_POLICY';
+const JARVIS_PERMISSIVE_POLICY_ENV = 'JARVIS_CLI_PERMISSIVE_POLICY';
 
 function isTruthyEnv(value: string | undefined): boolean {
   if (!value) {
@@ -53,13 +53,13 @@ function getDangerousShellCommandRules(): PolicyRule[] {
   ];
 
   return dangerousCommandPatterns.map((argsPattern, index) => ({
-    name: `clovis-permissive-dangerous-shell-${index + 1}`,
+    name: `jarvis-permissive-dangerous-shell-${index + 1}`,
     toolName: SHELL_TOOL_NAME,
     argsPattern,
     decision: PolicyDecision.DENY,
     denyMessage,
     priority: 10000,
-    source: 'CLOVIS (Permissive Dangerous Command Blocklist)',
+    source: 'JARVIS (Permissive Dangerous Command Blocklist)',
   }));
 }
 
@@ -80,7 +80,7 @@ export async function createPolicyEngineConfig(
     approvalMode,
   );
 
-  if (!isTruthyEnv(process.env[CLOVIS_PERMISSIVE_POLICY_ENV])) {
+  if (!isTruthyEnv(process.env[JARVIS_PERMISSIVE_POLICY_ENV])) {
     return coreConfig;
   }
 

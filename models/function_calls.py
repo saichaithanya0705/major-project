@@ -6,8 +6,8 @@ which decides how to handle user requests by delegating to appropriate agents.
 """
 from google.genai import types
 
-# Import direct_response from CLOVIS agent (used by both router and CLOVIS)
-from agents.clovis.tools import direct_response
+# Import direct_response from JARVIS agent (used by both router and JARVIS)
+from agents.jarvis.tools import direct_response
 
 
 # ================================================================================
@@ -28,13 +28,13 @@ direct_response_declaration = {
     },
 }
 
-invoke_clovis_declaration = {
-    "name": "invoke_clovis",
-    "description": "Delegate to CLOVIS for screen annotation and explanation. Use when the user wants to understand something on their screen, needs visual explanation, or refers to 'this', 'that', 'here', etc.",
+invoke_jarvis_declaration = {
+    "name": "invoke_jarvis",
+    "description": "Delegate to JARVIS for screen annotation and explanation only. Use when the user explicitly asks what is visible on screen or wants visual guidance. Do not use for executable tasks.",
     "parameters": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "The user's query to pass to CLOVIS."},
+            "query": {"type": "string", "description": "The user's query to pass to JARVIS."},
         },
         "required": ["query"],
     },
@@ -54,7 +54,7 @@ invoke_browser_declaration = {
 
 invoke_cua_cli_declaration = {
     "name": "invoke_cua_cli",
-    "description": "Delegate to the CLI Agent for shell-based desktop control. Use for running commands, opening apps via terminal, file operations, and script execution.",
+    "description": "Delegate to the CLI Agent for shell-based desktop control. Use for running commands, coding/codebase tasks, opening apps via terminal, file operations, and script execution.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -99,8 +99,8 @@ request_screen_context_declaration = {
 # PLACEHOLDER FUNCTIONS (actual invocation handled in router)
 # ================================================================================
 
-def invoke_clovis(query: str):
-    """Marker function - signals that ClovisAgent should be called."""
+def invoke_jarvis(query: str):
+    """Marker function - signals that JarvisAgent should be called."""
     pass
 
 
@@ -130,7 +130,7 @@ def request_screen_context(task: str, focus: str = ""):
 
 ROUTER_TOOLS = [types.Tool(function_declarations=[
     direct_response_declaration,
-    invoke_clovis_declaration,
+    invoke_jarvis_declaration,
     invoke_browser_declaration,
     invoke_cua_cli_declaration,
     invoke_cua_vision_declaration,
@@ -139,7 +139,7 @@ ROUTER_TOOLS = [types.Tool(function_declarations=[
 
 ROUTER_TOOL_MAP = {
     "direct_response": direct_response,
-    "invoke_clovis": invoke_clovis,
+    "invoke_jarvis": invoke_jarvis,
     "invoke_browser": invoke_browser,
     "invoke_cua_cli": invoke_cua_cli,
     "invoke_cua_vision": invoke_cua_vision,

@@ -35,7 +35,7 @@ from agents.cua_vision.keyboard import (
     hold_down_key,
     release_held_key,
 )
-from core.settings import get_clovis_model
+from core.settings import get_jarvis_model
 from agents.cua_vision.agentic_vision import crop_and_search_click
 from agents.cua_vision.legacy_locator import legacy_find_and_click_element
 from integrations.audio import tts_speak
@@ -551,7 +551,7 @@ def run_legacy_locator_fallback(type_of_click: str, element_description: str) ->
 def _get_precision_locator_model_name() -> str:
     """Get the model name used by the crop-and-search precision locator."""
     try:
-        model_name = get_clovis_model()
+        model_name = get_jarvis_model()
         if isinstance(model_name, str) and model_name.strip():
             return model_name.strip()
     except Exception:

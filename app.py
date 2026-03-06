@@ -5,7 +5,7 @@ from PIL import ImageGrab
 from core.settings import set_host_and_port, set_screen_size, get_model_configs, get_screen_size
 
 from models.models import call_gemini, store_screenshot
-from agents.clovis.tools import stop_all_actions
+from agents.jarvis.tools import stop_all_actions
 from agents.cua_vision.tools import (
     reset_state as reset_cua_vision_state,
     request_stop as request_cua_vision_stop,
@@ -37,8 +37,8 @@ async def main():
     set_screen_size(screen_width, screen_height)
 
     # Retrieve model configs from settings
-    rapid_response_model, clovis_model = get_model_configs(settings_path)
-    print(f"Models loaded - Rapid: {rapid_response_model}, CLOVIS: {clovis_model}")
+    rapid_response_model, jarvis_model = get_model_configs(settings_path)
+    print(f"Models loaded - Rapid: {rapid_response_model}, JARVIS: {jarvis_model}")
 
     current_task = None
     task_lock = asyncio.Lock()
@@ -59,7 +59,7 @@ async def main():
     async def _run_overlay_task(text: str):
         nonlocal current_task
         try:
-            await call_gemini(text, rapid_response_model, clovis_model)
+            await call_gemini(text, rapid_response_model, jarvis_model)
         except asyncio.CancelledError:
             print("Active task cancelled.")
         except Exception as exc:

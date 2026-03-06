@@ -1,8 +1,8 @@
 {
-  "name": "CLOVIS",
-  "productName": "CLOVIS",
+  "name": "JARVIS",
+  "productName": "JARVIS",
   "version": "1.0.0",
-  "description": "CLOVIS-frontend",
+  "description": "JARVIS-frontend",
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",

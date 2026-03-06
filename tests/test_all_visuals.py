@@ -20,7 +20,7 @@ from ui.server import VisualizationServer
 from ui.visualization_api.clear_screen import _clear_screen
 from ui.visualization_api.create_text import _create_text
 from ui.visualization_api.destroy_text import _destroy_text
-from agents.clovis.tools import (
+from agents.jarvis.tools import (
     create_text,
     create_text_for_box,
     draw_bounding_box,

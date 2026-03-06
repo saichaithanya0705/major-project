@@ -1,5 +1,5 @@
 """
-CLOVIS Agent Tools - Screen annotation capabilities.
+JARVIS Agent Tools - Screen annotation capabilities.
 
 This module contains all the tool definitions and wrapper functions for
 drawing on the user's screen (bounding boxes, text, pointers, etc.).
@@ -155,7 +155,7 @@ async def _run_queue_async():
 
         if last_time == 0.0 and action_time_s > _MAX_INITIAL_ACTION_DELAY_SECONDS:
             print(
-                f"[CLOVIS][queue] clamping initial action time from "
+                f"[JARVIS][queue] clamping initial action time from "
                 f"{action_time_s:.2f}s to {_MAX_INITIAL_ACTION_DELAY_SECONDS:.2f}s"
             )
             action_time_s = _MAX_INITIAL_ACTION_DELAY_SECONDS
@@ -163,7 +163,7 @@ async def _run_queue_async():
         delay = max(0.0, action_time_s - last_time)
         if delay > _MAX_INTER_ACTION_DELAY_SECONDS:
             print(
-                f"[CLOVIS][queue] clamping inter-action delay from "
+                f"[JARVIS][queue] clamping inter-action delay from "
                 f"{delay:.2f}s to {_MAX_INTER_ACTION_DELAY_SECONDS:.2f}s"
             )
             delay = _MAX_INTER_ACTION_DELAY_SECONDS
@@ -486,7 +486,7 @@ async def _create_text_non_overlapping(
     font_family: str,
     align: str | None,
     baseline: str | None,
-    source: str = "clovis",
+    source: str = "jarvis",
 ):
     resolved_text_id = text_id or f"text_{uuid.uuid4().hex[:8]}"
     resolved_x, resolved_y, rect = _resolve_non_overlapping_anchor(
@@ -500,7 +500,7 @@ async def _create_text_non_overlapping(
     )
     if resolved_x != int(x) or resolved_y != int(y):
         print(
-            "[CLOVIS][layout] nudged text "
+            "[JARVIS][layout] nudged text "
             f"{resolved_text_id} from ({int(x)},{int(y)}) to ({resolved_x},{resolved_y})"
         )
 
@@ -564,7 +564,7 @@ def create_text(
     queue_action(
         time,
         _create_text_non_overlapping,
-        (x, y, text, text_id, font_size, font_family, align, baseline, "clovis"),
+        (x, y, text, text_id, font_size, font_family, align, baseline, "jarvis"),
         {}
     )
 
@@ -573,7 +573,7 @@ def direct_response(
     text: str,
     font_size: int = 18,
     font_family: str = "Helvetica",
-    source: str = "clovis",
+    source: str = "jarvis",
 ):
     global _LAST_DIRECT_RESPONSE, _WAITED_AFTER_DIRECT_RESPONSE
     _LAST_DIRECT_RESPONSE = time.monotonic()
@@ -644,7 +644,7 @@ def create_text_for_box(
             font_family,
             anchor_align,
             baseline,
-            "clovis",
+            "jarvis",
         ),
         {},
     )
@@ -712,7 +712,7 @@ def draw_pointer_to_object(
     queue_action(
         time,
         _create_text_non_overlapping,
-        (text_x, text_y, text, text_id, 18, "Helvetica", "left", "top", "clovis"),
+        (text_x, text_y, text, text_id, 18, "Helvetica", "left", "top", "jarvis"),
         {},
     )
 
@@ -874,7 +874,7 @@ destroy_text_declaration = {
 # TOOL SETS
 # ================================================================================
 
-CLOVIS_TOOLS = [types.Tool(function_declarations=[
+JARVIS_TOOLS = [types.Tool(function_declarations=[
     draw_bounding_box_declaration,
     draw_point_declaration,
     create_text_declaration,
@@ -885,7 +885,7 @@ CLOVIS_TOOLS = [types.Tool(function_declarations=[
     destroy_text_declaration
 ])]
 
-CLOVIS_TOOL_MAP = {
+JARVIS_TOOL_MAP = {
     "draw_bounding_box": draw_bounding_box,
     "draw_pointer_to_object": draw_pointer_to_object,
     "create_text": create_text,

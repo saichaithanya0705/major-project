@@ -388,6 +388,18 @@ function checkHit(x, y) {
   return null;
 }
 
+function isInsideStatusBubble(x, y, requireInteractive = false) {
+  const statusBubble = document.getElementById('status-bubble');
+  if (!statusBubble || statusBubble.getAttribute('aria-hidden') === 'true') {
+    return false;
+  }
+  if (requireInteractive && !statusBubble.classList.contains('status-bubble--interactive')) {
+    return false;
+  }
+  const rect = statusBubble.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
 function isOverOverlayElement(x, y) {
   const overlayInputActive = window.overlayInputActiveFlag === true;
   const inputWrap = document.querySelector('.command-input-wrap');
@@ -413,6 +425,11 @@ function isOverOverlayElement(x, y) {
           y <= (rect.bottom + INPUT_HIT_SLOP)) {
         return true;
       }
+    }
+    // Keep the expanded completion bubble dismiss/action controls clickable
+    // even while command input mode is still active.
+    if (isInsideStatusBubble(x, y, true)) {
+      return true;
     }
     return false;
   }
@@ -441,12 +458,8 @@ function isOverOverlayElement(x, y) {
     }
   }
 
-  const statusBubble = document.getElementById('status-bubble');
-  if (statusBubble && statusBubble.getAttribute('aria-hidden') !== 'true') {
-    const rect = statusBubble.getBoundingClientRect();
-    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-      return true;
-    }
+  if (isInsideStatusBubble(x, y)) {
+    return true;
   }
 
   const cursorStatus = document.getElementById('cursor-status');

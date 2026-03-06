@@ -166,5 +166,5 @@ export * from './utils/terminal.js';
 // Stub: recordToolCallInteractions (removed with code_assist)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function recordToolCallInteractions(_config: any, _calls: any[]): Promise<void> {
-  // No-op: telemetry recording disabled for CLOVIS integration
+  // No-op: telemetry recording disabled for JARVIS integration
 }

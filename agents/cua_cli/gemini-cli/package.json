@@ -1,7 +1,7 @@
 {
   "name": "@google/gemini-cli",
   "version": "0.29.0",
-  "description": "Gemini CLI - Pruned for CLOVIS integration",
+  "description": "Gemini CLI - Pruned for JARVIS integration",
   "engines": {
     "node": ">=20.0.0"
   },

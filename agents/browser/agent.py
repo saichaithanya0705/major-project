@@ -126,7 +126,7 @@ class BrowserAgent:
                 pass
             return cls._shared_browser_use_session
 
-        user_data_dir = tempfile.mkdtemp(prefix="clovis-browser-use-")
+        user_data_dir = tempfile.mkdtemp(prefix="jarvis-browser-use-")
         profile = BrowserProfile(
             headless=False,
             user_data_dir=user_data_dir,
@@ -153,7 +153,7 @@ class BrowserAgent:
         except Exception:
             cls._shared_playwright_page = None
 
-        runtime_home = tempfile.mkdtemp(prefix="clovis-playwright-home-")
+        runtime_home = tempfile.mkdtemp(prefix="jarvis-playwright-home-")
         launch_env = dict(os.environ)
         launch_env["HOME"] = runtime_home
 

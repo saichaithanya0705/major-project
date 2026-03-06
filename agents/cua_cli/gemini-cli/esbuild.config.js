@@ -34,7 +34,7 @@ function ensureGeneratedGitCommitFile() {
   mkdirSync(generatedDir, { recursive: true });
   const fallback = [
     '/**',
-    ' * Auto-generated fallback metadata for local CLOVIS builds.',
+    ' * Auto-generated fallback metadata for local JARVIS builds.',
     ' * Upstream typically generates this from git state in CI.',
     ' */',
     `export const GIT_COMMIT_INFO = process.env['GIT_COMMIT_INFO'] || 'unknown';`,

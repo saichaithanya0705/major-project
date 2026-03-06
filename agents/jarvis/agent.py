@@ -1,15 +1,15 @@
 """
-CLOVIS Agent - Screen annotation and visual explanation.
+JARVIS Agent - Screen annotation and visual explanation.
 
 This agent receives a screenshot and user query, then generates
 timed annotations (boxes, text, pointers) to explain what's on screen.
 """
 from PIL import Image
-from agents.clovis.tools import CLOVIS_TOOLS, CLOVIS_TOOL_MAP, set_model_name
-from agents.clovis.prompts import CLOVIS_SYSTEM_PROMPT
+from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
+from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
 
 
-class ClovisAgent:
+class JarvisAgent:
     """
     Screen annotation agent that draws visual explanations on the user's screen.
 
@@ -23,7 +23,7 @@ class ClovisAgent:
 
     def __init__(self, model_client, model_name: str, config):
         """
-        Initialize the CLOVIS agent.
+        Initialize the JARVIS agent.
 
         Args:
             model_client: The Gemini client instance
@@ -33,8 +33,8 @@ class ClovisAgent:
         self.client = model_client
         self.model_name = model_name
         self.config = config
-        self.tools = CLOVIS_TOOLS
-        self.tool_map = CLOVIS_TOOL_MAP
+        self.tools = JARVIS_TOOLS
+        self.tool_map = JARVIS_TOOL_MAP
 
     async def execute(self, task: str, screenshot: Image = None) -> dict:
         """
@@ -53,7 +53,7 @@ class ClovisAgent:
         try:
             await set_model_name(self.model_name)
 
-            prompt = CLOVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{task}"
+            prompt = JARVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{task}"
 
             contents = [prompt]
             if screenshot:
@@ -70,8 +70,8 @@ class ClovisAgent:
 
             if function_calls:
                 for function_call in function_calls:
-                    print(f"\n[CLOVIS] Function: {function_call.name}")
-                    print(f"[CLOVIS] Arguments: {function_call.args}")
+                    print(f"\n[JARVIS] Function: {function_call.name}")
+                    print(f"[JARVIS] Arguments: {function_call.args}")
 
                     tool = self.tool_map.get(function_call.name)
                     if tool:

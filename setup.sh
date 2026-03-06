@@ -19,7 +19,7 @@ PY_MAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
 PY_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
 if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
   echo "[setup] ERROR: Python >= 3.11 required (found $PY_VERSION)." >&2
-  echo "[setup] Create a conda env:  conda create -n clovis python=3.11 && conda activate clovis" >&2
+  echo "[setup] Create a conda env:  conda create -n jarvis python=3.11 && conda activate jarvis" >&2
   exit 1
 fi
 echo "[setup] Using Python $PY_VERSION"

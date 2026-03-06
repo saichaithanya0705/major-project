@@ -6,7 +6,7 @@
 
 /**
  * Stub: Google credential provider for MCP servers.
- * Google OAuth functionality removed for CLOVIS integration.
+ * Google OAuth functionality removed for JARVIS integration.
  */
 
 import type { MCPServerConfig } from '../config/config.js';

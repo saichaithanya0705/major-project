@@ -1,4 +1,4 @@
-# CLOVIS
+# JARVIS
 ## Computer Linked Overlay Vision Interface System
 > This is a public checkpoint. This is a limited version of the full code. Please do not expect production ready performance. Best experience with a paid Gemini API key.
 
@@ -16,8 +16,8 @@ git clone https://github.com/JonOuyang/Jayu
 
 Or manually:
 ```
-conda create -n clovis
-conda activate clovis
+conda create -n jarvis
+conda activate jarvis
 
 pip install -r requirements.txt
 cd ui && npm install
@@ -28,13 +28,22 @@ cd ../agents/cua_cli/gemini-cli && npm install && npm run build
 ```
 GEMINI_API_KEY = "YOUR_API_KEY"
 
+# Router runs locally via Ollama (required for routing)
+OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
+# Optional overrides:
+# OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
+# OLLAMA_KEEP_ALIVE = "10m"
+# OLLAMA_ROUTER_NUM_CTX = "2048"
+# OLLAMA_ROUTER_NUM_PREDICT = "220"
+
 # Optional Gemini quota/rate-limit fallback via OpenRouter (Nemotron 30B free)
 OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
 OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 # Optional overrides:
 # OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # OPENROUTER_SITE_URL = "https://your-app-url.example"
-# OPENROUTER_SITE_NAME = "CLOVIS"
+# OPENROUTER_SITE_NAME = "JARVIS"
 # OPENROUTER_TIMEOUT_SECONDS = "45"
 
 ELEVENLABS_API_KEY = "YOUR_API_KEY"
@@ -45,23 +54,29 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
 # ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
 ```
 
-## Running Clovis
+## Running Jarvis
 
-1. Run the frontend visualization
+1. Ensure Ollama is running and the router model is available
+```
+ollama serve
+ollama run qwen3.5:4b-q4_K_M "ready"
+```
+
+2. Run the frontend visualization
 ```
 cd ui
 npm run dev
 ```
 
-2. Run the main app (in the project root directory)
+3. Run the main app (in the project root directory)
 ```
 python app.py
 ```
 
-## Clovis Commands
+## Jarvis Commands
 
-* `Cmd + Shift + Space` opens the CLOVIS input bar
-* `Cmd + Shift + X` closes the CLOVIS input bar
+* `Cmd + Shift + Space` opens the JARVIS input bar
+* `Cmd + Shift + X` closes the JARVIS input bar
 * `Cmd + Shift + C` stops active actions and clears overlay state
 
 ---
@@ -70,7 +85,7 @@ python app.py
 
 ### Overview
 
-CLOVIS uses a **two-tier routing architecture** where a lightweight router model decides how to handle requests, then delegates to specialized agents for execution.
+JARVIS uses a **two-tier routing architecture** where a lightweight router model decides how to handle requests, then delegates to specialized agents for execution.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -93,18 +108,18 @@ CLOVIS uses a **two-tier routing architecture** where a lightweight router model
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          ROUTER MODEL                                        │
-│                    (gemini-flash-lite-latest)                               │
+│                 (local Ollama: qwen3.5:4b-q4_K_M)                           │
 │                                                                              │
 │  Analyzes user request (NO screenshot) and decides routing:                 │
 │  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌──────────────────┐ │
-│  │direct_response │ │ invoke_clovis  │ │ invoke_browser │ │invoke_cua_vision │ │
+│  │direct_response │ │ invoke_jarvis  │ │ invoke_browser │ │invoke_cua_vision │ │
 │  │ Simple Q&A     │ │Screen annotate │ │ Web automation │ │GUI-based control │ │
 │  └───────┬────────┘ └───────┬────────┘ └───────┬────────┘ └────────┬─────────┘ │
 └──────────┼──────────────────┼──────────────────┼───────────────────┼───────────┘
            │                  │                  │                   │
            ▼                  ▼                  ▼                   ▼
 ┌──────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌───────────────────┐
-│  DIRECT RESPONSE │ │  CLOVIS AGENT   │ │  BROWSER AGENT  │ │  CUA VISION AGENT │
+│  DIRECT RESPONSE │ │  JARVIS AGENT   │ │  BROWSER AGENT  │ │  CUA VISION AGENT │
 │                  │ │                 │ │                 │ │                   │
 │ Immediate text   │ │ + Screenshot    │ │ Playwright-     │ │ + Screenshot      │
 │ response in      │ │ + Vision model  │ │ based web       │ │ + Element finding │
@@ -118,7 +133,7 @@ CLOVIS uses a **two-tier routing architecture** where a lightweight router model
 ### Directory Structure
 
 ```
-CLOVIS/
+JARVIS/
 ├── app.py                      # Entry point - starts server and handles input
 ├── settings.json               # Runtime configuration (port, models, screen size)
 │
@@ -132,10 +147,10 @@ CLOVIS/
 │   └── prompts.py              # Router system prompt
 │
 ├── agents/                     # Execution backends
-│   ├── clovis/                 # Screen annotation agent
-│   │   ├── agent.py            # ClovisAgent class
+│   ├── jarvis/                 # Screen annotation agent
+│   │   ├── agent.py            # JarvisAgent class
 │   │   ├── tools.py            # Drawing tools (boxes, text, pointers)
-│   │   └── prompts.py          # CLOVIS system prompt
+│   │   └── prompts.py          # JARVIS system prompt
 │   │
 │   ├── browser/                # Web automation agent (Playwright)
 │   │   └── agent.py            # BrowserAgent class (stub)
@@ -187,7 +202,7 @@ CLOVIS/
 
 ### Data Flow
 
-#### 1. User Triggers CLOVIS (`Cmd + Shift + Space`)
+#### 1. User Triggers JARVIS (`Cmd + Shift + Space`)
 
 ```
 main.js (Electron)
@@ -223,14 +238,14 @@ command_overlay.js
     │   │   (No screenshot - fast)        │
     │   │                                 │
     │   │   Decides: direct_response,     │
-    │   │   invoke_clovis, invoke_browser,│
+    │   │   invoke_jarvis, invoke_browser,│
     │   │   invoke_cua_cli, or            │
     │   │   invoke_cua_vision             │
     │   └─────────────────────────────────┘
     │               │
     │               ▼
     │   ┌─────────────────────────────────┐
-    │   │    CLOVIS AGENT (if invoked)    │
+    │   │    JARVIS AGENT (if invoked)    │
     │   │   + Stored screenshot           │
     │   │   + Full vision model           │
     │   │   + Returns tool calls:         │
@@ -264,12 +279,12 @@ The router is a lightweight model that classifies requests without seeing the sc
 | Tool | When to Use |
 |------|-------------|
 | `direct_response` | Simple facts, math, greetings |
-| `invoke_clovis` | Screen questions, "what's this?", visual explanation |
+| `invoke_jarvis` | Screen questions, "what's this?", visual explanation |
 | `invoke_browser` | Web tasks, searches, online services |
 | `invoke_cua_cli` | Shell commands, file ops, scripts |
 | `invoke_cua_vision` | GUI interactions, clicking buttons |
 
-#### CLOVIS Agent (agents/clovis/)
+#### JARVIS Agent (agents/jarvis/)
 
 Screen annotation agent with timed visual elements:
 
@@ -303,7 +318,7 @@ Vision-based computer use agent that can see and interact with the screen:
 
 The agent operates in a loop: capture screen → analyze → execute action → repeat until task complete.
 
-#### Action Queue (agents/clovis/tools.py)
+#### Action Queue (agents/jarvis/tools.py)
 
 The action queue handles timed execution:
 
@@ -351,8 +366,8 @@ Events (Electron → Python):
     "screen_height": 1080,
     "viewport_width": 1920,
     "viewport_height": 1080,
-    "rapid_response_model": "gemini-flash-lite-latest",
-    "clovis_model": "gemini-2.5-flash-preview-04-17"
+    "rapid_response_model": "qwen3.5:4b-q4_K_M",
+    "jarvis_model": "gemini-2.5-flash-preview-04-17"
 }
 ```
 

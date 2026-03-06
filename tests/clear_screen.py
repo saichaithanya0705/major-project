@@ -5,7 +5,7 @@ import sys
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
-from agents.clovis.tools import clear_screen
+from agents.jarvis.tools import clear_screen
 from core.settings import set_host_and_port
 from ui.server import VisualizationServer
 
