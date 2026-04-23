@@ -1,5 +1,7 @@
 # Environment
 .env
+.venv/
+logs/
 node_modules
 __pycache__/
 *.pyc

@@ -51,7 +51,7 @@ async def test_chains_multiple_agents_then_finishes() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -96,7 +96,7 @@ async def test_stops_on_repeated_step_loop() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -166,7 +166,7 @@ async def test_direct_response_repeat_artifact_is_sanitized() -> None:
 
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         return {
             "agent": agent,
@@ -221,7 +221,7 @@ async def test_screen_context_then_actionable_agent() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -280,7 +280,7 @@ async def test_execution_request_reroutes_jarvis_to_cli() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -326,7 +326,7 @@ async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> N
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -364,7 +364,64 @@ async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> N
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+def test_router_refusal_task_is_replaced_with_original_request() -> None:
+    model = object.__new__(model_module.GeminiModel)
+    route = model_module.GeminiModel._normalize_ollama_router_decision(
+        model,
+        {
+            "agent": "browser",
+            "task": "I cannot open URLs directly as I am a text-based AI model.",
+        },
+        "# User's Latest Request:\nopen https://example.com",
+    )
+    assert route == {
+        "agent": "browser",
+        "task": "open https://example.com",
+    }
+
+
+def test_ollama_router_payload_disables_thinking() -> None:
+    model = object.__new__(model_module.GeminiModel)
+    model.ollama_router_model = "router-model"
+    model.ollama_router_num_predict = 800
+    model.ollama_router_num_ctx = 4096
+    model.ollama_router_think = False
+    model.ollama_keep_alive = "10m"
+    model.ollama_base_url = "http://127.0.0.1:11434"
+    model.ollama_router_timeout_seconds = 90
+
+    captured_payload: dict[str, Any] = {}
+    original_post = model_module.requests.post
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "message": {
+                    "content": '{"agent":"browser","task":"open https://example.com"}',
+                },
+            }
+
+    def _fake_post(url, json, timeout):
+        captured_payload.update(json)
+        return _FakeResponse()
+
+    model_module.requests.post = _fake_post
+    try:
+        route = model._call_ollama_router_sync("open https://example.com")
+    finally:
+        model_module.requests.post = original_post
+
+    assert route == {"agent": "browser", "task": "open https://example.com"}
+    assert captured_payload["think"] is False, captured_payload
+    assert captured_payload["options"]["temperature"] == 0.0, captured_payload
+    assert captured_payload["options"]["num_predict"] == 800, captured_payload
+
+
 async def run_checks() -> None:
+    test_router_refusal_task_is_replaced_with_original_request()
+    test_ollama_router_payload_disables_thinking()
     await test_chains_multiple_agents_then_finishes()
     await test_stops_on_repeated_step_loop()
     await test_invalid_route_result_falls_back_to_direct()

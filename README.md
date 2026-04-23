@@ -9,17 +9,39 @@
 git clone https://github.com/JonOuyang/Jayu
 ```
 
-2. Create your environment and install necessary dependencies 
+2. Create your project-local environment and install dependencies
+
+Windows (PowerShell):
+```powershell
+.\setup.ps1
+.\.venv\Scripts\Activate.ps1
 ```
+
+macOS / Linux:
+```bash
 ./setup.sh
+source .venv/bin/activate
 ```
 
-Or manually:
+Manual setup:
+```bash
+python -m venv .venv
 ```
-conda create -n jarvis
-conda activate jarvis
 
-pip install -r requirements.txt
+Windows:
+```powershell
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python -m playwright install chromium
+cd ui; npm install
+cd ../agents/cua_cli/gemini-cli; npm install; npm run build
+```
+
+macOS / Linux:
+```bash
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m playwright install chromium
 cd ui && npm install
 cd ../agents/cua_cli/gemini-cli && npm install && npm run build
 ```
@@ -35,7 +57,8 @@ OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
 # OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
 # OLLAMA_KEEP_ALIVE = "10m"
 # OLLAMA_ROUTER_NUM_CTX = "2048"
-# OLLAMA_ROUTER_NUM_PREDICT = "220"
+# OLLAMA_ROUTER_NUM_PREDICT = "800"
+# OLLAMA_ROUTER_THINK = "false"
 
 # Optional Gemini quota/rate-limit fallback via OpenRouter (Nemotron 30B free)
 OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
@@ -68,9 +91,16 @@ cd ui
 npm run dev
 ```
 
-3. Run the main app (in the project root directory)
+3. Run the main app from the project root with the project venv
+
+Windows:
+```powershell
+.\.venv\Scripts\python.exe app.py
 ```
-python app.py
+
+macOS / Linux:
+```bash
+.venv/bin/python app.py
 ```
 
 ## Jarvis Commands

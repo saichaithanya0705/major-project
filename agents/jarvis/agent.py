@@ -51,7 +51,10 @@ class JarvisAgent:
                 - error: Optional error message if failed
         """
         try:
-            await set_model_name(self.model_name)
+            try:
+                await set_model_name(self.model_name)
+            except Exception as ui_exc:
+                print(f"[JARVIS] Model label update skipped: {ui_exc}")
 
             prompt = JARVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{task}"
 

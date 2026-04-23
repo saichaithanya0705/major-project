@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+import traceback
 from collections import deque
 from typing import Any, Optional
 
@@ -18,6 +19,7 @@ from PIL import Image, ImageGrab
 from dotenv import load_dotenv
 import requests
 
+from core.assistant_logging import log_assistant_event, new_assistant_request_id
 from models.function_calls import ROUTER_TOOL_MAP, TOOL_CONFIG
 from models.prompts import RAPID_RESPONSE_SYSTEM_PROMPT, OLLAMA_ROUTER_SYSTEM_PROMPT
 
@@ -148,7 +150,6 @@ _CLI_EXECUTION_MARKERS = (
     "127.0.0.1",
 )
 _ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
-
 
 def store_screenshot():
     """Capture and store a screenshot (called before overlay appears)."""
@@ -438,6 +439,23 @@ def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dic
     return "cua_cli"
 
 
+def _looks_like_router_refusal(text: str) -> bool:
+    lowered = (text or "").lower()
+    patterns = (
+        "i cannot",
+        "i can't",
+        "i am unable",
+        "i'm unable",
+        "as a text-based",
+        "as an ai",
+        "i don't have the ability",
+        "i do not have the ability",
+        "guide you on how",
+        "manually",
+    )
+    return any(pattern in lowered for pattern in patterns)
+
+
 def _apply_routing_guardrails(
     user_prompt: str,
     routing_result: dict[str, Any],
@@ -615,8 +633,16 @@ async def _run_routed_agent_step(
     model: "GeminiModel",
     routing_result: dict[str, Any],
     jarvis_model: str,
+    request_id: str,
 ) -> dict[str, Any]:
     agent_name = routing_result.get("agent")
+    task_text = _routing_task_text(routing_result)
+    log_assistant_event(
+        "agent_step_started",
+        request_id=request_id,
+        agent=str(agent_name or "unknown"),
+        task=task_text,
+    )
 
     if agent_name == "jarvis":
         await _start_non_rapid_status("Analyzing current screen...", source="jarvis")
@@ -632,6 +658,15 @@ async def _run_routed_agent_step(
             )
             elapsed = time.monotonic() - started
             print(f"[JARVIS] Completed in {elapsed:.2f}s")
+            log_assistant_event(
+                "agent_step_completed",
+                request_id=request_id,
+                agent="jarvis",
+                task=task_text,
+                message=jarvis_summary,
+                success=True,
+                duration_seconds=elapsed,
+            )
             await _finish_non_rapid_status(
                 jarvis_summary,
                 True,
@@ -646,6 +681,17 @@ async def _run_routed_agent_step(
             }
         except Exception as exc:
             error_message = _clean_text(str(exc), "JARVIS task failed.", max_len=420)
+            log_assistant_event(
+                "agent_step_failed",
+                request_id=request_id,
+                agent="jarvis",
+                task=task_text,
+                message=error_message,
+                error=str(exc),
+                success=False,
+                duration_seconds=time.monotonic() - started,
+                metadata={"traceback": traceback.format_exc()},
+            )
             await _finish_non_rapid_status(
                 error_message,
                 False,
@@ -666,14 +712,42 @@ async def _run_routed_agent_step(
         task = routing_result.get("task", "")
         print(f"[Router] Browser Agent starting. Task: {task}")
         browser_agent = BrowserAgent(model_name=jarvis_model)
+        started = time.monotonic()
+        browser_traceback = None
         try:
             result = await browser_agent.execute(task)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            browser_traceback = traceback.format_exc()
             result = {"success": False, "result": None, "error": str(exc)}
 
         message = _browser_completion_message(result)
+        if result.get("success", False):
+            log_assistant_event(
+                "agent_step_completed",
+                request_id=request_id,
+                agent="browser",
+                task=task_text,
+                message=message,
+                success=True,
+                duration_seconds=time.monotonic() - started,
+            )
+        else:
+            metadata = {"result": result.get("result")}
+            if browser_traceback:
+                metadata["traceback"] = browser_traceback
+            log_assistant_event(
+                "agent_step_failed",
+                request_id=request_id,
+                agent="browser",
+                task=task_text,
+                message=message,
+                error=_clean_text(result.get("error"), "Browser task failed.", max_len=420),
+                success=False,
+                duration_seconds=time.monotonic() - started,
+                metadata=metadata,
+            )
         await _finish_non_rapid_status(
             message,
             result.get("success", False),
@@ -692,6 +766,8 @@ async def _run_routed_agent_step(
         task = routing_result.get("task", "")
         print(f"[Router] CLI Agent executing: {task}")
         cli_agent = CLIAgent()
+        started = time.monotonic()
+        cli_traceback = None
         last_cli_status_text = ""
         last_cli_status_ts = 0.0
 
@@ -720,12 +796,39 @@ async def _run_routed_agent_step(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            cli_traceback = traceback.format_exc()
             result = {"success": False, "result": None, "error": str(exc)}
         if result.get("success"):
             print(f"[CLI Agent] Success: {result.get('result')}")
         else:
             print(f"[CLI Agent] Error: {result.get('error')}")
         message = _cli_completion_message(result)
+        if result.get("success", False):
+            log_assistant_event(
+                "agent_step_completed",
+                request_id=request_id,
+                agent="cua_cli",
+                task=task_text,
+                message=message,
+                success=True,
+                duration_seconds=time.monotonic() - started,
+                metadata={"tool_calls": result.get("tool_calls")},
+            )
+        else:
+            metadata = {"tool_calls": result.get("tool_calls")}
+            if cli_traceback:
+                metadata["traceback"] = cli_traceback
+            log_assistant_event(
+                "agent_step_failed",
+                request_id=request_id,
+                agent="cua_cli",
+                task=task_text,
+                message=message,
+                error=_clean_text(result.get("error"), "CLI task failed.", max_len=420),
+                success=False,
+                duration_seconds=time.monotonic() - started,
+                metadata=metadata,
+            )
         await _finish_non_rapid_status(
             message,
             result.get("success", False),
@@ -744,13 +847,41 @@ async def _run_routed_agent_step(
         screenshot = get_stored_screenshot()
         vision_agent = VisionAgent(model_name=jarvis_model)
         task = routing_result.get("task", "")
+        started = time.monotonic()
+        vision_traceback = None
         try:
             result = await vision_agent.execute(task, screenshot)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            vision_traceback = traceback.format_exc()
             result = {"success": False, "result": None, "error": str(exc)}
         message = _vision_completion_message(result)
+        if result.get("success", False):
+            log_assistant_event(
+                "agent_step_completed",
+                request_id=request_id,
+                agent="cua_vision",
+                task=task_text,
+                message=message,
+                success=True,
+                duration_seconds=time.monotonic() - started,
+            )
+        else:
+            metadata = {}
+            if vision_traceback:
+                metadata["traceback"] = vision_traceback
+            log_assistant_event(
+                "agent_step_failed",
+                request_id=request_id,
+                agent="cua_vision",
+                task=task_text,
+                message=message,
+                error=_clean_text(result.get("error"), "Computer task failed.", max_len=420),
+                success=False,
+                duration_seconds=time.monotonic() - started,
+                metadata=metadata or None,
+            )
         await _finish_non_rapid_status(
             message,
             result.get("success", False),
@@ -783,133 +914,260 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
     1. Rapid response model (router) decides how to handle the request
     2. Routes to appropriate agent: JARVIS, Browser, or Desktop
     """
-    model = GeminiModel(
-        jarvis_model=jarvis_model,
-        rapid_response_model=rapid_response_model
+    request_id = new_assistant_request_id()
+    log_assistant_event(
+        "request_started",
+        request_id=request_id,
+        task=_clean_text(user_prompt, "", max_len=1200),
+        metadata={
+            "rapid_response_model": rapid_response_model,
+            "jarvis_model": jarvis_model,
+        },
     )
 
-    _append_rapid_history("user", user_prompt, "user")
-
-    # Fast path: pure visual understanding queries should avoid extra router +
-    # screen-context hops to reduce latency.
-    if _is_visual_explanation_request(user_prompt):
-        print("[Router][FastPath] Directly invoking JARVIS for visual explanation.")
-        step_result = await _run_routed_agent_step(
-            model=model,
-            routing_result={"agent": "jarvis", "query": user_prompt},
+    try:
+        model = GeminiModel(
             jarvis_model=jarvis_model,
+            rapid_response_model=rapid_response_model
         )
-        _append_rapid_history(
-            "assistant",
-            step_result.get("message", ""),
-            step_result.get("source", "jarvis"),
-        )
-        if not step_result.get("success"):
-            tool = ROUTER_TOOL_MAP.get("direct_response")
-            if tool:
-                tool(
-                    text=_clean_text(
-                        f"JARVIS failed: {step_result.get('message')}",
-                        "JARVIS task failed.",
-                        max_len=420,
-                    ),
-                    source="rapid_response",
-                )
-        return
 
-    chain_steps: list[dict[str, Any]] = []
-    seen_step_signatures: dict[tuple[str, str], int] = {}
-    latest_screen_context: Optional[dict[str, Any]] = None
+        _append_rapid_history("user", user_prompt, "user")
 
-    for step_index in range(_MAX_ROUTER_CHAIN_STEPS):
-        history_block = _format_rapid_history_for_prompt()
-        chain_block = _format_chain_state_for_prompt(
-            user_prompt=user_prompt,
-            chain_steps=chain_steps,
-            max_steps=_MAX_ROUTER_CHAIN_STEPS,
-            latest_screen_context=latest_screen_context,
-        )
-        rapid_prompt = (
-            RAPID_RESPONSE_SYSTEM_PROMPT
-            + history_block
-            + chain_block
-            + f"\n# User's Latest Request:\n{user_prompt}"
-        )
-        routing_result = await model.route_request(rapid_prompt)
-        if not isinstance(routing_result, dict):
-            routing_result = {
-                "agent": "direct",
-                "response_text": "Router returned an invalid response shape.",
-            }
-        else:
-            routing_result = _apply_routing_guardrails(
-                user_prompt=user_prompt,
-                routing_result=routing_result,
-                latest_screen_context=latest_screen_context,
+        # Fast path: pure visual understanding queries should avoid extra router +
+        # screen-context hops to reduce latency.
+        if _is_visual_explanation_request(user_prompt):
+            print("[Router][FastPath] Directly invoking JARVIS for visual explanation.")
+            log_assistant_event(
+                "router_fast_path",
+                request_id=request_id,
+                agent="jarvis",
+                task=_clean_text(user_prompt, "", max_len=420),
             )
+            step_result = await _run_routed_agent_step(
+                model=model,
+                routing_result={"agent": "jarvis", "query": user_prompt},
+                jarvis_model=jarvis_model,
+                request_id=request_id,
+            )
+            _append_rapid_history(
+                "assistant",
+                step_result.get("message", ""),
+                step_result.get("source", "jarvis"),
+            )
+            if not step_result.get("success"):
+                failure_text = _clean_text(
+                    f"JARVIS failed: {step_result.get('message')}",
+                    "JARVIS task failed.",
+                    max_len=420,
+                )
+                tool = ROUTER_TOOL_MAP.get("direct_response")
+                if tool:
+                    tool(text=failure_text, source="rapid_response")
+                log_assistant_event(
+                    "request_failed",
+                    request_id=request_id,
+                    agent="jarvis",
+                    task=_clean_text(user_prompt, "", max_len=420),
+                    message=failure_text,
+                    error=step_result.get("message", ""),
+                    success=False,
+                )
+            else:
+                log_assistant_event(
+                    "request_completed",
+                    request_id=request_id,
+                    agent="jarvis",
+                    task=_clean_text(user_prompt, "", max_len=420),
+                    message=step_result.get("message", ""),
+                    success=True,
+                )
+            return
 
-        if routing_result.get("agent") == "direct":
-            direct_args = routing_result.get("direct_response_args")
-            if not isinstance(direct_args, dict):
-                direct_args = {}
-            raw_direct_text = direct_args.get("text") or routing_result.get("response_text")
-            direct_text = _finalize_direct_response_text(
+        chain_steps: list[dict[str, Any]] = []
+        seen_step_signatures: dict[tuple[str, str], int] = {}
+        latest_screen_context: Optional[dict[str, Any]] = None
+
+        for step_index in range(_MAX_ROUTER_CHAIN_STEPS):
+            history_block = _format_rapid_history_for_prompt()
+            chain_block = _format_chain_state_for_prompt(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=_clean_text(raw_direct_text, "Rapid response provided.", max_len=420),
+                max_steps=_MAX_ROUTER_CHAIN_STEPS,
+                latest_screen_context=latest_screen_context,
             )
-            tool = ROUTER_TOOL_MAP.get("direct_response")
-            if tool:
-                safe_args = dict(direct_args)
-                safe_args.pop("text", None)
-                tool(text=direct_text, source="rapid_response", **safe_args)
-            _append_rapid_history("assistant", direct_text, "rapid")
-            return
-
-        signature = _routing_signature(routing_result)
-        seen_step_signatures[signature] = seen_step_signatures.get(signature, 0) + 1
-        if seen_step_signatures[signature] >= _REPEATED_STEP_LIMIT:
-            repeated_msg = (
-                "I stopped automatic multi-agent chaining because the next delegated step "
-                "kept repeating. Please rephrase or ask for one specific next action."
+            rapid_prompt = (
+                RAPID_RESPONSE_SYSTEM_PROMPT
+                + history_block
+                + chain_block
+                + f"\n# User's Latest Request:\n{user_prompt}"
             )
-            tool = ROUTER_TOOL_MAP.get("direct_response")
-            if tool:
-                tool(text=repeated_msg, source="rapid_response")
-            _append_rapid_history("assistant", repeated_msg, "rapid")
-            return
+            routing_result = await model.route_request(rapid_prompt)
+            if not isinstance(routing_result, dict):
+                routing_result = {
+                    "agent": "direct",
+                    "response_text": "Router returned an invalid response shape.",
+                }
+            else:
+                routing_result = _apply_routing_guardrails(
+                    user_prompt=user_prompt,
+                    routing_result=routing_result,
+                    latest_screen_context=latest_screen_context,
+                )
 
-        if routing_result.get("agent") == "screen_context":
-            judge_task = routing_result.get("task") or user_prompt
-            focus = routing_result.get("focus") or ""
+            log_assistant_event(
+                "router_decision",
+                request_id=request_id,
+                agent=str(routing_result.get("agent") or "direct"),
+                task=_routing_task_text(routing_result),
+                metadata={"step_index": step_index + 1},
+            )
+
+            if routing_result.get("agent") == "direct":
+                direct_args = routing_result.get("direct_response_args")
+                if not isinstance(direct_args, dict):
+                    direct_args = {}
+                raw_direct_text = direct_args.get("text") or routing_result.get("response_text")
+                direct_text = _finalize_direct_response_text(
+                    user_prompt=user_prompt,
+                    chain_steps=chain_steps,
+                    text=_clean_text(raw_direct_text, "Rapid response provided.", max_len=420),
+                )
+                tool = ROUTER_TOOL_MAP.get("direct_response")
+                if tool:
+                    safe_args = dict(direct_args)
+                    safe_args.pop("text", None)
+                    tool(text=direct_text, source="rapid_response", **safe_args)
+                _append_rapid_history("assistant", direct_text, "rapid")
+                log_assistant_event(
+                    "request_completed",
+                    request_id=request_id,
+                    agent="direct",
+                    task=_clean_text(user_prompt, "", max_len=420),
+                    message=direct_text,
+                    success=True,
+                    metadata={"delegated_steps": len(chain_steps)},
+                )
+                return
+
+            signature = _routing_signature(routing_result)
+            seen_step_signatures[signature] = seen_step_signatures.get(signature, 0) + 1
+            if seen_step_signatures[signature] >= _REPEATED_STEP_LIMIT:
+                repeated_msg = (
+                    "I stopped automatic multi-agent chaining because the next delegated step "
+                    "kept repeating. Please rephrase or ask for one specific next action."
+                )
+                tool = ROUTER_TOOL_MAP.get("direct_response")
+                if tool:
+                    tool(text=repeated_msg, source="rapid_response")
+                _append_rapid_history("assistant", repeated_msg, "rapid")
+                log_assistant_event(
+                    "request_stopped",
+                    request_id=request_id,
+                    agent=str(routing_result.get("agent") or ""),
+                    task=_routing_task_text(routing_result),
+                    message=repeated_msg,
+                    success=False,
+                    metadata={"reason": "repeated_step_limit"},
+                )
+                return
+
+            if routing_result.get("agent") == "screen_context":
+                judge_task = routing_result.get("task") or user_prompt
+                focus = routing_result.get("focus") or ""
+                print(
+                    f"[Router][Chain] Step {step_index + 1}/{_MAX_ROUTER_CHAIN_STEPS}: "
+                    f"agent=screen_context task={_clean_text(judge_task, '', max_len=200)}"
+                )
+                screenshot = get_stored_screenshot()
+                screen_context_started = time.monotonic()
+                log_assistant_event(
+                    "agent_step_started",
+                    request_id=request_id,
+                    agent="screen_context",
+                    task=_clean_text(judge_task, "", max_len=420),
+                    metadata={"focus": _clean_text(focus, "", max_len=220)},
+                )
+                try:
+                    latest_screen_context = await model.generate_screen_context(
+                        user_request=judge_task,
+                        image=screenshot,
+                        focus=focus,
+                    )
+                    message = _screen_context_message(latest_screen_context)
+                    step_result = {
+                        "agent": "screen_context",
+                        "task": _clean_text(judge_task, "", max_len=220),
+                        "success": True,
+                        "message": message,
+                        "source": "screen_judge",
+                    }
+                    log_assistant_event(
+                        "agent_step_completed",
+                        request_id=request_id,
+                        agent="screen_context",
+                        task=_clean_text(judge_task, "", max_len=420),
+                        message=message,
+                        success=True,
+                        duration_seconds=time.monotonic() - screen_context_started,
+                        metadata=latest_screen_context,
+                    )
+                except Exception as exc:
+                    step_result = {
+                        "agent": "screen_context",
+                        "task": _clean_text(judge_task, "", max_len=220),
+                        "success": False,
+                        "message": _clean_text(str(exc), "Failed to collect screen context.", max_len=420),
+                        "source": "screen_judge",
+                    }
+                    log_assistant_event(
+                        "agent_step_failed",
+                        request_id=request_id,
+                        agent="screen_context",
+                        task=_clean_text(judge_task, "", max_len=420),
+                        message=step_result["message"],
+                        error=str(exc),
+                        success=False,
+                        duration_seconds=time.monotonic() - screen_context_started,
+                        metadata={"traceback": traceback.format_exc()},
+                    )
+
+                chain_steps.append(step_result)
+                _append_rapid_history(
+                    "assistant",
+                    step_result.get("message", ""),
+                    step_result.get("source", "rapid"),
+                )
+                if not step_result.get("success"):
+                    failure_msg = (
+                        f"Stopping chained execution because screen context failed: "
+                        f"{step_result.get('message')}"
+                    )
+                    tool = ROUTER_TOOL_MAP.get("direct_response")
+                    if tool:
+                        tool(text=_clean_text(failure_msg, "Task failed.", max_len=420), source="rapid_response")
+                    _append_rapid_history("assistant", failure_msg, "rapid")
+                    log_assistant_event(
+                        "request_failed",
+                        request_id=request_id,
+                        agent="screen_context",
+                        task=_clean_text(judge_task, "", max_len=420),
+                        message=failure_msg,
+                        error=step_result.get("message", ""),
+                        success=False,
+                    )
+                    return
+                continue
+
             print(
                 f"[Router][Chain] Step {step_index + 1}/{_MAX_ROUTER_CHAIN_STEPS}: "
-                f"agent=screen_context task={_clean_text(judge_task, '', max_len=200)}"
+                f"agent={routing_result.get('agent')} task={_routing_task_text(routing_result)}"
             )
-            screenshot = get_stored_screenshot()
-            try:
-                latest_screen_context = await model.generate_screen_context(
-                    user_request=judge_task,
-                    image=screenshot,
-                    focus=focus,
-                )
-                message = _screen_context_message(latest_screen_context)
-                step_result = {
-                    "agent": "screen_context",
-                    "task": _clean_text(judge_task, "", max_len=220),
-                    "success": True,
-                    "message": message,
-                    "source": "screen_judge",
-                }
-            except Exception as exc:
-                step_result = {
-                    "agent": "screen_context",
-                    "task": _clean_text(judge_task, "", max_len=220),
-                    "success": False,
-                    "message": _clean_text(str(exc), "Failed to collect screen context.", max_len=420),
-                    "source": "screen_judge",
-                }
-
+            step_result = await _run_routed_agent_step(
+                model=model,
+                routing_result=routing_result,
+                jarvis_model=jarvis_model,
+                request_id=request_id,
+            )
             chain_steps.append(step_result)
             _append_rapid_history(
                 "assistant",
@@ -918,50 +1176,51 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
             )
             if not step_result.get("success"):
                 failure_msg = (
-                    f"Stopping chained execution because screen context failed: "
+                    f"Stopping chained execution because {step_result.get('agent')} failed: "
                     f"{step_result.get('message')}"
                 )
                 tool = ROUTER_TOOL_MAP.get("direct_response")
                 if tool:
                     tool(text=_clean_text(failure_msg, "Task failed.", max_len=420), source="rapid_response")
                 _append_rapid_history("assistant", failure_msg, "rapid")
+                log_assistant_event(
+                    "request_failed",
+                    request_id=request_id,
+                    agent=str(step_result.get("agent") or ""),
+                    task=_clean_text(step_result.get("task"), "", max_len=420),
+                    message=failure_msg,
+                    error=step_result.get("message", ""),
+                    success=False,
+                )
                 return
-            continue
 
-        print(
-            f"[Router][Chain] Step {step_index + 1}/{_MAX_ROUTER_CHAIN_STEPS}: "
-            f"agent={routing_result.get('agent')} task={_routing_task_text(routing_result)}"
+        max_step_msg = (
+            f"I stopped after {_MAX_ROUTER_CHAIN_STEPS} delegated steps to avoid loops. "
+            "If you want me to continue, ask for the next specific step."
         )
-        step_result = await _run_routed_agent_step(
-            model=model,
-            routing_result=routing_result,
-            jarvis_model=jarvis_model,
+        tool = ROUTER_TOOL_MAP.get("direct_response")
+        if tool:
+            tool(text=max_step_msg, source="rapid_response")
+        _append_rapid_history("assistant", max_step_msg, "rapid")
+        log_assistant_event(
+            "request_stopped",
+            request_id=request_id,
+            task=_clean_text(user_prompt, "", max_len=420),
+            message=max_step_msg,
+            success=False,
+            metadata={"reason": "max_router_chain_steps"},
         )
-        chain_steps.append(step_result)
-        _append_rapid_history(
-            "assistant",
-            step_result.get("message", ""),
-            step_result.get("source", "rapid"),
+    except Exception as exc:
+        log_assistant_event(
+            "request_crashed",
+            request_id=request_id,
+            task=_clean_text(user_prompt, "", max_len=420),
+            message=_clean_text(str(exc), "Assistant request crashed.", max_len=420),
+            error=str(exc),
+            success=False,
+            metadata={"traceback": traceback.format_exc()},
         )
-        if not step_result.get("success"):
-            failure_msg = (
-                f"Stopping chained execution because {step_result.get('agent')} failed: "
-                f"{step_result.get('message')}"
-            )
-            tool = ROUTER_TOOL_MAP.get("direct_response")
-            if tool:
-                tool(text=_clean_text(failure_msg, "Task failed.", max_len=420), source="rapid_response")
-            _append_rapid_history("assistant", failure_msg, "rapid")
-            return
-
-    max_step_msg = (
-        f"I stopped after {_MAX_ROUTER_CHAIN_STEPS} delegated steps to avoid loops. "
-        "If you want me to continue, ask for the next specific step."
-    )
-    tool = ROUTER_TOOL_MAP.get("direct_response")
-    if tool:
-        tool(text=max_step_msg, source="rapid_response")
-    _append_rapid_history("assistant", max_step_msg, "rapid")
+        raise
 
 
 # ================================================================================
@@ -1028,10 +1287,14 @@ class GeminiModel:
             ollama_num_ctx = 2048
         self.ollama_router_num_ctx = max(512, min(8192, ollama_num_ctx))
         try:
-            ollama_num_predict = int(os.getenv("OLLAMA_ROUTER_NUM_PREDICT", "220"))
+            ollama_num_predict = int(os.getenv("OLLAMA_ROUTER_NUM_PREDICT", "800"))
         except ValueError:
-            ollama_num_predict = 220
-        self.ollama_router_num_predict = max(80, min(800, ollama_num_predict))
+            ollama_num_predict = 800
+        self.ollama_router_num_predict = max(80, min(2048, ollama_num_predict))
+        self.ollama_router_think = (
+            os.getenv("OLLAMA_ROUTER_THINK", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
         # Config for JARVIS model (full capabilities)
         self.jarvis_config = types.GenerateContentConfig(
@@ -1194,11 +1457,12 @@ class GeminiModel:
                 {"role": "user", "content": prompt},
             ],
             "options": {
-                "temperature": 0.1,
+                "temperature": 0.0,
                 "num_predict": self.ollama_router_num_predict,
                 "num_ctx": self.ollama_router_num_ctx,
             },
         }
+        payload["think"] = self.ollama_router_think
         if self.ollama_keep_alive:
             payload["keep_alive"] = self.ollama_keep_alive
 
@@ -1267,13 +1531,16 @@ class GeminiModel:
             }
 
         if agent in {"browser", "cua_cli", "cua_vision"}:
+            task_text = _clean_text(
+                payload.get("task") or payload.get("query"),
+                latest_request,
+                max_len=420,
+            )
+            if _looks_like_router_refusal(task_text):
+                task_text = latest_request
             return {
                 "agent": agent,
-                "task": _clean_text(
-                    payload.get("task") or payload.get("query"),
-                    latest_request,
-                    max_len=420,
-                ),
+                "task": task_text,
             }
 
         return {
@@ -1299,9 +1566,12 @@ class GeminiModel:
         """
         print("[Router] Processing via Ollama...")
         started = time.monotonic()
-        await set_model_name(f"{self.ollama_router_model} (Ollama)")
 
         try:
+            try:
+                await set_model_name(f"{self.ollama_router_model} (Ollama)")
+            except Exception as ui_exc:
+                print(f"[Router] Model label update skipped: {ui_exc}")
             payload = await asyncio.to_thread(self._call_ollama_router_sync, prompt)
             routed = self._normalize_ollama_router_decision(payload, prompt)
             elapsed = time.monotonic() - started
@@ -1415,7 +1685,10 @@ class GeminiModel:
         """
         print("[JARVIS] Processing with screenshot...")
         started = time.monotonic()
-        await set_model_name(self.jarvis_model)
+        try:
+            await set_model_name(self.jarvis_model)
+        except Exception as ui_exc:
+            print(f"[JARVIS] Model label update skipped: {ui_exc}")
 
         contents = [prompt]
         if image:

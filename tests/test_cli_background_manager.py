@@ -8,6 +8,7 @@ Usage:
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
@@ -48,7 +49,8 @@ async def run_checks() -> None:
     ])
     assert inferred is not None, "Expected inferred launch command from tool calls"
     assert inferred["command"] == "npm run dev", inferred
-    assert inferred["cwd"].endswith("Desktop/demo-app"), inferred
+    expected_suffix = Path("Desktop") / "demo-app"
+    assert Path(inferred["cwd"]).parts[-len(expected_suffix.parts):] == expected_suffix.parts, inferred
     assert CLIAgent._is_quick_server_launch_task("run npm start in ~/Desktop/demo-app")
     assert not CLIAgent._is_quick_server_launch_task(
         "Clone repo, run npm install, then npm start on localhost"

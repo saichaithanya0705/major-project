@@ -402,13 +402,49 @@ class BrowserAgent:
 
     @staticmethod
     def _known_browser_executables() -> list[str]:
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ]
-        return [path for path in candidates if Path(path).exists()]
+        if sys.platform.startswith("win"):
+            candidates = [
+                r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+                r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+                r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+                r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+                r"%LocalAppData%\Microsoft\Edge\Application\msedge.exe",
+                r"%ProgramFiles%\Chromium\Application\chrome.exe",
+                r"%ProgramFiles(x86)%\Chromium\Application\chrome.exe",
+                r"%LocalAppData%\Chromium\Application\chrome.exe",
+                r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe",
+                r"%ProgramFiles(x86)%\BraveSoftware\Brave-Browser\Application\brave.exe",
+                r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe",
+            ]
+        elif sys.platform == "darwin":
+            candidates = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            ]
+        else:
+            candidates = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/microsoft-edge",
+                "/usr/bin/brave-browser",
+                "/snap/bin/chromium",
+            ]
+
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            path = str(Path(os.path.expandvars(candidate)).expanduser())
+            if path in seen:
+                continue
+            seen.add(path)
+            if Path(path).exists():
+                resolved.append(path)
+        return resolved
 
     @staticmethod
     def _should_close_after_task(task: str) -> bool:
@@ -490,18 +526,23 @@ class BrowserAgent:
         if not task:
             return []
 
+        def is_url_like(value: str) -> bool:
+            return bool(re.match(r"^(?:https?:)?//", value.strip(), flags=re.IGNORECASE))
+
         candidates: list[str] = []
 
         # Quoted chunks commonly contain explicit file paths.
         for quoted in re.findall(r"""['"]([^'"]+)['"]""", task):
             q = quoted.strip()
-            if q:
+            if q and not is_url_like(q):
                 candidates.append(q)
 
+        path_scan_text = re.sub(r"https?://[^\s,;]+", " ", task, flags=re.IGNORECASE)
+
         # Also capture unquoted absolute/home-relative paths.
-        for match in re.findall(r"""(?<!\w)(~\/[^\s,;]+|\/[^\s,;]+)""", task):
+        for match in re.findall(r"""(?<!\w)(~\/[^\s,;]+|\/[^\s,;]+|[A-Za-z]:\\[^\s,;]+|\\\\[^\s,;]+)""", path_scan_text):
             m = str(match).strip()
-            if m:
+            if m and not is_url_like(m):
                 candidates.append(m)
 
         resolved: list[str] = []
@@ -513,7 +554,7 @@ class BrowserAgent:
                 return
             # Trim surrounding punctuation that can appear in prose.
             p = p.strip(".,;:()[]{}'\"`")
-            if not p or p in seen:
+            if not p or is_url_like(p) or p in seen:
                 return
             seen.add(p)
             resolved.append(p)

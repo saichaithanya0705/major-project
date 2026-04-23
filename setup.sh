@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$ROOT_DIR/.venv"
+PYTHON_BIN="$VENV_DIR/bin/python"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -26,6 +28,14 @@ echo "[setup] Using Python $PY_VERSION"
 
 cd "$ROOT_DIR"
 
+if [ ! -d "$VENV_DIR" ]; then
+  echo "[setup] Creating project virtual environment at $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+fi
+
+echo "[setup] Upgrading pip inside the virtual environment..."
+"$PYTHON_BIN" -m pip install --upgrade pip
+
 if [ ! -f "$ROOT_DIR/.env" ]; then
   echo "[setup] Creating .env with placeholder keys..."
   cat <<'ENV_EOF' > "$ROOT_DIR/.env"
@@ -37,10 +47,10 @@ ENV_EOF
 fi
 
 echo "[setup] Installing Python dependencies..."
-python3 -m pip install -r requirements.txt
+"$PYTHON_BIN" -m pip install -r requirements.txt
 
 echo "[setup] Installing Playwright browsers..."
-python3 -m playwright install chromium
+"$PYTHON_BIN" -m playwright install chromium
 
 echo "[setup] Clearing Python bytecode cache..."
 find "$ROOT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -54,4 +64,6 @@ cd "$ROOT_DIR/agents/cua_cli/gemini-cli"
 npm install
 npm run build
 
-echo "[setup] Done. Activate your env and run:  python app.py"
+echo "[setup] Done."
+echo "[setup] Activate with: source .venv/bin/activate"
+echo "[setup] Then run: .venv/bin/python app.py"

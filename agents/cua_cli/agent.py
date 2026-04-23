@@ -8,6 +8,8 @@ import atexit
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import re
 import signal
@@ -441,6 +443,72 @@ class CLIAgent:
             await asyncio.sleep(0.35)
         return None
 
+    @staticmethod
+    def _resolve_background_shell() -> tuple[list[str], dict[str, Any]]:
+        if os.name == "nt":
+            shell_path = (
+                shutil.which("pwsh")
+                or shutil.which("powershell")
+                or os.path.join(
+                    os.environ.get("SystemRoot", r"C:\Windows"),
+                    "System32",
+                    "WindowsPowerShell",
+                    "v1.0",
+                    "powershell.exe",
+                )
+            )
+            creationflags = 0
+            for flag_name in (
+                "CREATE_NEW_PROCESS_GROUP",
+                "DETACHED_PROCESS",
+                "CREATE_NO_WINDOW",
+            ):
+                creationflags |= int(getattr(subprocess, flag_name, 0))
+            return (
+                [
+                    shell_path,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                ],
+                {"creationflags": creationflags},
+            )
+
+        shell_path = shutil.which("zsh") or shutil.which("bash") or shutil.which("sh")
+        if not shell_path:
+            raise RuntimeError("No supported POSIX shell found for background execution.")
+        return ([shell_path, "-lc"], {"start_new_session": True})
+
+    @staticmethod
+    def _terminate_process_tree_sync(metadata: Dict[str, Any]) -> None:
+        pid = int(metadata.get("pid") or 0)
+        pgid = int(metadata.get("pgid") or 0)
+
+        if os.name == "nt":
+            if pid <= 0:
+                return
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            except Exception:
+                pass
+            return
+
+        try:
+            if pgid > 0:
+                os.killpg(pgid, signal.SIGTERM)
+            elif pid > 0:
+                os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
     @classmethod
     async def _start_background_process(
         cls,
@@ -451,24 +519,27 @@ class CLIAgent:
     ) -> dict:
         process_id = uuid.uuid4().hex[:8]
         log_path = os.path.join(tempfile.gettempdir(), f"jarvis_cli_bg_{process_id}.log")
-        log_file = open(log_path, "ab")
-        process = await asyncio.create_subprocess_exec(
-            "/bin/zsh",
-            "-lc",
-            command,
-            cwd=working_dir,
-            env=env,
-            stdout=log_file,
-            stderr=log_file,
-            start_new_session=True,
-        )
-        log_file.close()
+        shell_args, spawn_kwargs = cls._resolve_background_shell()
+        with open(log_path, "ab") as log_file:
+            process = await asyncio.create_subprocess_exec(
+                *shell_args,
+                command,
+                cwd=working_dir,
+                env=env,
+                stdout=log_file,
+                stderr=log_file,
+                **spawn_kwargs,
+            )
 
         pid = process.pid
-        try:
-            pgid = os.getpgid(pid)
-        except Exception:
-            pgid = pid
+        pgid: Optional[int]
+        if os.name == "nt":
+            pgid = None
+        else:
+            try:
+                pgid = os.getpgid(pid)
+            except Exception:
+                pgid = pid
 
         metadata: Dict[str, Any] = {
             "id": process_id,
@@ -519,15 +590,7 @@ class CLIAgent:
     def _cleanup_background_processes_sync(cls) -> None:
         for proc_id in list(cls._managed_background_processes.keys()):
             meta = cls._managed_background_processes.get(proc_id) or {}
-            pgid = int(meta.get("pgid") or 0)
-            pid = int(meta.get("pid") or 0)
-            try:
-                if pgid > 0:
-                    os.killpg(pgid, signal.SIGTERM)
-                elif pid > 0:
-                    os.kill(pid, signal.SIGTERM)
-            except Exception:
-                pass
+            cls._terminate_process_tree_sync(meta)
             cls._managed_background_processes.pop(proc_id, None)
 
     @classmethod
@@ -535,15 +598,7 @@ class CLIAgent:
         meta = cls._managed_background_processes.get(process_id)
         if not meta:
             return False
-        pgid = int(meta.get("pgid") or 0)
-        pid = int(meta.get("pid") or 0)
-        try:
-            if pgid > 0:
-                os.killpg(pgid, signal.SIGTERM)
-            elif pid > 0:
-                os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
+        cls._terminate_process_tree_sync(meta)
         cls._managed_background_processes.pop(process_id, None)
         return True
 

@@ -159,6 +159,9 @@ def run_checks() -> None:
     assert BrowserAgent._must_avoid_search("On the currently open page, upload this file")
     assert BrowserAgent._must_avoid_search("Open localhost 3000")
     assert not BrowserAgent._must_avoid_search("Open youtube.com")
+    assert BrowserAgent._extract_available_file_paths_from_task("Open https://example.com") == []
+    assert BrowserAgent._extract_available_file_paths_from_task('"https://example.com/file.pdf"') == []
+    assert BrowserAgent._extract_available_file_paths_from_task(r"Upload C:\Users\SAI\Desktop\homework.zip")
     steered = BrowserAgent._steer_task_for_existing_page(
         "On the currently open ScopeGrade page, upload ECE_131A_HW5.zip"
     )
