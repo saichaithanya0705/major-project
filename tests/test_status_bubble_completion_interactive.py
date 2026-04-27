@@ -12,7 +12,6 @@ Usage:
 """
 
 import asyncio
-import json
 import os
 import sys
 
@@ -27,6 +26,11 @@ from ui.visualization_api.status_bubble import (
     complete_status_bubble,
     show_command_overlay,
 )
+from tests.status_bubble_harness import (
+    HeadlessVisualizationClient,
+    allocate_local_ws_endpoint,
+    configure_isolated_runtime_endpoint,
+)
 
 LIGHT_STATUS_THEME = {
     "statusBg": "rgba(245, 248, 252, 0.96)",
@@ -39,61 +43,44 @@ LIGHT_STATUS_THEME = {
 
 async def _run_mock_task(final_response: str):
     await show_command_overlay()
-    await asyncio.sleep(0.8)
+    await asyncio.sleep(0.05)
 
     await show_status_bubble("Running mocked agent...", theme=LIGHT_STATUS_THEME)
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.05)
     await update_status_bubble("Gathering context...", theme=LIGHT_STATUS_THEME)
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.05)
     await update_status_bubble("Executing mocked steps...", theme=LIGHT_STATUS_THEME)
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.05)
 
     await complete_status_bubble(
         final_response,
         done_text="Task done",
-        delay_ms=2000,
+        delay_ms=100,
         theme=LIGHT_STATUS_THEME,
     )
 
 
 async def run_test():
-    settings_path = os.path.join(os.path.dirname(__file__), "..", "settings.json")
-    host = "127.0.0.1"
-    port = 8765
-
-    with open(settings_path, "r", encoding="utf-8") as handle:
-        settings = json.load(handle)
-    settings["host"] = host
-    settings["port"] = port
-    with open(settings_path, "w", encoding="utf-8") as handle:
-        json.dump(settings, handle, indent=4)
+    host, port = allocate_local_ws_endpoint()
+    configure_isolated_runtime_endpoint(host=host, port=port)
 
     server = VisualizationServer(host=host, port=port)
     await server.start()
-    print("[completion_interactive] Waiting for client connection on ws://127.0.0.1:8765...")
-    await server.wait_for_client()
-    print("[completion_interactive] Client connected!")
-
     try:
-        print("[completion_interactive] Phase 1: click expanded status bubble body.")
-        await _run_mock_task(
-            "Mocked CLI confirmation: wrote 2 files and finished without errors."
-        )
-        print("[completion_interactive] When expanded, click the status bubble body.")
-        print("[completion_interactive] Expected: center command input is restored and response appears underneath it.")
-        await asyncio.sleep(14)
-
-        print("[completion_interactive] Phase 2: click the X dismiss button.")
-        await _run_mock_task(
-            "Mocked browser confirmation: extracted 5 results from the page."
-        )
-        print("[completion_interactive] When expanded, click the X on the right.")
-        print("[completion_interactive] Expected: status bubble dismisses.")
-        await asyncio.sleep(14)
+        uri = f"ws://{host}:{port}"
+        async with HeadlessVisualizationClient(uri):
+            await _run_mock_task(
+                "Mocked CLI confirmation: wrote 2 files and finished without errors."
+            )
+            await asyncio.sleep(0.05)
+            await _run_mock_task(
+                "Mocked browser confirmation: extracted 5 results from the page."
+            )
+            await asyncio.sleep(0.1)
+            print("[completion_interactive] Test finished.")
     finally:
         await _clear_screen()
         await server.stop()
-        print("[completion_interactive] Test finished.")
 
 
 if __name__ == "__main__":

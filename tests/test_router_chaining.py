@@ -14,6 +14,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
 import models.models as model_module
+import models.router_backends as router_backends_module
 
 
 class _FakeRouterModel:
@@ -439,7 +440,7 @@ def test_ollama_router_payload_disables_thinking() -> None:
     model.ollama_router_timeout_seconds = 90
 
     captured_payload: dict[str, Any] = {}
-    original_post = model_module.requests.post
+    original_post = router_backends_module.requests.post
 
     class _FakeResponse:
         status_code = 200
@@ -455,11 +456,11 @@ def test_ollama_router_payload_disables_thinking() -> None:
         captured_payload.update(json)
         return _FakeResponse()
 
-    model_module.requests.post = _fake_post
+    router_backends_module.requests.post = _fake_post
     try:
         route = model._call_ollama_router_sync("open https://example.com")
     finally:
-        model_module.requests.post = original_post
+        router_backends_module.requests.post = original_post
 
     assert route == {"agent": "browser", "task": "open https://example.com"}
     assert captured_payload["think"] is False, captured_payload

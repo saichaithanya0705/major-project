@@ -16,9 +16,7 @@ import sys
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
-import pyautogui
-
-from core.settings import set_host_and_port
+from core.settings import get_screen_size
 from ui.server import VisualizationServer
 from ui.visualization_api.status_bubble import (
     show_status_bubble,
@@ -31,13 +29,20 @@ from ui.visualization_api.cursor_status import (
     hide_cursor_status,
     set_cursor_status_position,
 )
+from tests.status_bubble_harness import (
+    HeadlessVisualizationClient,
+    allocate_local_ws_endpoint,
+    configure_isolated_runtime_endpoint,
+)
 
 
 async def simulate_cua_vision_agent():
     """
     Simulates mouse movement with near-cursor thinking and status bubble updates.
     """
-    screen_width, screen_height = pyautogui.size()
+    screen_width, screen_height = get_screen_size()
+    screen_width = int(screen_width or 1920)
+    screen_height = int(screen_height or 1080)
 
     # Keep clicks comfortably away from screen edges.
     margin = 140
@@ -62,35 +67,31 @@ async def simulate_cua_vision_agent():
 
     for idx, (target_x, target_y) in enumerate(points, start=1):
         await update_status_bubble(f"Moving to point {idx}...")
-
-        pyautogui.moveTo(target_x, target_y, duration=0.225)
+        await set_cursor_status_position(target_x, target_y)
         next_cursor_msg = random.choice(cursor_messages)
         await update_cursor_status(next_cursor_msg)
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.05)
 
     await update_status_bubble("Task complete")
-    await asyncio.sleep(0.6)
+    await asyncio.sleep(0.05)
     await hide_cursor_status()
-    await hide_status_bubble(delay=1000)
+    await hide_status_bubble(delay=50)
 
 
 async def run_test():
-    settings_path = os.path.join(os.path.dirname(__file__), "..", "settings.json")
-    host, port = set_host_and_port(settings_path)
+    host, port = allocate_local_ws_endpoint()
+    configure_isolated_runtime_endpoint(host=host, port=port)
 
     server = VisualizationServer(host=host, port=port)
     await server.start()
-    print("[test_status_bubble_cua_vision] Waiting for client connection...")
-    await server.wait_for_client()
-    print("[test_status_bubble_cua_vision] Client connected!")
-
-    print("[test_status_bubble_cua_vision] Starting CUA Vision agent simulation...")
-    await simulate_cua_vision_agent()
-    print("[test_status_bubble_cua_vision] Simulation complete!")
-
-    # Keep server running for a moment to see the final state
-    await asyncio.sleep(2)
-    print("[test_status_bubble_cua_vision] Test finished.")
+    try:
+        uri = f"ws://{host}:{port}"
+        async with HeadlessVisualizationClient(uri):
+            await simulate_cua_vision_agent()
+            await asyncio.sleep(0.1)
+            print("[test_status_bubble_cua_vision] Test finished.")
+    finally:
+        await server.stop()
 
 
 if __name__ == "__main__":

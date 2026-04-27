@@ -9,13 +9,12 @@ import asyncio
 import os
 import random
 
-from PIL import ImageGrab
-import pygetwindow as gw
-
 try:
     from google import genai
     from google.genai import types
 except ImportError:
+    genai = None
+    types = None
     print('Google Gemini dependencies have not been installed')
 
 from agents.cua_vision.keyboard import (
@@ -23,6 +22,11 @@ from agents.cua_vision.keyboard import (
     click_left_click,
     click_double_left_click,
     click_right_click,
+)
+from agents.cua_vision.screen_context import (
+    _get_active_window_bbox,
+    capture_active_window as _capture_active_window,
+    get_active_window_title as _get_active_window_title,
 )
 from ui.visualization_api.cursor_status import (
     show_cursor_status,
@@ -41,70 +45,6 @@ def _dispatch_now(coro):
             asyncio.run(coro)
         except RuntimeError:
             pass
-
-
-def _capture_active_window():
-    """Capture the currently active window, falling back to full screen."""
-    try:
-        bbox = _get_active_window_bbox()
-        if bbox:
-            return ImageGrab.grab(bbox=bbox)
-    except Exception as e:
-        print(f"Error capturing active window for legacy locator: {e}")
-
-    return ImageGrab.grab()
-
-
-def _get_active_window_title() -> str:
-    """Get the active window title for prompt context."""
-    try:
-        return gw.getActiveWindowTitle() or "Unknown"
-    except Exception:
-        return "Unknown"
-
-
-def _get_active_window_bbox():
-    """
-    Return active window bounds as (left, top, right, bottom), or None.
-
-    Handles environments where getActiveWindow() may return a string title.
-    """
-    try:
-        window = gw.getActiveWindow()
-    except Exception:
-        return None
-
-    def _bounds_from_window(win):
-        required = ("left", "top", "width", "height")
-        if not all(hasattr(win, key) for key in required):
-            return None
-        try:
-            left = int(win.left)
-            top = int(win.top)
-            width = int(win.width)
-            height = int(win.height)
-        except Exception:
-            return None
-        if width <= 0 or height <= 0:
-            return None
-        return (left, top, left + width, top + height)
-
-    bbox = _bounds_from_window(window)
-    if bbox:
-        return bbox
-
-    if isinstance(window, str) and window:
-        try:
-            candidates = gw.getWindowsWithTitle(window)
-        except Exception:
-            return None
-        for candidate in candidates:
-            bbox = _bounds_from_window(candidate)
-            if bbox:
-                return bbox
-
-    return None
-
 
 def legacy_find_and_click_element(
     type_of_click: str,
@@ -129,6 +69,10 @@ def legacy_find_and_click_element(
     print(f"[LegacyLocator] Searching for: {element_description}")
 
     try:
+        if genai is None or types is None:
+            print("[LegacyLocator] Gemini dependencies unavailable; skipping legacy fallback.")
+            return False
+
         if callable(should_stop) and should_stop():
             print("[LegacyLocator] Stop requested before fallback lookup; aborting.")
             return False

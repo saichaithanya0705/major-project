@@ -5,7 +5,25 @@ Provides functions for emulating keyboard and mouse input.
 """
 import time
 import platform
-import pyautogui
+
+try:
+    import pyautogui as _pyautogui
+except ImportError:
+    _pyautogui = None
+    print("pyautogui dependency is not installed; keyboard/mouse actions are unavailable.")
+
+
+if _pyautogui is None:
+    class _PyAutoGuiUnavailable:
+        def __getattr__(self, _name):
+            raise RuntimeError(
+                "pyautogui is required for keyboard/mouse control. Install `pyautogui` to enable CUA actions."
+            )
+
+
+    pyautogui = _PyAutoGuiUnavailable()
+else:
+    pyautogui = _pyautogui
 
 
 # ================================================================================

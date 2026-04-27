@@ -15,12 +15,16 @@ import sys
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
-from core.settings import set_host_and_port
 from ui.server import VisualizationServer
 from ui.visualization_api.status_bubble import (
     show_status_bubble,
     update_status_bubble,
     hide_status_bubble,
+)
+from tests.status_bubble_harness import (
+    HeadlessVisualizationClient,
+    allocate_local_ws_endpoint,
+    configure_isolated_runtime_endpoint,
 )
 
 
@@ -57,35 +61,33 @@ async def simulate_browser_agent():
     }
 
     await show_status_bubble(status_messages[0], theme=dark_theme)
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.05)
     await update_status_bubble(status_messages[1], theme=light_theme)
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.05)
 
     for msg in status_messages[2:]:
         await update_status_bubble(msg)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.05)
 
     # Hide after showing "Task complete" briefly
-    await hide_status_bubble(delay=1000)
+    await hide_status_bubble(delay=50)
 
 
 async def run_test():
-    settings_path = os.path.join(os.path.dirname(__file__), "..", "settings.json")
-    host, port = set_host_and_port(settings_path)
+    host, port = allocate_local_ws_endpoint()
+    configure_isolated_runtime_endpoint(host=host, port=port)
 
     server = VisualizationServer(host=host, port=port)
     await server.start()
-    print("[test_status_bubble_browser] Waiting for client connection...")
-    await server.wait_for_client()
-    print("[test_status_bubble_browser] Client connected!")
-
-    print("[test_status_bubble_browser] Starting Browser agent simulation...")
-    await simulate_browser_agent()
-    print("[test_status_bubble_browser] Simulation complete!")
-
-    # Keep server running for a moment to see the final state
-    await asyncio.sleep(2)
-    print("[test_status_bubble_browser] Test finished.")
+    try:
+        uri = f"ws://{host}:{port}"
+        async with HeadlessVisualizationClient(uri):
+            print("[test_status_bubble_browser] Headless client connected.")
+            await simulate_browser_agent()
+            await asyncio.sleep(0.1)
+            print("[test_status_bubble_browser] Test finished.")
+    finally:
+        await server.stop()
 
 
 if __name__ == "__main__":

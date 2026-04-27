@@ -8,11 +8,8 @@ import atexit
 import asyncio
 import json
 import os
-import shutil
-import subprocess
 import tempfile
 import re
-import signal
 import time
 import uuid
 from dataclasses import dataclass
@@ -20,6 +17,50 @@ from pathlib import Path
 from typing import Optional, List, Dict, Callable, Awaitable, Any
 
 from dotenv import load_dotenv
+from agents.cua_cli.background_manager import (
+    cleanup_background_processes_sync,
+    is_local_port_open,
+    list_background_processes,
+    register_foreground_process,
+    resolve_background_shell,
+    start_background_process,
+    stop_all_background_processes,
+    stop_background_process,
+    terminate_process_tree_sync,
+    unregister_foreground_process,
+    wait_for_any_port,
+)
+from agents.cua_cli.server_launch_policy import (
+    extract_explicit_shell_command,
+    extract_port_candidates,
+    extract_server_subcommand,
+    extract_shell_command_from_tool_call,
+    infer_server_launch_from_tool_calls,
+    is_background_intent_task,
+    is_quick_server_launch_task,
+    is_server_intent_text,
+    is_server_like_command,
+    resolve_shell_path,
+)
+from agents.cua_cli.response_parser import (
+    parse_json_response,
+    parse_stream_json_response,
+)
+from agents.cua_cli.stream_event_policy import (
+    emit_terminal_stream_event,
+    format_tool_status,
+    safe_preview,
+    status_from_stream_event,
+)
+from agents.cua_cli.workspace_policy import (
+    compute_workspace_dirs,
+    dedupe_workspace_dirs,
+    extract_drive_roots_from_task,
+    extract_path_candidates_from_task,
+    nearest_existing_workspace_scope,
+    task_requests_terminal_execution,
+    workspace_dirs_for_task,
+)
 from ui.visualization_api.client import get_client
 
 # Load environment variables (ensures GEMINI_API_KEY is available)
@@ -200,24 +241,19 @@ class CLIAgent:
         process: asyncio.subprocess.Process,
         task: str,
     ) -> Dict[str, Any]:
-        metadata: Dict[str, Any] = {
-            "id": session_id,
-            "pid": process.pid,
-            "pgid": None,
-            "task": task,
-            "started_at": time.time(),
-        }
-        if os.name != "nt":
-            try:
-                metadata["pgid"] = os.getpgid(process.pid)
-            except Exception:
-                metadata["pgid"] = process.pid
-        cls._active_foreground_processes[session_id] = metadata
-        return metadata
+        return register_foreground_process(
+            store=cls._active_foreground_processes,
+            session_id=session_id,
+            process=process,
+            task=task,
+        )
 
     @classmethod
     def _unregister_foreground_process(cls, session_id: str) -> None:
-        cls._active_foreground_processes.pop(session_id, None)
+        unregister_foreground_process(
+            store=cls._active_foreground_processes,
+            session_id=session_id,
+        )
 
     @classmethod
     def _ensure_cleanup_hook_registered(cls) -> None:
@@ -253,126 +289,30 @@ class CLIAgent:
 
     @staticmethod
     def _compute_workspace_dirs() -> List[str]:
-        """
-        Include common directories so workspace-scoped tools (ls/glob/read/write)
-        can operate beyond the gemini-cli subfolder.
-        """
-        paths = [
-            str(Path.cwd().resolve()),
-            str(Path.home().resolve()),
-            str((Path.home() / "Desktop").resolve()),
-            "/tmp",
-        ]
-        deduped: List[str] = []
-        for p in paths:
-            if p not in deduped and Path(p).exists():
-                deduped.append(p)
-        return deduped
+        return compute_workspace_dirs()
 
     @staticmethod
     def _task_requests_terminal_execution(task: str) -> bool:
-        lowered = (task or "").lower()
-        markers = (
-            "terminal",
-            "shell",
-            "powershell",
-            "pwsh",
-            "bash",
-            "cmd",
-            "command prompt",
-        )
-        return any(marker in lowered for marker in markers)
+        return task_requests_terminal_execution(task)
 
     @staticmethod
     def _extract_drive_roots_from_task(task: str) -> List[str]:
-        roots: List[str] = []
-        for match in re.finditer(r"\b([a-zA-Z])\s*(?::)?\s*drive\b", task or "", flags=re.IGNORECASE):
-            root = f"{match.group(1).upper()}:\\"
-            if Path(root).exists() and root not in roots:
-                roots.append(root)
-        return roots
+        return extract_drive_roots_from_task(task)
 
     @staticmethod
     def _extract_path_candidates_from_task(task: str) -> List[str]:
-        if not task:
-            return []
-
-        candidates: List[str] = []
-
-        for pattern in (r"`([^`]+)`", r"'([^']+)'", r'"([^"]+)"'):
-            for match in re.finditer(pattern, task, flags=re.DOTALL):
-                candidate = match.group(1).strip()
-                if candidate and any(token in candidate for token in ("\\", "/", ":")):
-                    candidates.append(candidate)
-
-        path_scan_text = re.sub(r"https?://[^\s,;]+", " ", task, flags=re.IGNORECASE)
-        raw_matches = re.findall(
-            r"(?<!\w)(~\/[^\s,;]+|\/[^\s,;]+|[A-Za-z]:\\[^\n\r\t]+|\\\\[^\n\r\t]+)",
-            path_scan_text,
-        )
-        for raw in raw_matches:
-            candidate = str(raw).strip().strip(".,;:()[]{}'\"`")
-            if candidate:
-                candidates.append(candidate)
-
-        deduped: List[str] = []
-        for candidate in candidates:
-            if candidate not in deduped:
-                deduped.append(candidate)
-        return deduped
+        return extract_path_candidates_from_task(task)
 
     @staticmethod
     def _nearest_existing_workspace_scope(path_expr: str) -> Optional[str]:
-        if not path_expr:
-            return None
-
-        expanded = os.path.expandvars(os.path.expanduser(path_expr.strip().strip("'\"`")))
-        candidate = Path(expanded)
-        if not candidate.is_absolute():
-            candidate = (Path.cwd().resolve() / candidate)
-
-        probe = candidate
-        while True:
-            if probe.exists():
-                directory = probe if probe.is_dir() else probe.parent
-                try:
-                    return str(directory.resolve())
-                except Exception:
-                    return str(directory)
-
-            parent = probe.parent
-            if parent == probe:
-                return None
-            probe = parent
+        return nearest_existing_workspace_scope(path_expr)
 
     @staticmethod
     def _dedupe_workspace_dirs(paths: List[str]) -> List[str]:
-        deduped: List[str] = []
-        seen: set[str] = set()
-        for raw in paths:
-            if not raw:
-                continue
-            try:
-                normalized = str(Path(raw).resolve())
-            except Exception:
-                normalized = os.path.abspath(raw)
-            key = os.path.normcase(os.path.normpath(normalized))
-            if key in seen or not Path(normalized).exists():
-                continue
-            seen.add(key)
-            deduped.append(normalized)
-        return deduped
+        return dedupe_workspace_dirs(paths)
 
     def _workspace_dirs_for_task(self, task: str) -> List[str]:
-        scoped_paths: List[str] = list(self._base_workspace_dirs)
-        scoped_paths.extend(self._extract_drive_roots_from_task(task))
-
-        for candidate in self._extract_path_candidates_from_task(task):
-            scope = self._nearest_existing_workspace_scope(candidate)
-            if scope:
-                scoped_paths.append(scope)
-
-        return self._dedupe_workspace_dirs(scoped_paths)
+        return workspace_dirs_for_task(self._base_workspace_dirs, task)
 
     def _prepare_cli_task(self, task: str) -> str:
         """
@@ -427,300 +367,68 @@ class CLIAgent:
 
     @staticmethod
     def _extract_explicit_shell_command(task: str) -> Optional[str]:
-        if not task:
-            return None
-
-        backtick = re.search(r"`([^`]+)`", task, flags=re.DOTALL)
-        if backtick:
-            command = backtick.group(1).strip()
-            return command if command else None
-
-        prefixed = re.search(r"(?:^|\n)\s*command\s*:\s*(.+)$", task, flags=re.IGNORECASE | re.MULTILINE)
-        if prefixed:
-            command = prefixed.group(1).strip()
-            return command if command else None
-
-        run_line = re.match(r"^\s*(?:run|start|launch)\s+(.+)$", task.strip(), flags=re.IGNORECASE)
-        if run_line:
-            candidate = run_line.group(1).strip()
-            if any(token in candidate for token in ("npm ", "pnpm ", "yarn ", "python", "uvicorn", "node ", "flask")):
-                return candidate
-
-        return None
+        return extract_explicit_shell_command(task)
 
     @staticmethod
     def _is_server_like_command(command: str) -> bool:
-        c = command.lower()
-        patterns = [
-            r"\bnpm\s+run\s+(dev|start|serve)\b",
-            r"\bnpm\s+(start|serve)\b",
-            r"\bpnpm\s+(dev|start|serve)\b",
-            r"\byarn\s+(dev|start|serve)\b",
-            r"\bnext\s+dev\b",
-            r"\bvite\b",
-            r"\bwebpack-dev-server\b",
-            r"\buvicorn\b",
-            r"\bflask\s+run\b",
-            r"\bpython(?:3)?\s+-m\s+http\.server\b",
-            r"\bnode\s+.+\b(server|dev)\b",
-            r"\bgunicorn\b",
-        ]
-        return any(re.search(p, c) for p in patterns)
+        return is_server_like_command(command)
 
     @classmethod
     def _is_background_intent_task(cls, task: str, command: str) -> bool:
-        text = (task or "").lower()
-        intent_markers = [
-            "localhost",
-            "port ",
-            "dev server",
-            "web server",
-            "api server",
-            "keep running",
-            "background",
-            "until i stop",
-        ]
-        return cls._is_server_like_command(command) or any(marker in text for marker in intent_markers)
+        del cls
+        return is_background_intent_task(task, command)
 
     @classmethod
     def _is_server_intent_text(cls, text: str) -> bool:
-        lowered = (text or "").lower()
-        if not lowered:
-            return False
-        markers = [
-            "localhost",
-            "127.0.0.1",
-            "local server",
-            "dev server",
-            "web server",
-            "api server",
-            "npm start",
-            "npm run dev",
-            "pnpm dev",
-            "yarn dev",
-            "uvicorn",
-            "flask run",
-        ]
-        if any(marker in lowered for marker in markers):
-            return True
-        return cls._is_server_like_command(lowered)
+        del cls
+        return is_server_intent_text(text)
 
     @classmethod
     def _is_quick_server_launch_task(cls, text: str) -> bool:
-        """
-        True only when the request is primarily "start/run existing local server".
-        False for multi-step setup tasks (clone/install/build/etc.) that need longer runtime.
-        """
-        lowered = (text or "").lower()
-        if not lowered:
-            return False
-
-        setup_markers = [
-            "clone",
-            "git ",
-            "install",
-            "dependency",
-            "dependencies",
-            "setup",
-            "set up",
-            "bootstrap",
-            "scaffold",
-            "build",
-            "compile",
-            "create",
-            "download",
-            "npm ci",
-            "pip install",
-            "pnpm install",
-            "yarn install",
-        ]
-        if any(marker in lowered for marker in setup_markers):
-            return False
-
-        return cls._is_server_intent_text(lowered)
+        del cls
+        return is_quick_server_launch_task(text)
 
     @staticmethod
     def _extract_port_candidates(text: str) -> List[int]:
-        ports = set()
-        for m in re.finditer(r"(?:localhost|127\.0\.0\.1)\s*:\s*(\d{2,5})", text, flags=re.IGNORECASE):
-            ports.add(int(m.group(1)))
-        for m in re.finditer(r"\bport\s+(\d{2,5})\b", text, flags=re.IGNORECASE):
-            ports.add(int(m.group(1)))
-        for m in re.finditer(r"--port(?:=|\s+)(\d{2,5})", text, flags=re.IGNORECASE):
-            ports.add(int(m.group(1)))
-        return sorted(p for p in ports if 1 <= p <= 65535)
+        return extract_port_candidates(text)
 
     @staticmethod
     def _resolve_shell_path(path_expr: str, base_dir: Path) -> Path:
-        expanded = os.path.expandvars(os.path.expanduser(path_expr.strip().strip("'\"")))
-        candidate = Path(expanded)
-        if candidate.is_absolute():
-            return candidate.resolve()
-        return (base_dir / candidate).resolve()
+        return resolve_shell_path(path_expr, base_dir)
 
     @classmethod
     def _extract_server_subcommand(cls, command: str) -> str:
-        segments = [segment.strip() for segment in re.split(r"\s*&&\s*", command) if segment.strip()]
-        for segment in reversed(segments):
-            if cls._is_server_like_command(segment):
-                return segment
-        return command.strip()
+        del cls
+        return extract_server_subcommand(command)
 
     @staticmethod
     def _extract_shell_command_from_tool_call(tool_call: Dict[str, Any]) -> Optional[str]:
-        if not isinstance(tool_call, dict):
-            return None
-        tool_name = str(tool_call.get("tool_name") or "").strip().lower()
-        if tool_name not in {"run_shell_command", "shell", "bash"}:
-            return None
-        params = tool_call.get("parameters")
-        if not isinstance(params, dict):
-            return None
-        raw = params.get("command") or params.get("cmd") or params.get("script")
-        if raw is None:
-            return None
-        command = str(raw).strip()
-        return command or None
+        return extract_shell_command_from_tool_call(tool_call)
 
     @classmethod
     def _infer_server_launch_from_tool_calls(
         cls,
         tool_calls: Optional[List[Dict[str, Any]]],
     ) -> Optional[Dict[str, str]]:
-        if not tool_calls:
-            return None
-
-        current_dir = Path.cwd().resolve()
-        candidate: Optional[Dict[str, str]] = None
-
-        for tool_call in tool_calls:
-            if not isinstance(tool_call, dict):
-                continue
-            if tool_call.get("status") == "error":
-                continue
-
-            command = cls._extract_shell_command_from_tool_call(tool_call)
-            if not command:
-                continue
-
-            cd_chain = re.match(r"^\s*cd\s+([^;&|]+?)\s*&&\s*(.+)$", command, flags=re.IGNORECASE | re.DOTALL)
-            if cd_chain:
-                cd_target = cd_chain.group(1).strip()
-                remaining = cd_chain.group(2).strip()
-                try:
-                    current_dir = cls._resolve_shell_path(cd_target, current_dir)
-                except Exception:
-                    pass
-                if cls._is_server_like_command(remaining):
-                    candidate = {
-                        "command": cls._extract_server_subcommand(remaining),
-                        "cwd": str(current_dir),
-                    }
-                continue
-
-            cd_only = re.match(r"^\s*cd\s+(.+?)\s*$", command, flags=re.IGNORECASE | re.DOTALL)
-            if cd_only:
-                try:
-                    current_dir = cls._resolve_shell_path(cd_only.group(1), current_dir)
-                except Exception:
-                    pass
-                continue
-
-            if cls._is_server_like_command(command):
-                candidate = {
-                    "command": cls._extract_server_subcommand(command),
-                    "cwd": str(current_dir),
-                }
-
-        return candidate
+        del cls
+        return infer_server_launch_from_tool_calls(tool_calls)
 
     @staticmethod
     async def _is_local_port_open(port: int) -> bool:
-        try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=0.6)
-            writer.close()
-            await writer.wait_closed()
-            return True
-        except Exception:
-            return False
+        return await is_local_port_open(port)
 
     @classmethod
     async def _wait_for_any_port(cls, ports: List[int], timeout_seconds: float = 8.0) -> Optional[int]:
-        if not ports:
-            return None
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
-            for port in ports:
-                if await cls._is_local_port_open(port):
-                    return port
-            await asyncio.sleep(0.35)
-        return None
+        del cls
+        return await wait_for_any_port(ports=ports, timeout_seconds=timeout_seconds)
 
     @staticmethod
     def _resolve_background_shell() -> tuple[list[str], dict[str, Any]]:
-        if os.name == "nt":
-            shell_path = (
-                shutil.which("pwsh")
-                or shutil.which("powershell")
-                or os.path.join(
-                    os.environ.get("SystemRoot", r"C:\Windows"),
-                    "System32",
-                    "WindowsPowerShell",
-                    "v1.0",
-                    "powershell.exe",
-                )
-            )
-            creationflags = 0
-            for flag_name in (
-                "CREATE_NEW_PROCESS_GROUP",
-                "DETACHED_PROCESS",
-                "CREATE_NO_WINDOW",
-            ):
-                creationflags |= int(getattr(subprocess, flag_name, 0))
-            return (
-                [
-                    shell_path,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                ],
-                {"creationflags": creationflags},
-            )
-
-        shell_path = shutil.which("zsh") or shutil.which("bash") or shutil.which("sh")
-        if not shell_path:
-            raise RuntimeError("No supported POSIX shell found for background execution.")
-        return ([shell_path, "-lc"], {"start_new_session": True})
+        return resolve_background_shell()
 
     @staticmethod
     def _terminate_process_tree_sync(metadata: Dict[str, Any]) -> None:
-        pid = int(metadata.get("pid") or 0)
-        pgid = int(metadata.get("pgid") or 0)
-
-        if os.name == "nt":
-            if pid <= 0:
-                return
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                pass
-            return
-
-        try:
-            if pgid > 0:
-                os.killpg(pgid, signal.SIGTERM)
-            elif pid > 0:
-                os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
+        terminate_process_tree_sync(metadata)
 
     @classmethod
     async def _start_background_process(
@@ -730,99 +438,31 @@ class CLIAgent:
         working_dir: str,
         task: str,
     ) -> dict:
-        process_id = uuid.uuid4().hex[:8]
-        log_path = os.path.join(tempfile.gettempdir(), f"jarvis_cli_bg_{process_id}.log")
-        shell_args, spawn_kwargs = cls._resolve_background_shell()
-        with open(log_path, "ab") as log_file:
-            process = await asyncio.create_subprocess_exec(
-                *shell_args,
-                command,
-                cwd=working_dir,
-                env=env,
-                stdout=log_file,
-                stderr=log_file,
-                **spawn_kwargs,
-            )
-
-        pid = process.pid
-        pgid: Optional[int]
-        if os.name == "nt":
-            pgid = None
-        else:
-            try:
-                pgid = os.getpgid(pid)
-            except Exception:
-                pgid = pid
-
-        metadata: Dict[str, Any] = {
-            "id": process_id,
-            "pid": pid,
-            "pgid": pgid,
-            "command": command,
-            "cwd": working_dir,
-            "log_path": log_path,
-            "started_at": time.time(),
-            "task": task,
-        }
-
-        ports = cls._extract_port_candidates(task + "\n" + command)
-        if ports:
-            metadata["ports"] = ports
-            opened = await cls._wait_for_any_port(ports, timeout_seconds=20.0)
-            if opened is not None:
-                metadata["active_port"] = opened
-            else:
-                metadata["health_warning"] = f"Started process {pid}, but no expected port became reachable: {ports}"
-
-        cls._managed_background_processes[process_id] = metadata
-
-        summary_parts = [
-            f"Started background process {process_id}",
-            f"(pid {pid})",
-            f"command: {command}",
-            f"log: {log_path}",
-        ]
-        if metadata.get("active_port"):
-            summary_parts.append(f"verified on http://127.0.0.1:{metadata['active_port']}")
-        elif metadata.get("ports"):
-            summary_parts.append(f"expected ports: {metadata['ports']}")
-            summary_parts.append("health-check did not confirm readiness yet")
-
-        return {
-            "success": True,
-            "result": " | ".join(summary_parts),
-            "error": None,
-            "tool_calls": [{
-                "tool_name": "background_process_manager",
-                "tool_id": process_id,
-                "parameters": {"command": command, "pid": pid, "log_path": log_path},
-            }],
-        }
+        return await start_background_process(
+            managed_store=cls._managed_background_processes,
+            command=command,
+            env=env,
+            working_dir=working_dir,
+            task=task,
+            extract_port_candidates=cls._extract_port_candidates,
+        )
 
     @classmethod
     def _cleanup_background_processes_sync(cls) -> None:
-        for proc_id in list(cls._managed_background_processes.keys()):
-            meta = cls._managed_background_processes.get(proc_id) or {}
-            cls._terminate_process_tree_sync(meta)
-            cls._managed_background_processes.pop(proc_id, None)
+        cleanup_background_processes_sync(managed_store=cls._managed_background_processes)
 
     @classmethod
     async def stop_background_process(cls, process_id: str) -> bool:
-        meta = cls._managed_background_processes.get(process_id)
-        if not meta:
-            return False
-        cls._terminate_process_tree_sync(meta)
-        cls._managed_background_processes.pop(process_id, None)
-        return True
+        return await stop_background_process(
+            managed_store=cls._managed_background_processes,
+            process_id=process_id,
+        )
 
     @classmethod
     async def stop_all_background_processes(cls) -> int:
-        ids = list(cls._managed_background_processes.keys())
-        stopped = 0
-        for proc_id in ids:
-            if await cls.stop_background_process(proc_id):
-                stopped += 1
-        return stopped
+        return await stop_all_background_processes(
+            managed_store=cls._managed_background_processes,
+        )
 
     @classmethod
     async def stop_all_running_processes(cls) -> int:
@@ -848,20 +488,7 @@ class CLIAgent:
 
     @classmethod
     def list_background_processes(cls) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        now = time.time()
-        for proc_id, meta in cls._managed_background_processes.items():
-            row = {
-                "id": proc_id,
-                "pid": meta.get("pid"),
-                "command": meta.get("command"),
-                "log_path": meta.get("log_path"),
-                "uptime_seconds": int(max(0, now - float(meta.get("started_at", now)))),
-            }
-            if meta.get("active_port"):
-                row["active_port"] = meta["active_port"]
-            rows.append(row)
-        return rows
+        return list_background_processes(managed_store=cls._managed_background_processes)
 
     async def _maybe_handle_background_management_task(self, task: str) -> Optional[dict]:
         lower = task.strip().lower()
@@ -1166,48 +793,16 @@ class CLIAgent:
 
     @staticmethod
     def _safe_preview(value: object, max_len: int = 80) -> str:
-        if value is None:
-            return ""
-        text = " ".join(str(value).split())
-        if len(text) > max_len:
-            return f"{text[:max_len - 3]}..."
-        return text
+        return safe_preview(value, max_len=max_len)
 
     @classmethod
     def _format_tool_status(cls, tool_name: str, parameters: dict) -> str:
-        name = (tool_name or "tool").strip()
-        friendly = name.replace("_", " ")
-
-        if name in {"run_shell_command", "shell", "bash"}:
-            command = cls._safe_preview(
-                parameters.get("command")
-                or parameters.get("cmd")
-                or parameters.get("script"),
-                72,
-            )
-            if command:
-                return f"Running command: {command}"
-            return "Running shell command..."
-
-        if name in {"read_file", "read_many_files"}:
-            path = cls._safe_preview(parameters.get("file_path") or parameters.get("path"))
-            if path:
-                return f"Reading file: {path}"
-            return "Reading files..."
-
-        if name in {"write_file", "edit"}:
-            path = cls._safe_preview(parameters.get("file_path") or parameters.get("path"))
-            if path:
-                return f"Updating file: {path}"
-            return "Updating files..."
-
-        if name in {"ls", "glob", "grep", "ripgrep"}:
-            path = cls._safe_preview(parameters.get("path") or parameters.get("query"))
-            if path:
-                return f"{friendly.title()}: {path}"
-            return f"{friendly.title()}..."
-
-        return f"Using {friendly}..."
+        del cls
+        return format_tool_status(
+            tool_name=tool_name,
+            parameters=parameters,
+            safe_preview_fn=safe_preview,
+        )
 
     @classmethod
     def _status_from_stream_event(
@@ -1215,56 +810,13 @@ class CLIAgent:
         event: dict,
         tool_by_id: Dict[str, str],
     ) -> Optional[str]:
-        event_type = event.get("type")
-        if not event_type:
-            return None
-
-        if event_type == "init":
-            return "CLI session started..."
-
-        if event_type == "tool_use":
-            tool_name = str(event.get("tool_name") or "tool")
-            tool_id = event.get("tool_id")
-            if isinstance(tool_id, str) and tool_id:
-                tool_by_id[tool_id] = tool_name
-            params = event.get("parameters")
-            if not isinstance(params, dict):
-                params = {}
-            return cls._format_tool_status(tool_name, params)
-
-        if event_type == "tool_result":
-            tool_id = event.get("tool_id")
-            tool_name = tool_by_id.get(str(tool_id), "tool")
-            if event.get("status") == "error":
-                err = event.get("error")
-                if isinstance(err, dict):
-                    err_msg = cls._safe_preview(err.get("message"), 72)
-                else:
-                    err_msg = cls._safe_preview(err, 72)
-                if err_msg:
-                    return f"{tool_name.replace('_', ' ').title()} failed: {err_msg}"
-                return f"{tool_name.replace('_', ' ').title()} failed."
-            return f"Finished {tool_name.replace('_', ' ')}."
-
-        if event_type == "error":
-            msg = cls._safe_preview(event.get("message"), 96)
-            if msg:
-                return f"CLI error: {msg}"
-            return "CLI error."
-
-        if event_type == "result":
-            if event.get("status") == "success":
-                return "Finalizing CLI response..."
-            err = event.get("error")
-            if isinstance(err, dict):
-                err_msg = cls._safe_preview(err.get("message"), 80)
-            else:
-                err_msg = cls._safe_preview(err, 80)
-            if err_msg:
-                return f"CLI task failed: {err_msg}"
-            return "CLI task failed."
-
-        return None
+        del cls
+        return status_from_stream_event(
+            event=event,
+            tool_by_id=tool_by_id,
+            safe_preview_fn=safe_preview,
+            format_tool_status_fn=format_tool_status,
+        )
 
     @classmethod
     async def _emit_terminal_stream_event(
@@ -1274,88 +826,16 @@ class CLIAgent:
         tool_by_id: Dict[str, str],
         shell_command_by_id: Dict[str, str],
     ) -> None:
-        event_type = event.get("type")
-        if event_type == "init":
-            await cls._emit_terminal_event(
-                session_id,
-                kind="session_started",
-                text="CLI session started.",
-                status="running",
-            )
-            return
-
-        if event_type == "tool_use":
-            tool_name = str(event.get("tool_name") or "tool")
-            tool_id = str(event.get("tool_id") or "")
-            if not cls._is_shell_tool_name(tool_name):
-                return
-            params = event.get("parameters")
-            if not isinstance(params, dict):
-                params = {}
-            command = cls._safe_preview(
-                params.get("command") or params.get("cmd") or params.get("script"),
-                400,
-            )
-            if tool_id and command:
-                shell_command_by_id[tool_id] = command
-            await cls._emit_terminal_event(
-                session_id,
-                kind="command_started",
-                shell_command=command,
-                text=command or "Running shell command...",
-                status="running",
-            )
-            return
-
-        if event_type == "tool_result":
-            tool_id = str(event.get("tool_id") or "")
-            tool_name = tool_by_id.get(tool_id, "tool")
-            if not cls._is_shell_tool_name(tool_name):
-                return
-            command = shell_command_by_id.get(tool_id, "")
-            output_text = _stringify_terminal_value(event.get("output"))
-            error_text = _stringify_terminal_value(event.get("error"))
-            if event.get("status") == "error":
-                await cls._emit_terminal_event(
-                    session_id,
-                    kind="command_output",
-                    shell_command=command,
-                    text=error_text or "Shell command failed without captured stderr.",
-                    status="error",
-                )
-                return
-
-            await cls._emit_terminal_event(
-                session_id,
-                kind="command_output",
-                shell_command=command,
-                text=output_text or "(command completed with no output)",
-                status="success",
-            )
-            return
-
-        if event_type == "error":
-            await cls._emit_terminal_event(
-                session_id,
-                kind="session_error",
-                text=cls._safe_preview(event.get("message"), 240) or "CLI session failed.",
-                status="error",
-            )
-            return
-
-        if event_type == "result":
-            status = "success" if event.get("status") == "success" else "error"
-            error = event.get("error")
-            if isinstance(error, dict):
-                result_text = cls._safe_preview(error.get("message"), 240)
-            else:
-                result_text = cls._safe_preview(error, 240)
-            await cls._emit_terminal_event(
-                session_id,
-                kind="session_finished" if status == "success" else "session_error",
-                text=result_text or ("CLI session finished." if status == "success" else "CLI session failed."),
-                status=status,
-            )
+        await emit_terminal_stream_event(
+            session_id=session_id,
+            event=event,
+            tool_by_id=tool_by_id,
+            shell_command_by_id=shell_command_by_id,
+            emit_terminal_event=cls._emit_terminal_event,
+            is_shell_tool_name=cls._is_shell_tool_name,
+            safe_preview_fn=safe_preview,
+            stringify_terminal_value_fn=_stringify_terminal_value,
+        )
 
     async def _emit_status(
         self,
@@ -1503,78 +983,30 @@ class CLIAgent:
         return response
 
     def _parse_stream_json(self, stdout: str, stderr: str, returncode: int) -> CLIResponse:
-        """Parse stream-json format output (newline-delimited JSON events)."""
-        events = []
-        output_parts = []
-        tool_calls = []
-        error = None
-
-        for line in stdout.strip().split("\n"):
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                events.append(event)
-
-                event_type = event.get("type")
-
-                if event_type == "message" and event.get("role") == "assistant":
-                    content = event.get("content", "")
-                    if content:
-                        output_parts.append(content)
-
-                elif event_type == "tool_use":
-                    tool_calls.append({
-                        "tool_name": event.get("tool_name"),
-                        "tool_id": event.get("tool_id"),
-                        "parameters": event.get("parameters"),
-                    })
-
-                elif event_type == "tool_result":
-                    # Match tool result to tool call
-                    tool_id = event.get("tool_id")
-                    for tc in tool_calls:
-                        if tc.get("tool_id") == tool_id:
-                            tc["result"] = event.get("output")
-                            tc["status"] = event.get("status")
-                            tc["error"] = event.get("error")
-
-                elif event_type == "error":
-                    error = event.get("message", "Unknown error")
-
-                elif event_type == "result":
-                    # Final result event
-                    if event.get("status") != "success":
-                        error = event.get("error", "Task failed")
-
-            except json.JSONDecodeError:
-                # Non-JSON line, might be debug output
-                continue
-
-        output = "".join(output_parts)
-
+        parsed = parse_stream_json_response(
+            stdout=stdout,
+            stderr=stderr,
+            returncode=returncode,
+        )
         return CLIResponse(
-            success=returncode == 0 and error is None,
-            output=output,
-            error=error or (stderr if returncode != 0 else None),
-            tool_calls=tool_calls if tool_calls else None,
+            success=bool(parsed.get("success")),
+            output=str(parsed.get("output") or ""),
+            error=parsed.get("error"),
+            tool_calls=parsed.get("tool_calls"),
         )
 
     def _parse_json(self, stdout: str, stderr: str, returncode: int) -> CLIResponse:
-        """Parse single JSON output format."""
-        try:
-            data = json.loads(stdout)
-            return CLIResponse(
-                success=returncode == 0,
-                output=data.get("response", stdout),
-                error=data.get("error"),
-            )
-        except json.JSONDecodeError:
-            return CLIResponse(
-                success=returncode == 0,
-                output=stdout,
-                error=stderr if returncode != 0 else None,
-            )
+        parsed = parse_json_response(
+            stdout=stdout,
+            stderr=stderr,
+            returncode=returncode,
+        )
+        return CLIResponse(
+            success=bool(parsed.get("success")),
+            output=str(parsed.get("output") or ""),
+            error=parsed.get("error"),
+            tool_calls=parsed.get("tool_calls"),
+        )
 
     async def run_command(self, command: str, timeout: int = 30) -> tuple[str, str, int]:
         """

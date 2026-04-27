@@ -4,7 +4,37 @@ Router Tools - Rapid response model tool definitions for routing requests.
 This module contains the tools available to the rapid response (router) model,
 which decides how to handle user requests by delegating to appropriate agents.
 """
-from google.genai import types
+try:
+    from google.genai import types as _genai_types
+except ImportError:
+    _genai_types = None
+
+
+if _genai_types is None:
+    class _FunctionCallingConfig:
+        def __init__(self, mode: str):
+            self.mode = mode
+
+
+    class _ToolConfig:
+        def __init__(self, function_calling_config):
+            self.function_calling_config = function_calling_config
+
+
+    class _Tool:
+        def __init__(self, function_declarations):
+            self.function_declarations = function_declarations
+
+
+    class _TypesShim:
+        Tool = _Tool
+        ToolConfig = _ToolConfig
+        FunctionCallingConfig = _FunctionCallingConfig
+
+
+    types = _TypesShim()
+else:
+    types = _genai_types
 
 # Import direct_response from JARVIS agent (used by both router and JARVIS)
 from agents.jarvis.tools import direct_response

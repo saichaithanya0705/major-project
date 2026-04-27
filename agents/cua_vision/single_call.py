@@ -10,21 +10,39 @@ import json
 import os
 import time
 
-import numpy as np
-from google.api_core.exceptions import InternalServerError
+try:
+    from google.api_core.exceptions import InternalServerError
+except ImportError:
+    class InternalServerError(Exception):
+        """Fallback exception type when google-api-core is unavailable."""
+        pass
 
 from integrations.audio import tts_speak
-from agents.cua_vision.prompts import VISION_AGENT_SYSTEM_PROMPT
-from agents.cua_vision.image import image_change, reset_image_state, similarity_score
-from ui.visualization_api.cursor_status import (
-    show_cursor_status,
-    update_cursor_status,
-    hide_cursor_status,
+from agents.cua_vision.action_guard import (
+    ClickLoopState,
+    action_signature as compute_action_signature,
+    extract_position_bbox_args,
+    infer_click_type,
+    register_action_and_detect_click_loop,
+    resolve_click_type,
 )
-from ui.visualization_api.status_bubble import (
-    show_status_bubble,
-    update_status_bubble,
-    hide_status_bubble,
+from agents.cua_vision.interaction_policy import (
+    build_fallback_context,
+    default_status_text,
+    describe_action_for_feedback,
+    resolve_target_description,
+)
+from agents.cua_vision.prompts import VISION_AGENT_SYSTEM_PROMPT
+from agents.cua_vision.image import image_change, reset_image_state
+from agents.cua_vision.runtime_state import (
+    get_last_capture_context as _get_last_capture_context,
+)
+from agents.cua_vision.status_presenter import StatusPresenter
+from agents.cua_vision.visual_feedback import (
+    crop_target_region as compute_target_region_crop,
+    image_similarity as compute_image_similarity,
+    resolve_target_bbox_for_verification,
+    visual_similarity_metrics as compute_visual_similarity_metrics,
 )
 from agents.cua_vision.tools import (
     capture_active_window,
@@ -34,8 +52,6 @@ from agents.cua_vision.tools import (
     run_legacy_locator_fallback,
     is_stop_requested,
     save_go_to_element_debug_snapshot,
-    _get_last_capture_context,
-    _bbox_to_capture_pixel_box,
 )
 
 CLICK_TOOL_TO_TYPE = {
@@ -100,11 +116,8 @@ class SingleCallVisionEngine:
         self.repeated_action_count = 0
         self.last_click_context = None
         self.last_target_description = None
-        self._pending_position_signature = None
-        self._last_click_cycle_signature = None
-        self._repeated_click_cycle_count = 0
-        self._status_visible = False
-        self._last_status_text = None
+        self._click_loop_state = ClickLoopState()
+        self._status_presenter = StatusPresenter(source="cua_vision")
         self._thinking_index = 0
         self._debug_snapshot_taken = False
         self._action_settle_timeout_seconds = DEFAULT_ACTION_SETTLE_TIMEOUT_SECONDS
@@ -335,7 +348,7 @@ IMPORTANT:
         name = function_call.name
         args = dict(function_call.args or {})
 
-        status_text = args.get("status_text") or self._default_status_text(name)
+        status_text = args.get("status_text") or default_status_text(name, CLICK_TOOL_TO_TYPE)
         if status_text:
             await self._set_status(status_text)
 
@@ -362,7 +375,11 @@ IMPORTANT:
         ):
             auto_click_type = self._infer_click_type(task, args)
             auto_click_tool = CLICK_TYPE_TO_TOOL[auto_click_type]
-            target = self._resolve_target_description(task, args)
+            target = resolve_target_description(
+                task=task,
+                args=args,
+                last_target_description=self.last_target_description,
+            )
             auto_click_args = {"target_description": target}
             auto_click_signature = self._action_signature(auto_click_tool, auto_click_args)
             pre_action_frame, pre_action_context = (
@@ -417,14 +434,22 @@ IMPORTANT:
             self.consecutive_failures = 0
 
             if name in POSITIONING_TOOLS:
-                self.last_target_description = self._resolve_target_description(task, args)
+                self.last_target_description = resolve_target_description(
+                    task=task,
+                    args=args,
+                    last_target_description=self.last_target_description,
+                )
                 self._last_position_bbox_args = self._extract_position_bbox_args(args)
 
             if name == "go_to_element":
                 await self._maybe_debug_stop_after_first_goto(task, args)
 
             if click_type:
-                resolved_target = self._resolve_target_description(task, args)
+                resolved_target = resolve_target_description(
+                    task=task,
+                    args=args,
+                    last_target_description=self.last_target_description,
+                )
                 self.last_target_description = resolved_target
                 self.last_click_context = {
                     "type_of_click": click_type,
@@ -437,7 +462,11 @@ IMPORTANT:
                 return True
 
             if self._register_action_and_detect_click_loop(task, name, signature, click_type):
-                target = self._resolve_target_description(task, args)
+                target = resolve_target_description(
+                    task=task,
+                    args=args,
+                    last_target_description=self.last_target_description,
+                )
                 await self._set_status("Task appears complete. Stopping repeated clicks.")
                 print(
                     "[VisionAgent] Detected repeated position+click loop "
@@ -492,7 +521,11 @@ IMPORTANT:
         if not all(key in args for key in required):
             return
 
-        target = self._resolve_target_description(task, args)
+        target = resolve_target_description(
+            task=task,
+            args=args,
+            last_target_description=self.last_target_description,
+        )
         try:
             snapshot_path = save_go_to_element_debug_snapshot(
                 ymin=float(args["ymin"]),
@@ -513,92 +546,26 @@ IMPORTANT:
         )
 
     def _infer_click_type(self, task: str, args: dict) -> str:
-        """Infer click type from task/metadata when auto-clicking after positioning loops."""
-        pieces = [
-            args.get("status_text"),
-            args.get("target_description"),
-            task,
-        ]
-        haystack = " ".join(str(piece).lower() for piece in pieces if piece)
-        if "double click" in haystack or "double-click" in haystack:
-            return "double left click"
-        if "right click" in haystack or "right-click" in haystack or "context menu" in haystack:
-            return "right click"
-        return "left click"
-
-    def _to_norm_0_1000(self, value) -> float | None:
-        """Normalize supported coordinate formats into 0-1000 space."""
-        try:
-            val = float(value)
-        except Exception:
-            return None
-
-        if 0.0 <= val <= 1.0:
-            return val * 1000.0
-        if 0.0 <= val <= 1000.0:
-            return val
-        # If already pixel coordinates, keep as-is; bucketing still works heuristically.
-        return val
-
-    def _position_bucket(self, args: dict) -> tuple[int, int] | None:
-        """Create coarse center buckets so small bbox jitter counts as repetition."""
-        ymin = self._to_norm_0_1000(args.get("ymin"))
-        xmin = self._to_norm_0_1000(args.get("xmin"))
-        ymax = self._to_norm_0_1000(args.get("ymax"))
-        xmax = self._to_norm_0_1000(args.get("xmax"))
-        if None in {ymin, xmin, ymax, xmax}:
-            return None
-
-        center_x = (xmin + xmax) / 2.0
-        center_y = (ymin + ymax) / 2.0
-        bucket_x = int(center_x // POSITION_BUCKET_SIZE)
-        bucket_y = int(center_y // POSITION_BUCKET_SIZE)
-        return (bucket_x, bucket_y)
+        return infer_click_type(task, args)
 
     def _action_signature(self, name: str, args: dict) -> tuple:
-        filtered = {k: v for k, v in args.items() if k not in TOOL_METADATA_KEYS}
-        if name in CLICK_TOOL_TO_TYPE:
-            click_target = args.get("target_description") or self.last_target_description
-            if click_target:
-                filtered["target_description"] = click_target
-        if name in POSITIONING_TOOLS:
-            bucket = self._position_bucket(filtered)
-            if bucket is not None:
-                # Deliberately ignore target_description text to survive label jitter.
-                return (name, ("bucket", bucket[0], bucket[1]))
-        return (name, tuple(sorted(filtered.items())))
+        return compute_action_signature(
+            name=name,
+            args=args,
+            metadata_keys=TOOL_METADATA_KEYS,
+            click_tool_to_type=CLICK_TOOL_TO_TYPE,
+            positioning_tools=POSITIONING_TOOLS,
+            last_target_description=self.last_target_description,
+            bucket_size=POSITION_BUCKET_SIZE,
+        )
 
     def _resolve_click_type(self, tool_name: str, args: dict) -> str | None:
-        if tool_name in CLICK_TOOL_TO_TYPE:
-            return CLICK_TOOL_TO_TYPE[tool_name]
-
-        return None
+        del args
+        return resolve_click_type(tool_name, CLICK_TOOL_TO_TYPE)
 
     @staticmethod
     def _extract_position_bbox_args(args: dict) -> dict | None:
-        required = ("ymin", "xmin", "ymax", "xmax")
-        if not all(key in args for key in required):
-            return None
-        try:
-            return {key: float(args[key]) for key in required}
-        except Exception:
-            return None
-
-    @staticmethod
-    def _task_expects_repeated_clicks(task: str) -> bool:
-        text = (task or "").lower()
-        markers = [
-            "times",
-            "repeatedly",
-            "keep clicking",
-            "click again",
-            "double click multiple",
-            "spam click",
-            "until",
-            "every",
-            "loop",
-        ]
-        return any(marker in text for marker in markers)
+        return extract_position_bbox_args(args)
 
     def _register_action_and_detect_click_loop(
         self,
@@ -607,49 +574,25 @@ IMPORTANT:
         signature: tuple,
         click_type: str | None,
     ) -> bool:
-        """
-        Detect alternating position+click loops (A,B,A,B...) that can evade
-        immediate-repeat checks and lead to infinite interaction cycles.
-        """
-        if name in POSITIONING_TOOLS:
-            self._pending_position_signature = signature
-            return False
-
-        if click_type:
-            if self._pending_position_signature is None:
-                return False
-
-            cycle_signature = (self._pending_position_signature, signature)
-            if cycle_signature == self._last_click_cycle_signature:
-                self._repeated_click_cycle_count += 1
-            else:
-                self._last_click_cycle_signature = cycle_signature
-                self._repeated_click_cycle_count = 1
-
-            if (
-                self._repeated_click_cycle_count >= CLICK_CYCLE_LOOP_STOP_THRESHOLD
-                and not self._task_expects_repeated_clicks(task)
-            ):
-                return True
-            return False
-
-        # Non click/position actions reset this specific loop detector.
-        self._pending_position_signature = None
-        self._last_click_cycle_signature = None
-        self._repeated_click_cycle_count = 0
-        return False
+        return register_action_and_detect_click_loop(
+            state=self._click_loop_state,
+            task=task,
+            name=name,
+            signature=signature,
+            click_type=click_type,
+            positioning_tools=POSITIONING_TOOLS,
+            click_cycle_loop_stop_threshold=CLICK_CYCLE_LOOP_STOP_THRESHOLD,
+        )
 
     async def _attempt_fallback(self, task: str, click_type: str | None, args: dict | None) -> bool:
         self._raise_if_stopped()
-        context = None
-
-        if click_type and args is not None:
-            context = {
-                "type_of_click": click_type,
-                "target_description": self._resolve_target_description(task, args),
-            }
-        elif self.last_click_context:
-            context = self.last_click_context
+        context = build_fallback_context(
+            task=task,
+            click_type=click_type,
+            args=args,
+            last_click_context=self.last_click_context,
+            last_target_description=self.last_target_description,
+        )
 
         if not context:
             return False
@@ -672,96 +615,11 @@ IMPORTANT:
 
         return False
 
-    def _resolve_target_description(self, task: str, args: dict) -> str:
-        target = args.get("target_description")
-        if isinstance(target, str) and target.strip():
-            return target.strip()
-
-        status_text = args.get("status_text")
-        if isinstance(status_text, str) and status_text.strip():
-            normalized = status_text.strip().rstrip(".")
-            prefixes = [
-                "searching for ",
-                "looking for ",
-                "locating ",
-                "clicking ",
-                "opening ",
-                "selecting ",
-            ]
-            lower = normalized.lower()
-            for prefix in prefixes:
-                if lower.startswith(prefix):
-                    candidate = normalized[len(prefix):].strip()
-                    if candidate:
-                        return candidate
-            return normalized
-
-        if isinstance(self.last_target_description, str) and self.last_target_description.strip():
-            return self.last_target_description.strip()
-
-        return f"best target for task: {task}"
-
-    def _default_status_text(self, tool_name: str) -> str:
-        if tool_name == "type_string":
-            return "Typing..."
-        if tool_name in {"press_ctrl_hotkey", "press_alt_hotkey"}:
-            return "Using shortcut..."
-        if tool_name == "go_to_element":
-            return "Positioning cursor to target..."
-        if tool_name in CLICK_TOOL_TO_TYPE:
-            return "Clicking target..."
-        if tool_name == "crop_and_search":
-            return "Zooming in for a precision click..."
-        if tool_name == "tts_speak":
-            return "Preparing response..."
-        if tool_name == "task_is_complete":
-            return "Task complete"
-        return "Working..."
-
     async def _set_status(self, text: str):
-        if text == self._last_status_text:
-            return
-
-        if not self._status_visible:
-            await self._safe_ui_call(
-                show_status_bubble(text, source="cua_vision"),
-                "show_status_bubble",
-            )
-            await self._safe_ui_call(
-                show_cursor_status(text, source="cua_vision"),
-                "show_cursor_status",
-            )
-            self._status_visible = True
-            self._last_status_text = text
-            return
-
-        await self._safe_ui_call(
-            update_status_bubble(text, source="cua_vision"),
-            "update_status_bubble",
-        )
-        await self._safe_ui_call(
-            update_cursor_status(text, source="cua_vision"),
-            "update_cursor_status",
-        )
-        self._last_status_text = text
+        await self._status_presenter.set(text)
 
     async def _hide_statuses(self, delay_ms: int = 0):
-        if not self._status_visible:
-            return
-
-        await self._safe_ui_call(hide_cursor_status(), "hide_cursor_status")
-        await self._safe_ui_call(hide_status_bubble(delay=delay_ms), "hide_status_bubble")
-        self._status_visible = False
-        self._last_status_text = None
-
-    async def _safe_ui_call(self, coro, label: str):
-        """Best-effort UI calls: visualization failures must not block task execution."""
-        try:
-            await coro
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"[VisionAgent] UI call failed ({label}): {e}")
+        await self._status_presenter.hide(delay_ms=delay_ms)
 
     async def _wait_for_ui_settle(self):
         """Poll until the active window appears visually stable or times out."""
@@ -807,69 +665,24 @@ IMPORTANT:
 
     @staticmethod
     def _image_similarity(before_frame, after_frame) -> float | None:
-        if before_frame is None or after_frame is None:
-            return None
-        try:
-            before_arr = np.array(before_frame)
-            after_arr = np.array(after_frame)
-            if before_arr.shape != after_arr.shape:
-                return None
-            return float(similarity_score(before_arr, after_arr))
-        except Exception as e:
-            print(f"[VisionAgent] Frame similarity failed: {e}")
-            return None
+        return compute_image_similarity(before_frame, after_frame)
 
     def _resolve_target_bbox_for_verification(self, tool_name: str, args: dict) -> dict | None:
-        bbox = self._extract_position_bbox_args(args)
-        if bbox:
-            return bbox
-        if tool_name in CLICK_TOOL_TO_TYPE or tool_name == "type_string":
-            return self._last_position_bbox_args
-        return None
+        return resolve_target_bbox_for_verification(
+            tool_name=tool_name,
+            args=args,
+            click_tool_to_type=CLICK_TOOL_TO_TYPE,
+            last_position_bbox_args=self._last_position_bbox_args,
+        )
 
     def _crop_target_region(self, frame, context: dict | None, bbox_args: dict | None):
-        if frame is None or context is None or bbox_args is None:
-            return None
-        try:
-            left, top, right, bottom = _bbox_to_capture_pixel_box(
-                bbox_args["ymin"],
-                bbox_args["xmin"],
-                bbox_args["ymax"],
-                bbox_args["xmax"],
-                context=context,
-            )
-            left = int(round(left))
-            top = int(round(top))
-            right = int(round(right))
-            bottom = int(round(bottom))
-
-            pad = TARGET_REGION_PADDING_PX
-            left -= pad
-            top -= pad
-            right += pad
-            bottom += pad
-
-            width, height = frame.size
-            left = max(0, left)
-            top = max(0, top)
-            right = min(width, right)
-            bottom = min(height, bottom)
-
-            if right - left < TARGET_REGION_MIN_SIDE_PX:
-                deficit = TARGET_REGION_MIN_SIDE_PX - (right - left)
-                left = max(0, left - (deficit // 2))
-                right = min(width, right + (deficit - (deficit // 2)))
-            if bottom - top < TARGET_REGION_MIN_SIDE_PX:
-                deficit = TARGET_REGION_MIN_SIDE_PX - (bottom - top)
-                top = max(0, top - (deficit // 2))
-                bottom = min(height, bottom + (deficit - (deficit // 2)))
-
-            if right <= left or bottom <= top:
-                return None
-            return frame.crop((left, top, right, bottom))
-        except Exception as e:
-            print(f"[VisionAgent] Target crop failed: {e}")
-            return None
+        return compute_target_region_crop(
+            frame=frame,
+            context=context,
+            bbox_args=bbox_args,
+            padding_px=TARGET_REGION_PADDING_PX,
+            min_side_px=TARGET_REGION_MIN_SIDE_PX,
+        )
 
     def _visual_similarity_metrics(
         self,
@@ -880,18 +693,18 @@ IMPORTANT:
         after_frame,
         after_context: dict | None,
     ) -> dict:
-        metrics = {
-            "global_similarity": self._image_similarity(before_frame, after_frame),
-            "target_similarity": None,
-        }
-
-        target_bbox = self._resolve_target_bbox_for_verification(tool_name, args)
-        if target_bbox is not None:
-            before_crop = self._crop_target_region(before_frame, before_context, target_bbox)
-            after_crop = self._crop_target_region(after_frame, after_context, target_bbox)
-            metrics["target_similarity"] = self._image_similarity(before_crop, after_crop)
-
-        return metrics
+        return compute_visual_similarity_metrics(
+            tool_name=tool_name,
+            args=args,
+            before_frame=before_frame,
+            before_context=before_context,
+            after_frame=after_frame,
+            after_context=after_context,
+            click_tool_to_type=CLICK_TOOL_TO_TYPE,
+            last_position_bbox_args=self._last_position_bbox_args,
+            target_region_padding_px=TARGET_REGION_PADDING_PX,
+            target_region_min_side_px=TARGET_REGION_MIN_SIDE_PX,
+        )
 
     def _remember_runtime_observation(self, text: str):
         cleaned = str(text or "").strip()
@@ -906,16 +719,6 @@ IMPORTANT:
     def _reset_visual_noop_state(self):
         self._last_visual_noop_signature = None
         self._repeated_visual_noop_count = 0
-
-    def _describe_action_for_feedback(self, tool_name: str, task: str, args: dict) -> str:
-        target = self._resolve_target_description(task, args)
-        if tool_name in CLICK_TOOL_TO_TYPE:
-            return f"{CLICK_TOOL_TO_TYPE[tool_name]} on {target}"
-        if tool_name == "type_string":
-            return "typing into the current field"
-        if tool_name in {"press_ctrl_hotkey", "press_alt_hotkey", "press_key_for_duration"}:
-            return f"using {tool_name}"
-        return f"using {tool_name}"
 
     async def _handle_post_action_visual_feedback(
         self,
@@ -962,7 +765,13 @@ IMPORTANT:
             self._last_visual_noop_signature = signature
             self._repeated_visual_noop_count = 1
 
-        action_description = self._describe_action_for_feedback(name, task, args)
+        action_description = describe_action_for_feedback(
+            tool_name=name,
+            task=task,
+            args=args,
+            click_tool_to_type=CLICK_TOOL_TO_TYPE,
+            last_target_description=self.last_target_description,
+        )
         if self._repeated_visual_noop_count == 1:
             observation = f"After {action_description}, the visible UI looked unchanged."
         else:
