@@ -21,7 +21,9 @@
   let currentTheme = null;
 
   const DEFAULT_DONE_TEXT = 'Task done';
-  const DEFAULT_DONE_DELAY = 2000;
+  const DEFAULT_DONE_DELAY = 900;
+  const prefersReducedMotion = () =>
+    Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const normalizeSource = (source) =>
     (typeof source === 'string' && source.trim()) ? source.trim() : 'unknown';
   const logStatusText = (channel, text, source = currentSource) => {
@@ -43,7 +45,17 @@
   };
 
   const applyTheme = (theme) => {
-    if (!theme) return;
+    if (!theme) {
+      currentTheme = null;
+      delete statusBubble.dataset.phase;
+      statusBubble.style.removeProperty('--status-bg');
+      statusBubble.style.removeProperty('--status-border');
+      statusBubble.style.removeProperty('--status-text');
+      statusBubble.style.removeProperty('--status-shimmer');
+      statusBubble.style.removeProperty('--status-check');
+      statusIcon.setAttribute('data-icon', 'check');
+      return;
+    }
     currentTheme = { ...theme };
     statusBubble.style.setProperty('--status-bg', theme.statusBg || '');
     statusBubble.style.setProperty('--status-border', theme.statusBorder || '');
@@ -54,6 +66,11 @@
       statusIcon.setAttribute('data-icon', theme.icon);
     } else {
       statusIcon.setAttribute('data-icon', 'check');
+    }
+    if (theme.phase) {
+      statusBubble.dataset.phase = theme.phase;
+    } else {
+      delete statusBubble.dataset.phase;
     }
   };
 
@@ -152,6 +169,13 @@
 
     statusIcon.classList.add('visible');
 
+    if (prefersReducedMotion()) {
+      setText(text, true);
+      statusIcon.classList.remove('visible');
+      isTransitioning = false;
+      return;
+    }
+
     setTimeout(() => {
       statusText.classList.remove('rotating-in', 'rotating-out');
       void statusText.offsetWidth;
@@ -172,7 +196,7 @@
 
         statusText.addEventListener('animationend', onRotateInEnd);
       }, 250);
-    }, 500);
+    }, 120);
   };
 
   /**
@@ -215,6 +239,17 @@
     resetFinalState();
 
     hideTimeout = setTimeout(() => {
+      if (prefersReducedMotion()) {
+        statusBubble.setAttribute('aria-hidden', 'true');
+        statusBubble.classList.remove('status-bubble--visible', 'status-bubble--closing');
+        statusIcon.classList.remove('visible');
+        if (window.restoreCommandBar) {
+          window.restoreCommandBar();
+        }
+        hideTimeout = null;
+        return;
+      }
+
       statusIcon.classList.add('visible');
 
       setTimeout(() => {
@@ -228,10 +263,10 @@
           if (window.restoreCommandBar) {
             window.restoreCommandBar();
           }
-        }, 300);
+        }, 160);
 
         hideTimeout = null;
-      }, 250);
+      }, 120);
     }, delay);
   };
 

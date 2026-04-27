@@ -1,6 +1,6 @@
 """
 JARVIS Agent - Screen annotation and visual explanation.
-
+ 
 This agent receives a screenshot and user query, then generates
 timed annotations (boxes, text, pointers) to explain what's on screen.
 """

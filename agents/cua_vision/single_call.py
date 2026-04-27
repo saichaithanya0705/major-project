@@ -8,11 +8,14 @@ action and user-visible status text in one response.
 import asyncio
 import json
 import os
+import time
 
+import numpy as np
 from google.api_core.exceptions import InternalServerError
 
 from integrations.audio import tts_speak
 from agents.cua_vision.prompts import VISION_AGENT_SYSTEM_PROMPT
+from agents.cua_vision.image import image_change, reset_image_state, similarity_score
 from ui.visualization_api.cursor_status import (
     show_cursor_status,
     update_cursor_status,
@@ -31,6 +34,8 @@ from agents.cua_vision.tools import (
     run_legacy_locator_fallback,
     is_stop_requested,
     save_go_to_element_debug_snapshot,
+    _get_last_capture_context,
+    _bbox_to_capture_pixel_box,
 )
 
 CLICK_TOOL_TO_TYPE = {
@@ -47,8 +52,24 @@ POSITIONING_TOOLS = {"go_to_element", "crop_and_search"}
 AUTO_CLICK_AFTER_REPEAT_POSITIONING_THRESHOLD = 2
 POSITION_BUCKET_SIZE = 40
 CLICK_CYCLE_LOOP_STOP_THRESHOLD = 4
-DEFAULT_ACTION_SETTLE_DELAY_SECONDS = 1.0
+DEFAULT_ACTION_SETTLE_TIMEOUT_SECONDS = 2.0
+DEFAULT_ACTION_SETTLE_POLL_INTERVAL_SECONDS = 0.2
 POST_BATCH_DELAY_SECONDS = 0.05
+VISUAL_NOOP_SIMILARITY_THRESHOLD = 0.9995
+TARGET_REGION_NOOP_SIMILARITY_THRESHOLD = 0.995
+REPEATED_VISUAL_NOOP_FALLBACK_THRESHOLD = 2
+MAX_RUNTIME_OBSERVATIONS = 4
+TARGET_REGION_PADDING_PX = 24
+TARGET_REGION_MIN_SIDE_PX = 48
+VISUAL_EFFECT_VERIFICATION_TOOLS = {
+    "click_left_click",
+    "click_double_left_click",
+    "click_right_click",
+    "type_string",
+    "press_ctrl_hotkey",
+    "press_alt_hotkey",
+    "press_key_for_duration",
+}
 
 THINKING_MESSAGES = [
     "Analyzing screen...",
@@ -86,7 +107,12 @@ class SingleCallVisionEngine:
         self._last_status_text = None
         self._thinking_index = 0
         self._debug_snapshot_taken = False
-        self._action_settle_delay_seconds = DEFAULT_ACTION_SETTLE_DELAY_SECONDS
+        self._action_settle_timeout_seconds = DEFAULT_ACTION_SETTLE_TIMEOUT_SECONDS
+        self._action_settle_poll_interval_seconds = DEFAULT_ACTION_SETTLE_POLL_INTERVAL_SECONDS
+        self._runtime_observations: list[str] = []
+        self._last_visual_noop_signature = None
+        self._repeated_visual_noop_count = 0
+        self._last_position_bbox_args = None
         self.debug_stop_after_first_goto = _is_truthy_env(
             os.getenv("CUA_VISION_DEBUG_STOP_AFTER_FIRST_GOTO", "0")
         )
@@ -136,7 +162,11 @@ class SingleCallVisionEngine:
             self.agent.client.aio.models.generate_content(
                 model=self.agent.model_name,
                 contents=[model_prompt, screenshot],
-                config=self.agent.analysis_config,
+                config=getattr(
+                    self.agent,
+                    "interaction_config",
+                    getattr(self.agent, "analysis_config", None),
+                ),
             )
         )
         try:
@@ -163,6 +193,9 @@ class SingleCallVisionEngine:
 
     def _build_model_prompt(self, task: str, active_window: str, memory_text):
         memory_json = json.dumps(memory_text)
+        runtime_observations_json = json.dumps(
+            self._runtime_observations[-MAX_RUNTIME_OBSERVATIONS:]
+        )
         return f"""
 {VISION_AGENT_SYSTEM_PROMPT}
 
@@ -170,6 +203,7 @@ You are controlling the user's active application window.
 Application: {active_window}
 User goal: {task}
 Stored memory: {memory_json}
+Recent controller observations: {runtime_observations_json}
 
 First, analyze the screenshot in detail privately.
 Then decide the best NEXT action for this exact screen.
@@ -198,6 +232,8 @@ IMPORTANT:
 - For click tools, also include `target_description` (short target label) for fallback.
 - Only interact with elements you can currently see.
 - Before choosing an action, check if the user goal is already satisfied on this screen.
+- Treat "Recent controller observations" as factual feedback from executed actions and follow-up screenshots.
+- If an action was reported as having no visible effect, do not repeat it unchanged. Adjust the target or strategy.
 - When the task is fully complete, call `task_is_complete` and do not call any other function.
 - App-launch tasks on macOS should prefer keyboard flow:
   1) `press_ctrl_hotkey(key="space")` (maps to Command+Space on macOS)
@@ -327,8 +363,15 @@ IMPORTANT:
             auto_click_type = self._infer_click_type(task, args)
             auto_click_tool = CLICK_TYPE_TO_TOOL[auto_click_type]
             target = self._resolve_target_description(task, args)
+            auto_click_args = {"target_description": target}
+            auto_click_signature = self._action_signature(auto_click_tool, auto_click_args)
+            pre_action_frame, pre_action_context = (
+                self._capture_verification_snapshot()
+                if self._should_verify_visual_effect(auto_click_tool)
+                else (None, None)
+            )
             await self._set_status(f"Position repeated. Executing {auto_click_type} on {target}...")
-            execute_tool_call(auto_click_tool, {"target_description": target})
+            execute_tool_call(auto_click_tool, auto_click_args)
             self.last_target_description = target
             self.last_click_context = {
                 "type_of_click": auto_click_type,
@@ -341,7 +384,19 @@ IMPORTANT:
                 "[VisionAgent] Auto-click before repeated positioning: "
                 f"{auto_click_type} on {target}"
             )
-            await self._wait_for_ui_settle()
+            post_action_frame = await self._wait_for_ui_settle()
+            post_action_context = self._snapshot_current_capture_context()
+            await self._handle_post_action_visual_feedback(
+                task=task,
+                name=auto_click_tool,
+                args=auto_click_args,
+                signature=auto_click_signature,
+                click_type=auto_click_type,
+                pre_action_frame=pre_action_frame,
+                pre_action_context=pre_action_context,
+                post_action_frame=post_action_frame,
+                post_action_context=post_action_context,
+            )
             return False
 
         print(f"[VisionAgent] Function: {name}")
@@ -349,6 +404,11 @@ IMPORTANT:
 
         try:
             self._raise_if_stopped()
+            pre_action_frame, pre_action_context = (
+                self._capture_verification_snapshot()
+                if self._should_verify_visual_effect(name)
+                else (None, None)
+            )
             if name in {"crop_and_search", "go_to_element"}:
                 # These tools can do blocking model work; run them off-loop.
                 await asyncio.to_thread(execute_tool_call, name, args)
@@ -358,6 +418,7 @@ IMPORTANT:
 
             if name in POSITIONING_TOOLS:
                 self.last_target_description = self._resolve_target_description(task, args)
+                self._last_position_bbox_args = self._extract_position_bbox_args(args)
 
             if name == "go_to_element":
                 await self._maybe_debug_stop_after_first_goto(task, args)
@@ -385,7 +446,19 @@ IMPORTANT:
                 await self._hide_statuses(delay_ms=700)
                 return True
 
-            await self._wait_for_ui_settle()
+            post_action_frame = await self._wait_for_ui_settle()
+            post_action_context = self._snapshot_current_capture_context()
+            await self._handle_post_action_visual_feedback(
+                task=task,
+                name=name,
+                args=args,
+                signature=signature,
+                click_type=click_type,
+                pre_action_frame=pre_action_frame,
+                pre_action_context=pre_action_context,
+                post_action_frame=post_action_frame,
+                post_action_context=post_action_context,
+            )
             return False
         except Exception as e:
             if isinstance(e, DebugStopAfterFirstGoTo):
@@ -398,6 +471,7 @@ IMPORTANT:
                 if fallback_success:
                     self.consecutive_failures = 0
                     self.repeated_action_count = 0
+                    await self._wait_for_ui_settle()
                     return False
 
             if self.agent.retries < self.agent.max_retries:
@@ -483,8 +557,10 @@ IMPORTANT:
 
     def _action_signature(self, name: str, args: dict) -> tuple:
         filtered = {k: v for k, v in args.items() if k not in TOOL_METADATA_KEYS}
-        if name in CLICK_TOOL_TO_TYPE and "target_description" not in filtered and self.last_target_description:
-            filtered["target_description"] = self.last_target_description
+        if name in CLICK_TOOL_TO_TYPE:
+            click_target = args.get("target_description") or self.last_target_description
+            if click_target:
+                filtered["target_description"] = click_target
         if name in POSITIONING_TOOLS:
             bucket = self._position_bucket(filtered)
             if bucket is not None:
@@ -497,6 +573,16 @@ IMPORTANT:
             return CLICK_TOOL_TO_TYPE[tool_name]
 
         return None
+
+    @staticmethod
+    def _extract_position_bbox_args(args: dict) -> dict | None:
+        required = ("ymin", "xmin", "ymax", "xmax")
+        if not all(key in args for key in required):
+            return None
+        try:
+            return {key: float(args[key]) for key in required}
+        except Exception:
+            return None
 
     @staticmethod
     def _task_expects_repeated_clicks(task: str) -> bool:
@@ -579,6 +665,9 @@ IMPORTANT:
 
         if success:
             await self._set_status(f"Fallback located {target}.")
+            self._remember_runtime_observation(
+                f"Precision fallback was used for {target} after direct interaction struggled."
+            )
             return True
 
         return False
@@ -675,12 +764,226 @@ IMPORTANT:
             print(f"[VisionAgent] UI call failed ({label}): {e}")
 
     async def _wait_for_ui_settle(self):
-        """Pause briefly after each successful action so UI state can update."""
-        delay = float(self._action_settle_delay_seconds)
-        if delay <= 0:
+        """Poll until the active window appears visually stable or times out."""
+        timeout = float(self._action_settle_timeout_seconds)
+        poll_interval = float(self._action_settle_poll_interval_seconds)
+        if timeout <= 0 or poll_interval <= 0:
+            return None
+
+        reset_image_state()
+        deadline = time.monotonic() + timeout
+        last_frame = None
+
+        while True:
+            self._raise_if_stopped()
+            frame = capture_active_window()
+            last_frame = frame
+            if image_change(frame):
+                return frame
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print("[VisionAgent] UI did not fully stabilize before timeout; continuing.")
+                return last_frame
+
+            await asyncio.sleep(min(poll_interval, remaining))
+
+    def _should_verify_visual_effect(self, tool_name: str) -> bool:
+        return tool_name in VISUAL_EFFECT_VERIFICATION_TOOLS
+
+    def _snapshot_current_capture_context(self) -> dict | None:
+        context = _get_last_capture_context()
+        if not isinstance(context, dict):
+            return None
+        return dict(context)
+
+    def _capture_verification_snapshot(self):
+        try:
+            frame = capture_active_window()
+            return frame, self._snapshot_current_capture_context()
+        except Exception as e:
+            print(f"[VisionAgent] Verification capture failed: {e}")
+            return None, None
+
+    @staticmethod
+    def _image_similarity(before_frame, after_frame) -> float | None:
+        if before_frame is None or after_frame is None:
+            return None
+        try:
+            before_arr = np.array(before_frame)
+            after_arr = np.array(after_frame)
+            if before_arr.shape != after_arr.shape:
+                return None
+            return float(similarity_score(before_arr, after_arr))
+        except Exception as e:
+            print(f"[VisionAgent] Frame similarity failed: {e}")
+            return None
+
+    def _resolve_target_bbox_for_verification(self, tool_name: str, args: dict) -> dict | None:
+        bbox = self._extract_position_bbox_args(args)
+        if bbox:
+            return bbox
+        if tool_name in CLICK_TOOL_TO_TYPE or tool_name == "type_string":
+            return self._last_position_bbox_args
+        return None
+
+    def _crop_target_region(self, frame, context: dict | None, bbox_args: dict | None):
+        if frame is None or context is None or bbox_args is None:
+            return None
+        try:
+            left, top, right, bottom = _bbox_to_capture_pixel_box(
+                bbox_args["ymin"],
+                bbox_args["xmin"],
+                bbox_args["ymax"],
+                bbox_args["xmax"],
+                context=context,
+            )
+            left = int(round(left))
+            top = int(round(top))
+            right = int(round(right))
+            bottom = int(round(bottom))
+
+            pad = TARGET_REGION_PADDING_PX
+            left -= pad
+            top -= pad
+            right += pad
+            bottom += pad
+
+            width, height = frame.size
+            left = max(0, left)
+            top = max(0, top)
+            right = min(width, right)
+            bottom = min(height, bottom)
+
+            if right - left < TARGET_REGION_MIN_SIDE_PX:
+                deficit = TARGET_REGION_MIN_SIDE_PX - (right - left)
+                left = max(0, left - (deficit // 2))
+                right = min(width, right + (deficit - (deficit // 2)))
+            if bottom - top < TARGET_REGION_MIN_SIDE_PX:
+                deficit = TARGET_REGION_MIN_SIDE_PX - (bottom - top)
+                top = max(0, top - (deficit // 2))
+                bottom = min(height, bottom + (deficit - (deficit // 2)))
+
+            if right <= left or bottom <= top:
+                return None
+            return frame.crop((left, top, right, bottom))
+        except Exception as e:
+            print(f"[VisionAgent] Target crop failed: {e}")
+            return None
+
+    def _visual_similarity_metrics(
+        self,
+        tool_name: str,
+        args: dict,
+        before_frame,
+        before_context: dict | None,
+        after_frame,
+        after_context: dict | None,
+    ) -> dict:
+        metrics = {
+            "global_similarity": self._image_similarity(before_frame, after_frame),
+            "target_similarity": None,
+        }
+
+        target_bbox = self._resolve_target_bbox_for_verification(tool_name, args)
+        if target_bbox is not None:
+            before_crop = self._crop_target_region(before_frame, before_context, target_bbox)
+            after_crop = self._crop_target_region(after_frame, after_context, target_bbox)
+            metrics["target_similarity"] = self._image_similarity(before_crop, after_crop)
+
+        return metrics
+
+    def _remember_runtime_observation(self, text: str):
+        cleaned = str(text or "").strip()
+        if not cleaned:
             return
-        self._raise_if_stopped()
-        await asyncio.sleep(delay)
+        if self._runtime_observations and self._runtime_observations[-1] == cleaned:
+            return
+        self._runtime_observations.append(cleaned)
+        if len(self._runtime_observations) > MAX_RUNTIME_OBSERVATIONS:
+            self._runtime_observations = self._runtime_observations[-MAX_RUNTIME_OBSERVATIONS:]
+
+    def _reset_visual_noop_state(self):
+        self._last_visual_noop_signature = None
+        self._repeated_visual_noop_count = 0
+
+    def _describe_action_for_feedback(self, tool_name: str, task: str, args: dict) -> str:
+        target = self._resolve_target_description(task, args)
+        if tool_name in CLICK_TOOL_TO_TYPE:
+            return f"{CLICK_TOOL_TO_TYPE[tool_name]} on {target}"
+        if tool_name == "type_string":
+            return "typing into the current field"
+        if tool_name in {"press_ctrl_hotkey", "press_alt_hotkey", "press_key_for_duration"}:
+            return f"using {tool_name}"
+        return f"using {tool_name}"
+
+    async def _handle_post_action_visual_feedback(
+        self,
+        task: str,
+        name: str,
+        args: dict,
+        signature: tuple,
+        click_type: str | None,
+        pre_action_frame,
+        pre_action_context: dict | None,
+        post_action_frame,
+        post_action_context: dict | None,
+    ) -> None:
+        if not self._should_verify_visual_effect(name):
+            self._reset_visual_noop_state()
+            return
+
+        metrics = self._visual_similarity_metrics(
+            tool_name=name,
+            args=args,
+            before_frame=pre_action_frame,
+            before_context=pre_action_context,
+            after_frame=post_action_frame,
+            after_context=post_action_context,
+        )
+        global_similarity = metrics["global_similarity"]
+        target_similarity = metrics["target_similarity"]
+        globally_unchanged = (
+            global_similarity is not None
+            and global_similarity >= VISUAL_NOOP_SIMILARITY_THRESHOLD
+        )
+        target_unchanged = (
+            target_similarity is None
+            or target_similarity >= TARGET_REGION_NOOP_SIMILARITY_THRESHOLD
+        )
+
+        if not globally_unchanged or not target_unchanged:
+            self._reset_visual_noop_state()
+            return
+
+        if signature == self._last_visual_noop_signature:
+            self._repeated_visual_noop_count += 1
+        else:
+            self._last_visual_noop_signature = signature
+            self._repeated_visual_noop_count = 1
+
+        action_description = self._describe_action_for_feedback(name, task, args)
+        if self._repeated_visual_noop_count == 1:
+            observation = f"After {action_description}, the visible UI looked unchanged."
+        else:
+            observation = (
+                f"After {action_description}, the visible UI still looked unchanged "
+                f"after {self._repeated_visual_noop_count} attempts."
+            )
+        self._remember_runtime_observation(observation)
+        similarity_bits = [f"global={global_similarity:.4f}"]
+        if target_similarity is not None:
+            similarity_bits.append(f"target={target_similarity:.4f}")
+        print(f"[VisionAgent] {observation} {' '.join(similarity_bits)}")
+
+        if click_type and self._repeated_visual_noop_count >= REPEATED_VISUAL_NOOP_FALLBACK_THRESHOLD:
+            await self._set_status(f"{action_description} had no visible effect. Trying precision fallback...")
+            fallback_success = await self._attempt_fallback(task, click_type, args)
+            if fallback_success:
+                self.consecutive_failures = 0
+                self.repeated_action_count = 0
+                await self._wait_for_ui_settle()
+                self._reset_visual_noop_state()
 
     def _raise_if_stopped(self):
         if is_stop_requested():

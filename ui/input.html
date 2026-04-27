@@ -14,19 +14,127 @@
         <span id="chat-title">JARVIS Assistant</span>
       </div>
       <div id="chat-actions">
-        <button id="chat-stop" type="button" aria-label="Stop all agents">Stop</button>
-        <button id="chat-hide" type="button" aria-label="Hide chat">×</button>
+        <div id="chat-shortcuts-menu">
+          <button id="chat-shortcuts-toggle" type="button" aria-label="Show shortcuts" aria-haspopup="dialog" aria-expanded="false" title="Show shortcuts">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="4" width="15" height="12" rx="2"></rect>
+              <path d="M6 8.5h2"></path>
+              <path d="M10 8.5h4"></path>
+              <path d="M6 11.5h5"></path>
+              <path d="M13 11.5h1"></path>
+            </svg>
+          </button>
+          <div id="chat-shortcuts-popover" role="dialog" aria-label="Shortcut commands" hidden>
+            <div class="chat-shortcuts-popover-header">Shortcut commands</div>
+            <div class="chat-shortcuts-popover-list">
+              <div class="chat-shortcuts-popover-item">
+                <span class="chat-shortcuts-popover-label">Open input</span>
+                <kbd id="chat-guidance-open-shortcut">Ctrl + Shift + Space</kbd>
+              </div>
+              <div class="chat-shortcuts-popover-item">
+                <span class="chat-shortcuts-popover-label">Stop running actions</span>
+                <kbd id="chat-guidance-stop-shortcut">Ctrl + Shift + C</kbd>
+              </div>
+              <div class="chat-shortcuts-popover-item">
+                <span class="chat-shortcuts-popover-label">Hide window</span>
+                <kbd id="chat-guidance-hide-shortcut">Esc</kbd>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button id="chat-history-toggle" type="button" aria-label="Open chat history" title="Open chat history">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 4.5a5.5 5.5 0 1 1-4.58 2.44"></path>
+            <path d="M5.5 3.5v3.25h3.25"></path>
+            <path d="M10 7.25v3l2 1.25"></path>
+          </svg>
+        </button>
+        <button id="chat-new" type="button" aria-label="Start a new chat" title="Start a new chat">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 4.5v11"></path>
+            <path d="M4.5 10h11"></path>
+          </svg>
+        </button>
+        <button id="chat-stop" type="button" aria-label="Stop all agents" title="Stop all agents">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="10" r="5.5"></circle>
+          </svg>
+        </button>
+        <button id="chat-hide" type="button" aria-label="Hide chat" title="Hide chat">×</button>
       </div>
     </div>
-    <div id="chat-status" aria-live="polite">Ready</div>
-    <div id="chat-messages" aria-live="polite"></div>
-    <div id="input-row">
-      <textarea id="command-input" rows="1" placeholder="Ask anything or assign a task (terminal, browser, desktop)..." autocomplete="off"></textarea>
-      <button id="command-send" type="button" aria-label="Send message">
-        <span class="send-icon">&#8594;</span>
-      </button>
+    <div id="chat-status" role="status" aria-live="polite" data-phase="idle">
+      <div id="chat-status-main">
+        <span id="chat-status-phase">Idle</span>
+        <span id="chat-status-text">Ready for command</span>
+      </div>
+      <div id="chat-status-detail">Type the next task below or reopen a prior session from History.</div>
+    </div>
+    <div id="chat-body">
+      <section id="history-panel" hidden aria-label="Chat history">
+        <div id="history-panel-header">
+          <span id="history-panel-title">Chat History</span>
+          <button id="history-panel-close" type="button" aria-label="Close chat history">Close</button>
+        </div>
+        <p id="history-retention-note">Chats inactive for 30 days move to archive. Archived chats are deleted after another 30 days.</p>
+        <div id="history-filter" role="tablist" aria-label="Chat history filters">
+          <button id="history-filter-active" type="button" role="tab" aria-selected="true">Active</button>
+          <button id="history-filter-archived" type="button" role="tab" aria-selected="false">Archived</button>
+        </div>
+        <div id="history-empty" hidden>No chats here yet.</div>
+        <div id="history-list" role="list"></div>
+      </section>
+        <div id="chat-main">
+          <section id="terminal-panel" hidden aria-label="CLI terminal transcript">
+            <div id="terminal-panel-header">
+              <span id="terminal-panel-title">CLI Terminal</span>
+              <button id="terminal-panel-stop" type="button" aria-label="Stop terminal session">Stop Terminal</button>
+            </div>
+            <div id="terminal-panel-meta">Waiting for CLI activity...</div>
+            <pre id="terminal-panel-output"></pre>
+          </section>
+          <div id="chat-messages" aria-live="polite">
+            <div id="chat-session-marker" hidden></div>
+          <div id="chat-empty-state" hidden>
+              <div id="chat-empty-title">Ready for command</div>
+              <div id="chat-empty-body">Type the next task below or reopen a prior session from History.</div>
+              <div id="chat-empty-meta">Terminal · Browser · Desktop</div>
+            </div>
+          </div>
+          <div id="input-row">
+            <div id="input-stack">
+              <label id="command-input-label" for="command-input">Command</label>
+              <textarea
+                id="command-input"
+                rows="1"
+                placeholder="Describe the next task for JARVIS…"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="chat-composer-hint chat-status-detail"
+              ></textarea>
+              <div id="chat-composer-hint" hidden></div>
+            </div>
+            <div id="composer-actions">
+              <button id="command-voice" type="button" aria-label="Record voice command" aria-pressed="false" title="Record voice command">
+                <svg class="command-icon voice-icon-mic" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 3.75a2.5 2.5 0 0 1 2.5 2.5v4.5a2.5 2.5 0 0 1-5 0v-4.5a2.5 2.5 0 0 1 2.5-2.5Z"></path>
+                  <path d="M5.5 9.75a4.5 4.5 0 0 0 9 0"></path>
+                  <path d="M10 14.25v2"></path>
+                  <path d="M7.5 16.25h5"></path>
+                </svg>
+                <span class="voice-recording-mark" aria-hidden="true">
+                  <span class="voice-recording-dot"></span>
+                </span>
+              </button>
+              <button id="command-send" type="button" aria-label="Send message">
+                <span class="send-icon">&#8594;</span>
+              </button>
+            </div>
+        </div>
+      </div>
     </div>
   </div>
+  <script src="browser-api-shim.js"></script>
   <script type="module" src="input_window.js"></script>
 </body>
 </html>

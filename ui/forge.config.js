@@ -1,15 +1,20 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+const { getWindowsSignOptions } = require('./scripts/windows-signing');
+
+const windowsSign = getWindowsSignOptions();
 
 module.exports = {
   packagerConfig: {
     asar: true,
+    executableName: 'JARVIS',
+    windowsSign,
   },
   rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: {},
+      config: windowsSign ? { windowsSign } : {},
     },
     {
       name: '@electron-forge/maker-zip',

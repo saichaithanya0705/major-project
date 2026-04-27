@@ -6,6 +6,8 @@ node_modules
 __pycache__/
 *.pyc
 .DS_Store
+ui/.electron-runtime/
+ui/out/
 
 # Demo Suite
 demo/

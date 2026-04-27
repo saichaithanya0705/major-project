@@ -8,6 +8,12 @@ import {
   createOverlayBoxRoot,
   updateOverlayBoxElement
 } from './dom_nodes/overlay_box.js';
+import {
+  EXECUTION_PHASES,
+  buildLifecycleSnapshot,
+  inferLifecycleSnapshot,
+  mergeLifecycleTheme,
+} from './status_lifecycle.js';
 
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -24,10 +30,13 @@ const DIRECT_RESPONSE_MIN_MAX_HEIGHT = 140;
 const OVERLAY_TEXT_VIEWPORT_MARGIN = 8;
 const OVERLAY_TEXT_MIN_MAX_HEIGHT = 96;
 const INPUT_HIT_SLOP = 10;
-const THINKING_STATUS_TEXT = 'Assistant is thinking...';
-const STOPPED_STATUS_TEXT = 'Assistant stopped responding';
+const THINKING_STATUS_TEXT = buildLifecycleSnapshot(EXECUTION_PHASES.ROUTING, {
+  text: 'Waiting for model response…',
+}).text;
+const STOPPED_STATUS_TEXT = buildLifecycleSnapshot(EXECUTION_PHASES.STOPPED).text;
 const NEUTRAL_RING_COLOR = '#AEB4BF';
 const NEUTRAL_ACCENT_COLOR = '#BCC3CF';
+const OVERLAY_VISIBLE_SOURCES = new Set(['jarvis']);
 const platform = window.api.getPlatform();
 let canvasBackgroundColor = null;
 let lastHoverState = false;
@@ -36,6 +45,11 @@ let isOverlayTextSelectionDragging = false;
 let overlayModelName = 'Agent';
 let lastDirectResponseTheme = null;
 let lastMouseSyncTs = 0;
+
+function shouldRenderOnOverlay(source) {
+  const value = typeof source === 'string' ? source.trim().toLowerCase() : '';
+  return OVERLAY_VISIBLE_SOURCES.has(value);
+}
 
 function applyDirectResponseHeightCap(el, bubble) {
   if (!el || !bubble) return;
@@ -219,9 +233,6 @@ function updateTextElement(el, text) {
 
   const { bubble, textEl } = ensureOverlayTextBubble(el);
 
-  const accentGlow = toRgba(text.color, 0.28);
-  bubble.style.setProperty('--accent-glow', accentGlow);
-
   if (text.theme) {
     bubble.style.setProperty('--bubble-bg', text.theme.panelBg || '');
     bubble.style.setProperty('--bubble-border', text.theme.panelBorder || '');
@@ -232,7 +243,7 @@ function updateTextElement(el, text) {
     bubble.style.setProperty('--bubble-thinking', text.theme.thinking || '');
     bubble.style.setProperty('--bubble-shimmer', text.theme.shimmer || '');
     if (text.theme.panelBg) {
-      bubble.style.background = `radial-gradient(140% 140% at 100% 100%, ${accentGlow}, rgba(0, 0, 0, 0) 60%), ${text.theme.panelBg}`;
+      bubble.style.background = text.theme.panelBg;
     }
     if (text.theme.panelBorder) {
       bubble.style.borderColor = text.theme.panelBorder;
@@ -586,14 +597,8 @@ function clearAll() {
 
 function showStopStatusBubble() {
   if (!window.showStatusBubble) return;
-  window.showStatusBubble(STOPPED_STATUS_TEXT, {
-    icon: 'stop',
-    statusBg: 'rgba(64, 16, 16, 0.96)',
-    statusBorder: 'rgba(255, 120, 120, 0.32)',
-    statusText: 'rgba(255, 235, 235, 0.98)',
-    statusShimmer: 'rgba(255, 120, 120, 0.55)',
-    statusCheck: 'rgba(255, 120, 120, 0.9)'
-  });
+  const snapshot = buildLifecycleSnapshot(EXECUTION_PHASES.STOPPED);
+  window.showStatusBubble(STOPPED_STATUS_TEXT, snapshot.theme);
 }
 
 function showThinkingAt(x, y, theme = null) {
@@ -780,6 +785,10 @@ async function connectSocket() {
       opacity: payload.opacity
     });
     } else if (payload.command === 'draw_text') {
+      if (payload.id === DIRECT_RESPONSE_ID && !shouldRenderOnOverlay(payload.source)) {
+        removeText(DIRECT_RESPONSE_ID);
+        return;
+      }
       if (typeof payload.text === 'string') {
         const source = payload.source || 'unknown';
         console.log(`[renderer][ui_text][${source}][draw_text][${payload.id || 'unknown'}] ${payload.text}`);
@@ -824,19 +833,44 @@ async function connectSocket() {
         overlayModelName = payload.name;
       }
     } else if (payload.command === 'show_status_bubble') {
+      if (!shouldRenderOnOverlay(payload.source)) {
+        return;
+      }
       if (window.showStatusBubble) {
-        window.showStatusBubble(payload.text || 'Working...', payload.theme, payload.source);
+        const snapshot = inferLifecycleSnapshot(payload.text || '', {
+          source: payload.source,
+          theme: payload.theme,
+          phaseHint: EXECUTION_PHASES.RUNNING,
+        });
+        const theme = mergeLifecycleTheme(snapshot.theme, payload.theme || {});
+        window.showStatusBubble(snapshot.text || 'Running desktop action…', theme, payload.source);
       }
     } else if (payload.command === 'update_status_bubble') {
+      if (!shouldRenderOnOverlay(payload.source)) {
+        return;
+      }
       if (window.updateStatusBubble) {
-        window.updateStatusBubble(payload.text || 'Working...', payload.theme, payload.source);
+        const snapshot = inferLifecycleSnapshot(payload.text || '', {
+          source: payload.source,
+          theme: payload.theme,
+          phaseHint: EXECUTION_PHASES.RUNNING,
+        });
+        const theme = mergeLifecycleTheme(snapshot.theme, payload.theme || {});
+        window.updateStatusBubble(snapshot.text || 'Running desktop action…', theme, payload.source);
       }
     } else if (payload.command === 'complete_status_bubble') {
+      if (!shouldRenderOnOverlay(payload.source)) {
+        return;
+      }
       if (window.completeStatusBubble) {
-        window.completeStatusBubble(payload.responseText || payload.text || '', {
-          doneText: payload.doneText,
-          delayMs: payload.delayMs ?? payload.delay,
+        const snapshot = buildLifecycleSnapshot(EXECUTION_PHASES.COMPLETED, {
+          text: 'Completed',
           theme: payload.theme,
+        });
+        window.completeStatusBubble(payload.responseText || payload.text || '', {
+          doneText: snapshot.text,
+          delayMs: payload.delayMs ?? payload.delay,
+          theme: mergeLifecycleTheme(snapshot.theme, payload.theme || {}),
           source: payload.source
         });
       }

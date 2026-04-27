@@ -50,24 +50,25 @@ cd ../agents/cua_cli/gemini-cli && npm install && npm run build
 ```
 GEMINI_API_KEY = "YOUR_API_KEY"
 
-# Router runs locally via Ollama (required for routing)
-OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
-# Optional overrides:
-# OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-# OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
-# OLLAMA_KEEP_ALIVE = "10m"
-# OLLAMA_ROUTER_NUM_CTX = "2048"
-# OLLAMA_ROUTER_NUM_PREDICT = "800"
-# OLLAMA_ROUTER_THINK = "false"
-
-# Optional Gemini quota/rate-limit fallback via OpenRouter (Nemotron 30B free)
+# Router prefers OpenRouter when configured, and falls back to Ollama if needed.
+ROUTER_PROVIDER = "openrouter"
 OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
+OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 # Optional overrides:
 # OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # OPENROUTER_SITE_URL = "https://your-app-url.example"
 # OPENROUTER_SITE_NAME = "JARVIS"
 # OPENROUTER_TIMEOUT_SECONDS = "45"
+
+# Optional local router alternative. Use only by setting ROUTER_PROVIDER = "ollama".
+# OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
+# OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
+# OLLAMA_KEEP_ALIVE = "10m"
+# OLLAMA_ROUTER_NUM_CTX = "2048"
+# OLLAMA_ROUTER_NUM_PREDICT = "240"
+# OLLAMA_ROUTER_THINK = "false"
 
 ELEVENLABS_API_KEY = "YOUR_API_KEY"
 ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"   # Optional
@@ -79,8 +80,12 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
 
 ## Running Jarvis
 
-1. Ensure Ollama is running and the router model is available
+1. Ensure your router provider is available
 ```
+# OpenRouter-first setup:
+# add a valid OPENROUTER_API_KEY to .env
+
+# Optional Ollama fallback:
 ollama serve
 ollama run qwen3.5:4b-q4_K_M "ready"
 ```
@@ -138,7 +143,7 @@ JARVIS uses a **two-tier routing architecture** where a lightweight router model
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          ROUTER MODEL                                        │
-│                 (local Ollama: qwen3.5:4b-q4_K_M)                           │
+│          (OpenRouter Nemotron 3 free, with Ollama fallback support)         │
 │                                                                              │
 │  Analyzes user request (NO screenshot) and decides routing:                 │
 │  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌──────────────────┐ │

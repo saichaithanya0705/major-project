@@ -3,7 +3,7 @@ JARVIS Model Integration - Local router + Gemini vision agent logic.
 
 This module handles:
 - Screenshot capture and storage
-- Two-tier model routing (Ollama router -> specialized agents)
+- Two-tier model routing (provider-aware router -> specialized agents)
 - Gemini/OpenRouter model configuration for screen tasks
 """
 import asyncio
@@ -57,6 +57,21 @@ _RAPID_CONVERSATION_HISTORY = deque(maxlen=32)
 _MAX_ROUTER_CHAIN_STEPS = 6
 _REPEATED_STEP_LIMIT = 3
 _VISUAL_EXPLAIN_MARKERS = (
+    "analyze my screen",
+    "analyse my screen",
+    "analyze the screen",
+    "analyse the screen",
+    "analyze this screen",
+    "analyse this screen",
+    "analyze what's on my screen",
+    "analyse what's on my screen",
+    "look at my screen",
+    "look at the screen",
+    "look at this screen",
+    "check my screen",
+    "check the screen",
+    "inspect my screen",
+    "inspect the screen",
     "what do you see",
     "what do u see",
     "what's on my screen",
@@ -65,6 +80,8 @@ _VISUAL_EXPLAIN_MARKERS = (
     "describe my screen",
     "describe what you see",
     "explain what you see",
+    "explain my screen",
+    "explain this screen",
     "tell me what you see",
     "can you see my screen",
 )
@@ -88,6 +105,15 @@ _EXECUTION_INTENT_MARKERS = (
     "press",
     "launch",
     "execute",
+    "minimize",
+    "maximize",
+    "restore",
+    "close",
+    "switch",
+    "focus",
+    "drag",
+    "drop",
+    "select",
     "debug",
     "fix",
     "build",
@@ -128,12 +154,19 @@ _VISION_EXECUTION_MARKERS = (
 )
 _CLI_EXECUTION_MARKERS = (
     "terminal",
+    "from terminal",
     "shell",
     "command",
     "powershell",
     "bash",
     "zsh",
     "cmd",
+    "ping",
+    "curl",
+    "wget",
+    "nslookup",
+    "tracert",
+    "ipconfig",
     "git",
     "npm",
     "pnpm",
@@ -149,7 +182,34 @@ _CLI_EXECUTION_MARKERS = (
     "localhost",
     "127.0.0.1",
 )
+_WINDOW_MANAGEMENT_MARKERS = (
+    "minimize",
+    "maximize",
+    "restore",
+    "close the app",
+    "close the window",
+    "switch window",
+    "focus window",
+)
 _ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
+_DEFAULT_OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+_DEFAULT_OPENROUTER_FALLBACK_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
+
+
+def _looks_like_openrouter_model_name(model_name: str) -> bool:
+    cleaned = (model_name or "").strip().lower()
+    if not cleaned:
+        return False
+    if cleaned.startswith("openrouter:"):
+        return True
+    return "/" in cleaned or cleaned.endswith(":free")
+
+
+def _extract_openrouter_model_name(model_name: str) -> str:
+    cleaned = (model_name or "").strip()
+    if cleaned.lower().startswith("openrouter:"):
+        return cleaned.split(":", 1)[1].strip()
+    return cleaned
 
 def store_screenshot():
     """Capture and store a screenshot (called before overlay appears)."""
@@ -176,6 +236,19 @@ def _append_rapid_history(role: str, text: str, source: str) -> None:
         "source": source,
         "text": cleaned,
     })
+
+
+def _extract_latest_request_from_router_prompt(prompt: str) -> str:
+    markers = (
+        "# User's Latest Request:\n",
+        "# User's Request:\n",
+    )
+    for marker in markers:
+        if marker in prompt:
+            tail = prompt.rsplit(marker, 1)[-1].strip()
+            if tail:
+                return tail
+    return _clean_text(prompt, "", max_len=1800)
 
 
 def _format_rapid_history_for_prompt() -> str:
@@ -223,11 +296,33 @@ def _routing_signature(routing_result: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def _format_blocked_step_signatures_for_prompt(
+    blocked_step_signatures: Optional[set[tuple[str, str]]],
+) -> str:
+    if not blocked_step_signatures:
+        return ""
+
+    lines = []
+    for agent, task in sorted(blocked_step_signatures):
+        lines.append(f"- agent={agent} task={task}")
+
+    return (
+        "\n# Loop Guard\n"
+        "The following delegated steps already repeated in this turn and are now blocked.\n"
+        "Do NOT choose them again unless the user explicitly asked to repeat the exact same action.\n"
+        "Choose a materially different next step, request `screen_context` if verification is needed, "
+        "or call `direct_response` if the overall task is complete.\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
 def _format_chain_state_for_prompt(
     user_prompt: str,
     chain_steps: list[dict[str, Any]],
     max_steps: int,
     latest_screen_context: Optional[dict[str, Any]],
+    blocked_step_signatures: Optional[set[tuple[str, str]]] = None,
 ) -> str:
     context_lines = ""
     if latest_screen_context:
@@ -253,6 +348,7 @@ def _format_chain_state_for_prompt(
             rows.append(f"- Extra hints: {hints}")
         if rows:
             context_lines = "\n# Latest Screen Context\n" + "\n".join(rows) + "\n"
+    loop_guard_lines = _format_blocked_step_signatures_for_prompt(blocked_step_signatures)
 
     if not chain_steps:
         return (
@@ -264,6 +360,7 @@ def _format_chain_state_for_prompt(
             "Use `invoke_jarvis` only for explanation/annotation requests.\n"
             "When the overall user request is fully complete, call `direct_response`.\n"
             + context_lines +
+            loop_guard_lines +
             f"Never exceed {max_steps} delegated steps.\n"
         )
 
@@ -285,6 +382,7 @@ def _format_chain_state_for_prompt(
         f"Completed delegated steps ({len(chain_steps)}/{max_steps}):\n"
         + "\n".join(lines)
         + context_lines
+        + loop_guard_lines
         + "\n"
     )
 
@@ -391,6 +489,25 @@ def _is_visual_explanation_request(user_prompt: str) -> bool:
 
     if _is_execution_request(lowered):
         return False
+    if _is_window_management_request(lowered):
+        return False
+
+    screen_analysis_terms = (
+        "analyze",
+        "analyse",
+        "describe",
+        "explain",
+        "look at",
+        "check",
+        "inspect",
+        "what",
+        "what's",
+        "what is",
+        "tell me",
+    )
+    mentions_screen = "screen" in lowered or "what you see" in lowered
+    if mentions_screen and any(term in lowered for term in screen_analysis_terms):
+        return True
 
     if any(marker in lowered for marker in _VISUAL_EXPLAIN_MARKERS):
         return True
@@ -422,6 +539,44 @@ def _is_execution_request(text: str) -> bool:
     return _matches_any_marker(text, _EXECUTION_INTENT_MARKERS)
 
 
+def _is_window_management_request(text: str) -> bool:
+    return _matches_any_marker(text, _WINDOW_MANAGEMENT_MARKERS)
+
+
+def _deterministic_router_decision(prompt: str) -> Optional[dict[str, Any]]:
+    latest_request = _clean_text(_extract_latest_request_from_router_prompt(prompt), "", max_len=420)
+    lowered = latest_request.lower()
+    if not latest_request:
+        return None
+
+    if _is_visual_explanation_request(latest_request):
+        return {"agent": "jarvis", "query": latest_request}
+
+    if _is_window_management_request(lowered):
+        return {"agent": "cua_vision", "task": latest_request}
+    if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
+        return {"agent": "cua_cli", "task": latest_request}
+    if _matches_any_marker(lowered, _BROWSER_EXECUTION_MARKERS):
+        return {"agent": "browser", "task": latest_request}
+    if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS) and _is_execution_request(latest_request):
+        return {"agent": "cua_vision", "task": latest_request}
+
+    if _is_execution_request(latest_request):
+        return {"agent": _choose_actionable_agent(latest_request, None), "task": latest_request}
+
+    return None
+
+
+def _prompt_has_completed_delegated_steps(prompt: str) -> bool:
+    return "Completed delegated steps (" in (prompt or "")
+
+
+def _should_use_deterministic_router(prompt: str) -> bool:
+    if _prompt_has_completed_delegated_steps(prompt):
+        return False
+    return _deterministic_router_decision(prompt) is not None
+
+
 def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dict[str, Any]]) -> str:
     recommended = ""
     if latest_screen_context:
@@ -430,12 +585,14 @@ def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dic
         return recommended
 
     lowered = (task_text or "").lower()
+    if _is_window_management_request(lowered):
+        return "cua_vision"
     if _matches_any_marker(lowered, _BROWSER_EXECUTION_MARKERS):
         return "browser"
-    if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS):
-        return "cua_vision"
     if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
         return "cua_cli"
+    if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS):
+        return "cua_vision"
     return "cua_cli"
 
 
@@ -671,6 +828,11 @@ async def _run_routed_agent_step(
                 jarvis_summary,
                 True,
                 source="jarvis",
+            )
+            await _finish_non_rapid_status(
+                "Screen analysis is done.",
+                True,
+                source="jarvis_completion",
             )
             return {
                 "agent": "jarvis",
@@ -985,6 +1147,7 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
 
         chain_steps: list[dict[str, Any]] = []
         seen_step_signatures: dict[tuple[str, str], int] = {}
+        blocked_step_signatures: set[tuple[str, str]] = set()
         latest_screen_context: Optional[dict[str, Any]] = None
 
         for step_index in range(_MAX_ROUTER_CHAIN_STEPS):
@@ -994,6 +1157,7 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
                 chain_steps=chain_steps,
                 max_steps=_MAX_ROUTER_CHAIN_STEPS,
                 latest_screen_context=latest_screen_context,
+                blocked_step_signatures=blocked_step_signatures,
             )
             rapid_prompt = (
                 RAPID_RESPONSE_SYSTEM_PROMPT
@@ -1001,12 +1165,43 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
                 + chain_block
                 + f"\n# User's Latest Request:\n{user_prompt}"
             )
-            routing_result = await model.route_request(rapid_prompt)
+            try:
+                routing_result = await model.route_request(rapid_prompt)
+            except Exception as exc:
+                error_text = _clean_text(str(exc), "Router failed.", max_len=420)
+                router_error = f"Router failed: {error_text}"
+                tool = ROUTER_TOOL_MAP.get("direct_response")
+                if tool:
+                    tool(text=router_error, source="rapid_response")
+                _append_rapid_history("assistant", router_error, "rapid")
+                log_assistant_event(
+                    "request_failed",
+                    request_id=request_id,
+                    agent="router",
+                    task=_clean_text(user_prompt, "", max_len=420),
+                    message=router_error,
+                    error=error_text,
+                    success=False,
+                    metadata={"step_index": step_index + 1},
+                )
+                return
             if not isinstance(routing_result, dict):
-                routing_result = {
-                    "agent": "direct",
-                    "response_text": "Router returned an invalid response shape.",
-                }
+                router_error = "Router failed: invalid routing response shape."
+                tool = ROUTER_TOOL_MAP.get("direct_response")
+                if tool:
+                    tool(text=router_error, source="rapid_response")
+                _append_rapid_history("assistant", router_error, "rapid")
+                log_assistant_event(
+                    "request_failed",
+                    request_id=request_id,
+                    agent="router",
+                    task=_clean_text(user_prompt, "", max_len=420),
+                    message=router_error,
+                    error="Invalid routing response shape.",
+                    success=False,
+                    metadata={"step_index": step_index + 1},
+                )
+                return
             else:
                 routing_result = _apply_routing_guardrails(
                     user_prompt=user_prompt,
@@ -1050,26 +1245,55 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
                 return
 
             signature = _routing_signature(routing_result)
-            seen_step_signatures[signature] = seen_step_signatures.get(signature, 0) + 1
-            if seen_step_signatures[signature] >= _REPEATED_STEP_LIMIT:
-                repeated_msg = (
-                    "I stopped automatic multi-agent chaining because the next delegated step "
-                    "kept repeating. Please rephrase or ask for one specific next action."
+            if signature in blocked_step_signatures and not _user_requested_repeat(user_prompt):
+                blocked_msg = (
+                    "Loop guard: the router chose a delegated step that was already blocked for repetition. "
+                    "Choosing a different next step or finishing directly is required."
                 )
-                tool = ROUTER_TOOL_MAP.get("direct_response")
-                if tool:
-                    tool(text=repeated_msg, source="rapid_response")
+                chain_steps.append({
+                    "agent": "router_guard",
+                    "task": _routing_task_text(routing_result),
+                    "success": False,
+                    "message": blocked_msg,
+                    "source": "rapid",
+                })
+                _append_rapid_history("assistant", blocked_msg, "rapid")
+                log_assistant_event(
+                    "router_loop_guard",
+                    request_id=request_id,
+                    agent=str(routing_result.get("agent") or ""),
+                    task=_routing_task_text(routing_result),
+                    message=blocked_msg,
+                    success=False,
+                    metadata={"reason": "blocked_repeated_step", "step_index": step_index + 1},
+                )
+                continue
+
+            seen_step_signatures[signature] = seen_step_signatures.get(signature, 0) + 1
+            if seen_step_signatures[signature] >= _REPEATED_STEP_LIMIT and not _user_requested_repeat(user_prompt):
+                blocked_step_signatures.add(signature)
+                repeated_msg = (
+                    "Loop guard: I already delegated this exact next step multiple times, "
+                    "so I'm asking the router to choose a different next step or finish directly."
+                )
+                chain_steps.append({
+                    "agent": "router_guard",
+                    "task": _routing_task_text(routing_result),
+                    "success": False,
+                    "message": repeated_msg,
+                    "source": "rapid",
+                })
                 _append_rapid_history("assistant", repeated_msg, "rapid")
                 log_assistant_event(
-                    "request_stopped",
+                    "router_loop_guard",
                     request_id=request_id,
                     agent=str(routing_result.get("agent") or ""),
                     task=_routing_task_text(routing_result),
                     message=repeated_msg,
                     success=False,
-                    metadata={"reason": "repeated_step_limit"},
+                    metadata={"reason": "repeated_step_limit", "step_index": step_index + 1},
                 )
-                return
+                continue
 
             if routing_result.get("agent") == "screen_context":
                 judge_task = routing_result.get("task") or user_prompt
@@ -1229,10 +1453,10 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
 
 class GeminiModel:
     """
-    Model orchestrator with local Ollama routing and Gemini screen capabilities.
+    Model orchestrator with provider-aware routing and Gemini screen capabilities.
 
     Two-tier system:
-    - Router model: Local Ollama text model, no image, decides where to route requests
+    - Router model: OpenRouter or Ollama text model, no image, decides where to route requests
     - JARVIS model: Gemini with screenshot, for screen annotations and screen context
 
     Documentation Reference: https://github.com/googleapis/python-genai
@@ -1249,8 +1473,18 @@ class GeminiModel:
             thinking_budget = 256
         self.jarvis_thinking_budget = max(0, min(2048, thinking_budget))
         self.openrouter_api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        configured_rapid_model = (self.rapid_response_model or "").strip()
+        rapid_model_requests_openrouter = _looks_like_openrouter_model_name(configured_rapid_model)
+        rapid_openrouter_model = _extract_openrouter_model_name(configured_rapid_model)
         self.openrouter_model = (
-            os.getenv("OPENROUTER_MODEL") or "nvidia/nemotron-3-nano-30b-a3b:free"
+            os.getenv("OPENROUTER_MODEL")
+            or (rapid_openrouter_model if rapid_model_requests_openrouter else "")
+            or _DEFAULT_OPENROUTER_FALLBACK_MODEL
+        ).strip()
+        self.openrouter_router_model = (
+            os.getenv("OPENROUTER_ROUTER_MODEL")
+            or (rapid_openrouter_model if rapid_model_requests_openrouter else "")
+            or _DEFAULT_OPENROUTER_ROUTER_MODEL
         ).strip()
         self.openrouter_url = (
             os.getenv("OPENROUTER_URL") or "https://openrouter.ai/api/v1/chat/completions"
@@ -1262,14 +1496,26 @@ class GeminiModel:
         except ValueError:
             timeout_seconds = 45
         self.openrouter_timeout_seconds = max(10, min(180, timeout_seconds))
+        configured_router_provider = (
+            os.getenv("ROUTER_PROVIDER")
+            or ("openrouter" if rapid_model_requests_openrouter else "")
+            or ("openrouter" if self.openrouter_api_key else "ollama")
+        ).strip().lower()
+        if configured_router_provider not in {"openrouter", "ollama"}:
+            configured_router_provider = "openrouter" if self.openrouter_api_key else "ollama"
+        self.router_provider = configured_router_provider
 
         configured_router_model = (
             os.getenv("OLLAMA_ROUTER_MODEL")
             or self.rapid_response_model
             or ""
         ).strip()
-        # Prevent legacy Gemini router defaults from being used as Ollama model names.
-        if not configured_router_model or "gemini" in configured_router_model.lower():
+        # Prevent non-Ollama router identifiers from being used as Ollama fallback model names.
+        if (
+            not configured_router_model
+            or "gemini" in configured_router_model.lower()
+            or _looks_like_openrouter_model_name(configured_router_model)
+        ):
             configured_router_model = "qwen3.5:4b-q4_K_M"
         self.ollama_router_model = configured_router_model
         self.ollama_base_url = (
@@ -1287,14 +1533,22 @@ class GeminiModel:
             ollama_num_ctx = 2048
         self.ollama_router_num_ctx = max(512, min(8192, ollama_num_ctx))
         try:
-            ollama_num_predict = int(os.getenv("OLLAMA_ROUTER_NUM_PREDICT", "800"))
+            ollama_num_predict = int(os.getenv("OLLAMA_ROUTER_NUM_PREDICT", "240"))
         except ValueError:
-            ollama_num_predict = 800
+            ollama_num_predict = 240
         self.ollama_router_num_predict = max(80, min(2048, ollama_num_predict))
+        try:
+            openrouter_router_max_tokens = int(os.getenv("OPENROUTER_ROUTER_MAX_TOKENS", "260"))
+        except ValueError:
+            openrouter_router_max_tokens = 260
+        self.openrouter_router_max_tokens = max(80, min(2048, openrouter_router_max_tokens))
         self.ollama_router_think = (
             os.getenv("OLLAMA_ROUTER_THINK", "false").strip().lower()
             in {"1", "true", "yes", "on"}
         )
+        self.gemini_backup_model = (
+            os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash"
+        ).strip()
 
         # Config for JARVIS model (full capabilities)
         self.jarvis_config = types.GenerateContentConfig(
@@ -1330,6 +1584,19 @@ class GeminiModel:
         return any(marker in text for marker in markers)
 
     @staticmethod
+    def _is_gemini_temporary_error(exc: Exception) -> bool:
+        text = f"{type(exc).__name__}: {exc}".lower()
+        markers = (
+            "503",
+            "unavailable",
+            "high demand",
+            "temporarily unavailable",
+            "overloaded",
+            "deadline exceeded",
+        )
+        return any(marker in text for marker in markers)
+
+    @staticmethod
     def _extract_latest_request(prompt: str) -> str:
         markers = (
             "# User's Latest Request:\n",
@@ -1342,8 +1609,14 @@ class GeminiModel:
                     return tail
         return _clean_text(prompt, "", max_len=1800)
 
+    def _openrouter_model_enabled(self, model_name: str) -> bool:
+        return bool(self.openrouter_api_key and model_name and self.openrouter_url)
+
     def _openrouter_enabled(self) -> bool:
-        return bool(self.openrouter_api_key and self.openrouter_model and self.openrouter_url)
+        return self._openrouter_model_enabled(self.openrouter_model)
+
+    def _openrouter_router_enabled(self) -> bool:
+        return self._openrouter_model_enabled(self.openrouter_router_model)
 
     def _call_openrouter_text_sync(
         self,
@@ -1351,8 +1624,12 @@ class GeminiModel:
         user_prompt: str,
         temperature: float,
         max_tokens: int,
+        *,
+        model: Optional[str] = None,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> str:
-        if not self._openrouter_enabled():
+        model_name = (model or self.openrouter_model or "").strip()
+        if not self._openrouter_model_enabled(model_name):
             raise RuntimeError("OpenRouter fallback is not configured.")
 
         headers = {
@@ -1365,7 +1642,7 @@ class GeminiModel:
             headers["X-Title"] = self.openrouter_site_name
 
         payload = {
-            "model": self.openrouter_model,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -1373,6 +1650,8 @@ class GeminiModel:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if response_format:
+            payload["response_format"] = response_format
 
         response = requests.post(
             self.openrouter_url,
@@ -1414,6 +1693,20 @@ class GeminiModel:
             raise RuntimeError("OpenRouter returned empty message content.")
 
         return text
+
+    def _call_openrouter_router_sync(self, prompt: str) -> dict[str, Any]:
+        text = self._call_openrouter_text_sync(
+            OLLAMA_ROUTER_SYSTEM_PROMPT,
+            prompt,
+            0.0,
+            self.openrouter_router_max_tokens,
+            model=self.openrouter_router_model,
+            response_format={"type": "json_object"},
+        )
+        parsed = _parse_json_object_from_text(text)
+        if not isinstance(parsed, dict) or not parsed:
+            raise RuntimeError(f"OpenRouter router returned non-JSON payload: {text}")
+        return parsed
 
     async def _try_openrouter_text_fallback(
         self,
@@ -1493,22 +1786,17 @@ class GeminiModel:
             raise RuntimeError(f"Ollama router returned non-JSON payload: {content}")
         return parsed
 
-    def _normalize_ollama_router_decision(
+    def _normalize_router_decision(
         self,
         payload: dict[str, Any],
         prompt: str,
+        *,
+        provider_name: str,
     ) -> dict[str, Any]:
         latest_request = self._extract_latest_request(prompt)
         agent = str(payload.get("agent") or "").strip().lower()
         if agent not in _ROUTER_AGENT_CHOICES:
-            return {
-                "agent": "direct",
-                "response_text": _clean_text(
-                    f"Router returned invalid agent '{agent}'.",
-                    "Router returned invalid agent.",
-                    max_len=420,
-                ),
-            }
+            raise RuntimeError(f"{provider_name} router returned invalid agent '{agent}'.")
 
         if agent == "direct":
             return {
@@ -1553,6 +1841,18 @@ class GeminiModel:
             "focus": _clean_text(payload.get("focus"), "", max_len=220),
         }
 
+    def _router_provider_order(self) -> list[str]:
+        providers: list[str] = []
+
+        def add(provider: str, enabled: bool) -> None:
+            if enabled and provider not in providers:
+                providers.append(provider)
+
+        prefer_openrouter = self.router_provider == "openrouter"
+        add("openrouter", prefer_openrouter and self._openrouter_router_enabled())
+        add("ollama", (not prefer_openrouter) and bool(self.ollama_router_model and self.ollama_base_url))
+        return providers
+
     async def route_request(self, prompt: str) -> dict:
         """
         Use the router model to decide how to handle the request.
@@ -1564,30 +1864,59 @@ class GeminiModel:
                 - response_text: direct response text when agent == "direct"
                 - Additional agent-specific params
         """
-        print("[Router] Processing via Ollama...")
+        print(f"[Router] Processing via {self.router_provider}...")
         started = time.monotonic()
 
-        try:
-            try:
-                await set_model_name(f"{self.ollama_router_model} (Ollama)")
-            except Exception as ui_exc:
-                print(f"[Router] Model label update skipped: {ui_exc}")
-            payload = await asyncio.to_thread(self._call_ollama_router_sync, prompt)
-            routed = self._normalize_ollama_router_decision(payload, prompt)
+        deterministic_route = _deterministic_router_decision(prompt) if _should_use_deterministic_router(prompt) else None
+        if deterministic_route:
             elapsed = time.monotonic() - started
-            print(f"[Router] Completed in {elapsed:.2f}s with agent={routed.get('agent')}")
-            return routed
-        except Exception as exc:
-            error = _clean_text(str(exc), "Router generation failed.", max_len=420)
-            print(f"[Router] Ollama routing failed: {error}")
-            return {
-                "agent": "direct",
-                "response_text": _clean_text(
-                    f"Router generation failed: {error}",
-                    "Router generation failed.",
-                    max_len=420,
-                ),
-            }
+            print(
+                f"[Router] Deterministic route selected in {elapsed:.2f}s "
+                f"with agent={deterministic_route.get('agent')}"
+            )
+            return deterministic_route
+
+        provider_order = self._router_provider_order()
+        if not provider_order:
+            raise RuntimeError("Router provider is not configured. Set OPENROUTER_API_KEY for OpenRouter routing.")
+
+        last_error = ""
+        for provider in provider_order:
+            try:
+                if provider == "openrouter":
+                    try:
+                        await set_model_name(f"{self.openrouter_router_model} (OpenRouter)")
+                    except Exception as ui_exc:
+                        print(f"[Router] Model label update skipped: {ui_exc}")
+                    payload = await asyncio.to_thread(self._call_openrouter_router_sync, prompt)
+                    routed = self._normalize_router_decision(
+                        payload,
+                        prompt,
+                        provider_name="OpenRouter",
+                    )
+                else:
+                    try:
+                        await set_model_name(f"{self.ollama_router_model} (Ollama)")
+                    except Exception as ui_exc:
+                        print(f"[Router] Model label update skipped: {ui_exc}")
+                    payload = await asyncio.to_thread(self._call_ollama_router_sync, prompt)
+                    routed = self._normalize_router_decision(
+                        payload,
+                        prompt,
+                        provider_name="Ollama",
+                    )
+                elapsed = time.monotonic() - started
+                print(
+                    f"[Router] Completed in {elapsed:.2f}s via {provider} "
+                    f"with agent={routed.get('agent')}"
+                )
+                return routed
+            except Exception as exc:
+                error = _clean_text(str(exc), "Router generation failed.", max_len=420)
+                print(f"[Router] {provider} routing failed: {error}")
+                last_error = error
+
+        raise RuntimeError(f"Router failed using configured provider(s): {last_error or 'unknown error'}")
 
     async def generate_screen_context(
         self,
@@ -1630,7 +1959,22 @@ class GeminiModel:
                 config=self.screen_judge_config,
             )
         except Exception as exc:
-            if self._is_gemini_quota_error(exc):
+            if (
+                self._is_gemini_temporary_error(exc)
+                and self.gemini_backup_model
+                and self.gemini_backup_model != self.screen_judge_model
+            ):
+                print(
+                    f"[ScreenJudge] Primary model unavailable; retrying with backup "
+                    f"{self.gemini_backup_model}"
+                )
+                response = await self.client.aio.models.generate_content(
+                    model=self.gemini_backup_model,
+                    contents=contents,
+                    config=self.screen_judge_config,
+                )
+                self.screen_judge_model = self.gemini_backup_model
+            elif self._is_gemini_quota_error(exc):
                 fallback_text = await self._try_openrouter_text_fallback(
                     label="ScreenJudge",
                     system_prompt=(
@@ -1659,7 +2003,8 @@ class GeminiModel:
                         )
                     normalized["model"] = f"{self.openrouter_model} (openrouter_fallback)"
                     return normalized
-            raise
+            else:
+                raise
         elapsed = time.monotonic() - started
         print(f"[ScreenJudge] Completed in {elapsed:.2f}s")
 
@@ -1701,7 +2046,22 @@ class GeminiModel:
                 config=self.jarvis_config
             )
         except Exception as exc:
-            if self._is_gemini_quota_error(exc):
+            if (
+                self._is_gemini_temporary_error(exc)
+                and self.gemini_backup_model
+                and self.gemini_backup_model != self.jarvis_model
+            ):
+                print(
+                    f"[JARVIS] Primary model unavailable; retrying with backup "
+                    f"{self.gemini_backup_model}"
+                )
+                response = await self.client.aio.models.generate_content(
+                    model=self.gemini_backup_model,
+                    contents=contents,
+                    config=self.jarvis_config
+                )
+                self.jarvis_model = self.gemini_backup_model
+            elif self._is_gemini_quota_error(exc):
                 fallback_text = await self._try_openrouter_text_fallback(
                     label="JARVIS",
                     system_prompt=(
@@ -1723,7 +2083,8 @@ class GeminiModel:
                             max_len=420,
                         ),
                     }
-            raise
+            else:
+                raise
         elapsed = time.monotonic() - started
         print(
             f"[JARVIS] Model call completed in {elapsed:.2f}s "

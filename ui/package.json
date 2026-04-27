@@ -8,7 +8,9 @@
     "start": "node scripts/start-electron.js",
     "dev": "node scripts/start-electron.js",
     "package": "electron-forge package",
+    "package:win": "electron-forge package --platform win32 --arch x64",
     "make": "electron-forge make",
+    "make:win": "electron-forge make --platform win32 --arch x64",
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\""
   },

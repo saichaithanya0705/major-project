@@ -65,6 +65,7 @@ class VisionAgent:
     def __init__(self, model_name: str = "gemini-2.0-flash"):
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         self.model_name = model_name
+        self.backup_model_name = (os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash").strip()
         self.max_retries = 3
         self.retries = 0
 
@@ -93,6 +94,20 @@ class VisionAgent:
         # Chat history for multi-turn interaction
         self.chat_history = []
 
+    @staticmethod
+    def _is_temporary_model_error(exc: Exception) -> bool:
+        text = f"{type(exc).__name__}: {exc}".lower()
+        markers = (
+            "503",
+            "unavailable",
+            "high demand",
+            "temporarily unavailable",
+            "overloaded",
+            "resource_exhausted",
+            "429",
+        )
+        return any(marker in text for marker in markers)
+
     async def execute(self, task: str, screenshot: Image.Image = None) -> dict:
         """
         Execute a vision-based desktop task.
@@ -115,17 +130,53 @@ class VisionAgent:
         self.chat_history = []
 
         try:
-            await self._interact_with_screen(task)
-            return {
-                "success": True,
-                "result": "Task completed",
-                "error": None
-            }
-        except ResourceExhausted as e:
+            models_to_try = [self.model_name]
+            if self.backup_model_name and self.backup_model_name not in models_to_try:
+                models_to_try.append(self.backup_model_name)
+
+            last_error: Exception | None = None
+            for candidate_model in models_to_try:
+                self.model_name = candidate_model
+                try:
+                    await self._interact_with_screen(task)
+                    return {
+                        "success": True,
+                        "result": "Task completed",
+                        "error": None
+                    }
+                except ResourceExhausted as e:
+                    last_error = e
+                    if candidate_model != models_to_try[-1]:
+                        print(f"[VisionAgent] Model {candidate_model} exhausted; retrying with backup.")
+                        continue
+                    return {
+                        "success": False,
+                        "result": None,
+                        "error": f"Vision model rate limit exceeded: {e}"
+                    }
+                except Exception as e:
+                    last_error = e
+                    if self._is_temporary_model_error(e) and candidate_model != models_to_try[-1]:
+                        print(
+                            f"[VisionAgent] Model {candidate_model} unavailable; "
+                            f"retrying with backup {models_to_try[-1]}."
+                        )
+                        continue
+                    return {
+                        "success": False,
+                        "result": None,
+                        "error": (
+                            "Vision model is temporarily unavailable. "
+                            f"Last error: {e}"
+                            if self._is_temporary_model_error(e)
+                            else str(e)
+                        )
+                    }
+
             return {
                 "success": False,
                 "result": None,
-                "error": f"API rate limit exceeded: {e}"
+                "error": str(last_error) if last_error else "Vision task failed."
             }
         except Exception as e:
             return {

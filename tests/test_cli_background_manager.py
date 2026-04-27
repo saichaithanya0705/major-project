@@ -56,8 +56,54 @@ async def run_checks() -> None:
         "Clone repo, run npm install, then npm start on localhost"
     )
 
+    cli_task = (
+        "By using the terminal create a new file in the d drive "
+        "with name test.txt and write hello world"
+    )
+    cmd = agent._build_command(cli_task)
+    include_dirs = [
+        cmd[idx + 1]
+        for idx, token in enumerate(cmd[:-1])
+        if token == "--include-directories"
+    ]
+    if os.name == "nt" and Path(r"D:\\").exists():
+        normalized_include_dirs = {
+            os.path.normcase(os.path.normpath(path))
+            for path in include_dirs
+        }
+        assert os.path.normcase(os.path.normpath(r"D:\\")) in normalized_include_dirs, include_dirs
+
     original_run_cli = CLIAgent._run_cli
     original_start_bg = CLIAgent._start_background_process
+
+    async def _fake_run_cli_generic_error(self, task, timeout, status_callback=None):
+        return CLIResponse(
+            success=False,
+            output="",
+            error="[API Error: exception TypeError: fetch failed sending request]",
+            tool_calls=[
+                {
+                    "tool_name": "write_file",
+                    "tool_id": "write_file-failed",
+                    "parameters": {"file_path": r"D:\test.txt", "content": "hello world"},
+                    "result": 'Path not in workspace: Attempted path "D:\\test.txt"',
+                    "status": "error",
+                    "error": {
+                        "type": "invalid_tool_params",
+                        "message": 'Path not in workspace: Attempted path "D:\\test.txt"',
+                    },
+                }
+            ],
+        )
+
+    CLIAgent._run_cli = _fake_run_cli_generic_error
+    try:
+        normalized_error = await agent.execute(cli_task, timeout=30)
+        assert not normalized_error.get("success"), normalized_error
+        assert "Path not in workspace" in str(normalized_error.get("error", "")), normalized_error
+        assert "fetch failed" in str(normalized_error.get("error", "")).lower(), normalized_error
+    finally:
+        CLIAgent._run_cli = original_run_cli
 
     async def _fake_run_cli(self, task, timeout, status_callback=None):
         return CLIResponse(

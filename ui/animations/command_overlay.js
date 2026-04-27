@@ -7,6 +7,7 @@ const commandBar = document.getElementById('command-bar');
 const commandInputWrap = commandOverlay?.querySelector('.command-input-wrap');
 const MAX_INPUT_HEIGHT = 180;
 const INPUT_FOCUS_RECOVERY_SLOP = 14;
+const OVERLAY_CLOSE_DURATION_MS = 220;
 let overlayActive = false;
 let overlayClosing = false;
 let inputFocused = false;
@@ -68,7 +69,7 @@ function stopLogoSyncLoop() {
   logoSyncUntil = 0;
 }
 
-function startLogoSyncLoop(durationMs = 1800) {
+function startLogoSyncLoop(durationMs = 700) {
   stopLogoSyncLoop();
   logoSyncUntil = performance.now() + durationMs;
 
@@ -217,10 +218,9 @@ function showCommandOverlay() {
   commandInput.value = '';
   resizeInput();
   setInputMode(true);
-  startLogoSyncLoop(1800);
-  focusCommandInput(20);
-  // Retry focus once after intro animations in case another app temporarily steals focus.
-  focusCommandInput(180);
+  startLogoSyncLoop(700);
+  focusCommandInput(0);
+  focusCommandInput(90);
 }
 
 function collapseCommandBar() {
@@ -278,7 +278,7 @@ function hideCommandOverlay() {
     hideOverlayTimeout = null;
     commandOverlay.classList.remove('active');
     commandOverlay.classList.remove('closing');
-  }, 1000);
+  }, OVERLAY_CLOSE_DURATION_MS);
 }
 
 function forceResetCommandOverlay() {
@@ -500,7 +500,7 @@ if (window.api?.onOverlayImage) {
     // Small delay to ensure screenshot is taken before overlay appears
     setTimeout(() => {
       showCommandOverlay();
-    }, 50);
+    }, 24);
   });
 }
 

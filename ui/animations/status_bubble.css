@@ -1,34 +1,26 @@
-/**
- * Status Bubble - Agent status indicator
- */
-
 #status-bubble {
   position: fixed;
-  top: 38px;
+  top: 28px;
   left: 50%;
-  margin-left: -150px;
-  width: 300px;
-  min-height: 36px;
+  transform: translateX(-50%);
+  min-height: 44px;
+  max-width: min(360px, calc(100vw - 48px));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--status-text, rgba(255, 255, 255, 0.95));
-  background: var(--status-bg, rgba(4, 5, 7, 0.96));
-  border: 1px solid var(--status-border, rgba(255, 255, 255, 0.06));
-  border-radius: 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38);
+  background: var(--status-bg, rgba(17, 20, 24, 0.98));
+  border: 1px solid var(--status-border, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
   opacity: 0;
   pointer-events: none;
   z-index: 25;
   overflow: hidden;
-  transition:
-    opacity 0.25s ease,
-    width 0.35s ease,
-    margin-left 0.35s ease,
-    box-shadow 0.25s ease;
+  transition: opacity 140ms ease, max-width 180ms ease, box-shadow 140ms ease;
 }
 
 #status-bubble.status-bubble--visible {
@@ -45,22 +37,20 @@
 }
 
 #status-bubble.status-bubble--expanded {
-  width: 500px;
-  margin-left: -250px;
+  max-width: min(560px, calc(100vw - 48px));
 }
 
 #status-bubble.status-bubble--pulse {
-  animation: status-bubble-pulse 2s ease-in-out infinite;
+  animation: status-bubble-pulse 1.8s ease-in-out infinite;
 }
 
-/* Checkmark indicator */
 #status-bubble-icon {
   position: absolute;
   left: 14px;
   width: 14px;
   height: 14px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 120ms ease;
 }
 
 #status-bubble-icon.visible {
@@ -71,7 +61,7 @@
   width: 100%;
   height: 100%;
   stroke: var(--status-check, rgba(170, 178, 190, 0.9));
-  stroke-width: 2.5;
+  stroke-width: 2.4;
   fill: none;
 }
 
@@ -89,7 +79,6 @@
   display: block;
 }
 
-/* Text container for rotation effect */
 #status-bubble-text-container {
   position: relative;
   min-height: 20px;
@@ -97,43 +86,43 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 20px;
+  padding: 11px 18px 11px 18px;
   -webkit-user-select: text;
   user-select: text;
 }
 
 #status-bubble-text {
-  color: var(--status-text, rgba(255, 255, 255, 0.92));
+  color: var(--status-text, rgba(255, 255, 255, 0.94));
   position: relative;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-  max-width: 260px;
-  transition: opacity 0.2s ease, font-size 0.2s ease;
+  max-width: 288px;
+  transition: opacity 140ms ease, font-size 140ms ease;
   -webkit-user-select: text;
   user-select: text;
 }
 
 #status-bubble.status-bubble--expanded #status-bubble-text {
-  max-width: 430px;
+  max-width: min(500px, calc(100vw - 92px));
   white-space: normal;
-  line-height: 1.35;
+  line-height: 1.45;
   text-align: left;
   cursor: text;
 }
 
 #status-bubble-text.status-bubble-text--final {
-  font-size: 15px;
-  font-weight: 540;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 #status-bubble-text.rotating-out {
-  animation: status-text-out 0.25s ease forwards;
+  animation: status-text-out 140ms ease forwards;
   opacity: 0;
 }
 
 #status-bubble-text.rotating-in {
-  animation: status-text-in 0.25s ease forwards;
+  animation: status-text-in 140ms ease forwards;
   opacity: 0;
 }
 
@@ -156,24 +145,25 @@
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: status-text-shimmer 2.9s linear infinite;
+  animation: status-text-shimmer 2.2s linear infinite;
   pointer-events: none;
 }
 
 #status-bubble-dismiss {
   position: absolute;
   right: 10px;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.14);
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
   color: var(--status-text, rgba(255, 255, 255, 0.9));
   font-size: 14px;
-  line-height: 18px;
+  line-height: 1;
   display: none;
   cursor: pointer;
   padding: 0;
+  transition: background-color 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
 }
 
 #status-bubble.status-bubble--expanded #status-bubble-dismiss {
@@ -183,7 +173,13 @@
 }
 
 #status-bubble-dismiss:hover {
-  background: rgba(171, 178, 190, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+#status-bubble-dismiss:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(151, 179, 162, 0.36);
 }
 
 #status-bubble-text::selection {
@@ -193,13 +189,13 @@
 
 @keyframes status-bubble-pulse {
   0% {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(171, 178, 190, 0);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28), 0 0 0 0 rgba(171, 178, 190, 0);
   }
   50% {
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.42), 0 0 0 8px rgba(171, 178, 190, 0.28);
+    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32), 0 0 0 6px rgba(171, 178, 190, 0.18);
   }
   100% {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 0 0 0 rgba(171, 178, 190, 0);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28), 0 0 0 0 rgba(171, 178, 190, 0);
   }
 }
 
@@ -210,10 +206,19 @@
 
 @keyframes status-text-out {
   from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(10px); opacity: 0; }
 }
 
 @keyframes status-text-in {
-  from { transform: translateY(-20px); opacity: 0; }
+  from { transform: translateY(-10px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #status-bubble,
+  #status-bubble-text,
+  #status-bubble-text::after {
+    animation: none !important;
+    transition-duration: 10ms !important;
+  }
 }

@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('api', {
   getModelName: () => ipcRenderer.invoke('get-model-name'),
   getServerConfig: () => ipcRenderer.invoke('get-server-config'),
   getChatSessionInfo: () => ipcRenderer.invoke('get-chat-session-info'),
-  loadChatSession: () => ipcRenderer.invoke('load-chat-session'),
-  saveChatSession: (messages) => ipcRenderer.invoke('save-chat-session', { messages })
+  getChatSessionState: (sessionId) => ipcRenderer.invoke('get-chat-session-state', { sessionId }),
+  createChatSession: () => ipcRenderer.invoke('create-chat-session'),
+  archiveChatSession: (sessionId) => ipcRenderer.invoke('archive-chat-session', { sessionId }),
+  loadChatSession: (sessionId) => ipcRenderer.invoke('load-chat-session', { sessionId }),
+  saveChatSession: (sessionId, messages) => ipcRenderer.invoke('save-chat-session', { sessionId, messages })
 });

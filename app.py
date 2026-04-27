@@ -1,16 +1,61 @@
 import os
 import asyncio
 import time
+import shutil
+import subprocess
 from PIL import ImageGrab
 from core.settings import set_host_and_port, set_screen_size, get_model_configs, get_screen_size
 
 from models.models import call_gemini, store_screenshot
 from agents.jarvis.tools import stop_all_actions
+from agents.cua_cli.agent import CLIAgent
 from agents.cua_vision.tools import (
     reset_state as reset_cua_vision_state,
     request_stop as request_cua_vision_stop,
 )
+from integrations.audio import transcribe_audio_bytes
 from ui.server import VisualizationServer
+
+
+def maybe_launch_electron_ui(project_root: str):
+    auto_launch = os.getenv("JARVIS_AUTO_LAUNCH_ELECTRON", "1").strip().lower()
+    if auto_launch in {"0", "false", "no", "off"}:
+        return
+
+    ui_root = os.path.join(project_root, "ui")
+    if not os.path.isdir(ui_root):
+        print(f"Electron auto-launch skipped (missing UI directory): {ui_root}")
+        return
+
+    npm_command = "npm.cmd" if os.name == "nt" else "npm"
+    npm_path = shutil.which(npm_command) or shutil.which("npm")
+    if not npm_path:
+        print("Electron auto-launch skipped (npm not found on PATH).")
+        return
+
+    env = os.environ.copy()
+    electron_binary = os.path.join(
+        ui_root,
+        "node_modules",
+        "electron",
+        "dist",
+        "electron.exe" if os.name == "nt" else "electron",
+    )
+    if os.path.exists(electron_binary):
+        env.setdefault("JARVIS_ELECTRON_BINARY", electron_binary)
+
+    try:
+        kwargs = {
+            "cwd": ui_root,
+            "env": env,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        subprocess.Popen([npm_path, "run", "dev"], **kwargs)
+        print("Launching Electron UI...")
+    except Exception as exc:
+        print(f"Electron auto-launch failed: {type(exc).__name__}: {exc}")
 
 
 async def main():
@@ -53,6 +98,7 @@ async def main():
             task = current_task
         if task and not task.done():
             task.cancel()
+        await CLIAgent.stop_all_running_processes()
         stop_all_actions()
         reset_cua_vision_state()
 
@@ -89,15 +135,25 @@ async def main():
             task = asyncio.create_task(_run_overlay_task(text))
             current_task = task
 
+    async def handle_voice_transcription(audio_bytes: bytes, mime_type: str, filename: str) -> str:
+        return await asyncio.to_thread(
+            transcribe_audio_bytes,
+            audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+        )
+
     server = VisualizationServer(
         host=host,
         port=port,
         on_overlay_input=handle_overlay_input,
         on_capture_screenshot=store_screenshot,
-        on_stop_all=stop_all
+        on_stop_all=stop_all,
+        on_transcribe_audio=handle_voice_transcription,
     )
     await server.start()
     print(f"Visualization server listening at ws://{host}:{port}")
+    maybe_launch_electron_ui(os.path.dirname(__file__))
     print("Waiting for overlay client connection...")
     await server.wait_for_client()
     print("Overlay client connected.")

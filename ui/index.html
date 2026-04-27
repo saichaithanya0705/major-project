@@ -25,6 +25,18 @@
       height: 100%;
       pointer-events: auto;
     }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
   </style>
 </head>
 <body>
@@ -39,7 +51,15 @@
     </div>
     <div id="command-bar">
       <div class="command-input-wrap">
-        <textarea id="command-input" rows="1" placeholder="Ask anything or assign a task (terminal, browser, desktop)..." autocomplete="off"></textarea>
+        <label class="visually-hidden" for="command-input">Command input</label>
+        <textarea
+          id="command-input"
+          rows="1"
+          placeholder="Describe the next task for JARVIS…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Command input"
+        ></textarea>
         <button id="command-send" type="button" aria-label="Send">
           <span class="command-send-icon">&#8594;</span>
         </button>

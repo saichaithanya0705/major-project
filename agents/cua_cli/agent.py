@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Callable, Awaitable, Any
 
 from dotenv import load_dotenv
+from ui.visualization_api.client import get_client
 
 # Load environment variables (ensures GEMINI_API_KEY is available)
 load_dotenv()
@@ -43,6 +44,27 @@ def _clean_join_text(*parts: Any) -> str:
     return " | ".join(cleaned_parts)
 
 
+def _stringify_terminal_value(value: Any, max_len: int = 6000) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, indent=2, ensure_ascii=True)
+        except Exception:
+            text = str(value)
+
+    normalized = text.replace("\r\n", "\n").strip()
+    if not normalized:
+        return ""
+    if len(normalized) > max_len:
+        clipped = normalized[: max_len - 18].rstrip()
+        return f"{clipped}\n...[truncated]..."
+    return normalized
+
+
 class CLIAgent:
     """
     Desktop control agent using Gemini CLI.
@@ -58,6 +80,7 @@ class CLIAgent:
     """
     _cleanup_hook_registered = False
     _managed_background_processes: Dict[str, Dict[str, Any]] = {}
+    _active_foreground_processes: Dict[str, Dict[str, Any]] = {}
 
     def __init__(
         self,
@@ -84,7 +107,7 @@ class CLIAgent:
         self.approval_mode = approval_mode
         self.output_format = output_format
         self.model = model
-        self._workspace_dirs = self._compute_workspace_dirs()
+        self._base_workspace_dirs = self._compute_workspace_dirs()
         self._gemini_cli_home = self._ensure_gemini_cli_home()
         self._trusted_folders_path = self._ensure_trusted_folders_config()
         self._ensure_cleanup_hook_registered()
@@ -109,7 +132,7 @@ class CLIAgent:
             "--approval-mode", self.approval_mode,
         ]
 
-        for include_dir in self._workspace_dirs:
+        for include_dir in self._workspace_dirs_for_task(task):
             cmd.extend(["--include-directories", include_dir])
 
         if self.model:
@@ -134,6 +157,67 @@ class CLIAgent:
         # Disable sandbox for maximum tool/file access in JARVIS CLI sessions.
         env["GEMINI_SANDBOX"] = "false"
         return env
+
+    @staticmethod
+    def _is_shell_tool_name(tool_name: str) -> bool:
+        return str(tool_name or "").strip().lower() in {"run_shell_command", "shell", "bash"}
+
+    @classmethod
+    async def _emit_terminal_event(
+        cls,
+        session_id: str,
+        kind: str,
+        text: str = "",
+        shell_command: str = "",
+        status: str = "",
+        source: str = "cua_cli",
+    ) -> None:
+        payload = {
+            "command": "terminal_session_event",
+            "sessionId": session_id,
+            "kind": kind,
+            "source": source,
+            "ts": int(time.time() * 1000),
+        }
+        if text:
+            payload["text"] = text
+        if shell_command:
+            payload["shellCommand"] = shell_command
+        if status:
+            payload["status"] = status
+
+        try:
+            client = await get_client()
+            await client.send(payload)
+        except Exception:
+            # Best-effort UI transcript only.
+            pass
+
+    @classmethod
+    def _register_foreground_process(
+        cls,
+        session_id: str,
+        process: asyncio.subprocess.Process,
+        task: str,
+    ) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {
+            "id": session_id,
+            "pid": process.pid,
+            "pgid": None,
+            "task": task,
+            "started_at": time.time(),
+        }
+        if os.name != "nt":
+            try:
+                metadata["pgid"] = os.getpgid(process.pid)
+            except Exception:
+                metadata["pgid"] = process.pid
+        cls._active_foreground_processes[session_id] = metadata
+        return metadata
+
+    @classmethod
+    def _unregister_foreground_process(cls, session_id: str) -> None:
+        cls._active_foreground_processes.pop(session_id, None)
 
     @classmethod
     def _ensure_cleanup_hook_registered(cls) -> None:
@@ -186,11 +270,138 @@ class CLIAgent:
         return deduped
 
     @staticmethod
-    def _prepare_cli_task(task: str) -> str:
+    def _task_requests_terminal_execution(task: str) -> bool:
+        lowered = (task or "").lower()
+        markers = (
+            "terminal",
+            "shell",
+            "powershell",
+            "pwsh",
+            "bash",
+            "cmd",
+            "command prompt",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _extract_drive_roots_from_task(task: str) -> List[str]:
+        roots: List[str] = []
+        for match in re.finditer(r"\b([a-zA-Z])\s*(?::)?\s*drive\b", task or "", flags=re.IGNORECASE):
+            root = f"{match.group(1).upper()}:\\"
+            if Path(root).exists() and root not in roots:
+                roots.append(root)
+        return roots
+
+    @staticmethod
+    def _extract_path_candidates_from_task(task: str) -> List[str]:
+        if not task:
+            return []
+
+        candidates: List[str] = []
+
+        for pattern in (r"`([^`]+)`", r"'([^']+)'", r'"([^"]+)"'):
+            for match in re.finditer(pattern, task, flags=re.DOTALL):
+                candidate = match.group(1).strip()
+                if candidate and any(token in candidate for token in ("\\", "/", ":")):
+                    candidates.append(candidate)
+
+        path_scan_text = re.sub(r"https?://[^\s,;]+", " ", task, flags=re.IGNORECASE)
+        raw_matches = re.findall(
+            r"(?<!\w)(~\/[^\s,;]+|\/[^\s,;]+|[A-Za-z]:\\[^\n\r\t]+|\\\\[^\n\r\t]+)",
+            path_scan_text,
+        )
+        for raw in raw_matches:
+            candidate = str(raw).strip().strip(".,;:()[]{}'\"`")
+            if candidate:
+                candidates.append(candidate)
+
+        deduped: List[str] = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    @staticmethod
+    def _nearest_existing_workspace_scope(path_expr: str) -> Optional[str]:
+        if not path_expr:
+            return None
+
+        expanded = os.path.expandvars(os.path.expanduser(path_expr.strip().strip("'\"`")))
+        candidate = Path(expanded)
+        if not candidate.is_absolute():
+            candidate = (Path.cwd().resolve() / candidate)
+
+        probe = candidate
+        while True:
+            if probe.exists():
+                directory = probe if probe.is_dir() else probe.parent
+                try:
+                    return str(directory.resolve())
+                except Exception:
+                    return str(directory)
+
+            parent = probe.parent
+            if parent == probe:
+                return None
+            probe = parent
+
+    @staticmethod
+    def _dedupe_workspace_dirs(paths: List[str]) -> List[str]:
+        deduped: List[str] = []
+        seen: set[str] = set()
+        for raw in paths:
+            if not raw:
+                continue
+            try:
+                normalized = str(Path(raw).resolve())
+            except Exception:
+                normalized = os.path.abspath(raw)
+            key = os.path.normcase(os.path.normpath(normalized))
+            if key in seen or not Path(normalized).exists():
+                continue
+            seen.add(key)
+            deduped.append(normalized)
+        return deduped
+
+    def _workspace_dirs_for_task(self, task: str) -> List[str]:
+        scoped_paths: List[str] = list(self._base_workspace_dirs)
+        scoped_paths.extend(self._extract_drive_roots_from_task(task))
+
+        for candidate in self._extract_path_candidates_from_task(task):
+            scope = self._nearest_existing_workspace_scope(candidate)
+            if scope:
+                scoped_paths.append(scope)
+
+        return self._dedupe_workspace_dirs(scoped_paths)
+
+    def _prepare_cli_task(self, task: str) -> str:
         """
         Add execution guidance so the CLI model performs actions rather than
         only describing commands.
         """
+        extra_scope = [
+            path for path in self._workspace_dirs_for_task(task)
+            if os.path.normcase(os.path.normpath(path))
+            not in {
+                os.path.normcase(os.path.normpath(base_dir))
+                for base_dir in self._base_workspace_dirs
+            }
+        ]
+        extra_guidance: List[str] = []
+        if self._task_requests_terminal_execution(task):
+            extra_guidance.append(
+                "The user explicitly asked to use the terminal. Prefer shell commands over write_file/edit tools for filesystem changes."
+            )
+        if extra_scope:
+            extra_guidance.append(
+                "This task explicitly references filesystem locations under: "
+                + ", ".join(extra_scope)
+                + "."
+            )
+            extra_guidance.append(
+                "When the user specifies a drive, directory, or absolute path, operate there exactly and do not silently redirect to a different folder."
+            )
+
         instruction = (
             "You are running inside JARVIS with tool access enabled. "
             "Execute the request directly using tools/shell commands instead of giving manual instructions. "
@@ -200,6 +411,8 @@ class CLIAgent:
             "Launch detached with nohup/background so it stays alive after this turn, "
             "then verify localhost/port reachability before claiming success."
         )
+        if extra_guidance:
+            instruction = f"{instruction} {' '.join(extra_guidance)}"
         return f"{instruction}\n\nTask:\n{task}"
 
     @staticmethod
@@ -612,6 +825,28 @@ class CLIAgent:
         return stopped
 
     @classmethod
+    async def stop_all_running_processes(cls) -> int:
+        foreground_ids = list(cls._active_foreground_processes.keys())
+        stopped = 0
+
+        for proc_id in foreground_ids:
+            meta = cls._active_foreground_processes.get(proc_id)
+            if not meta:
+                continue
+            cls._terminate_process_tree_sync(meta)
+            cls._active_foreground_processes.pop(proc_id, None)
+            stopped += 1
+            await cls._emit_terminal_event(
+                proc_id,
+                kind="session_stopped",
+                text="Terminal session stopped.",
+                status="stopped",
+            )
+
+        stopped += await cls.stop_all_background_processes()
+        return stopped
+
+    @classmethod
     def list_background_processes(cls) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         now = time.time()
@@ -630,6 +865,17 @@ class CLIAgent:
 
     async def _maybe_handle_background_management_task(self, task: str) -> Optional[dict]:
         lower = task.strip().lower()
+        if any(phrase in lower for phrase in (
+            "close terminal",
+            "close the terminal",
+            "stop terminal",
+            "stop the terminal",
+            "kill terminal",
+            "stop cli agent",
+        )):
+            count = await self.stop_all_running_processes()
+            return {"success": True, "result": f"Stopped {count} CLI process(es).", "error": None}
+
         if "list background process" in lower or "show background process" in lower:
             rows = self.list_background_processes()
             if not rows:
@@ -746,6 +992,68 @@ class CLIAgent:
         ]
         return any(re.search(p, lowered) for p in patterns)
 
+    @staticmethod
+    def _looks_like_generic_api_failure(error_text: Optional[str]) -> bool:
+        lowered = str(error_text or "").lower()
+        if not lowered:
+            return False
+        markers = (
+            "fetch failed",
+            "sending request",
+            "[api error:",
+            "exception typeerror",
+            "session error",
+        )
+        return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _collect_tool_error_messages(
+        tool_calls: Optional[List[Dict[str, Any]]],
+    ) -> List[str]:
+        messages: List[str] = []
+        for tool_call in tool_calls or []:
+            if not isinstance(tool_call, dict):
+                continue
+            if str(tool_call.get("status") or "").strip().lower() != "error":
+                continue
+
+            message = ""
+            raw_error = tool_call.get("error")
+            if isinstance(raw_error, dict):
+                message = str(raw_error.get("message") or raw_error.get("error") or "")
+            elif raw_error is not None:
+                message = str(raw_error)
+
+            if not message:
+                raw_result = tool_call.get("result")
+                if isinstance(raw_result, str):
+                    message = raw_result
+                elif raw_result is not None:
+                    message = _stringify_terminal_value(raw_result, max_len=800)
+
+            cleaned = " ".join(str(message or "").split())
+            if cleaned and cleaned not in messages:
+                messages.append(cleaned)
+        return messages
+
+    @classmethod
+    def _normalize_cli_response(cls, response: CLIResponse) -> CLIResponse:
+        tool_errors = cls._collect_tool_error_messages(response.tool_calls)
+        if not tool_errors:
+            return response
+
+        primary_error = tool_errors[-1]
+        if not response.output and not response.success:
+            response.output = primary_error
+
+        if response.error:
+            if cls._looks_like_generic_api_failure(response.error):
+                response.error = _clean_join_text(primary_error, response.error)
+        elif not response.success:
+            response.error = primary_error
+
+        return response
+
     async def execute(
         self,
         task: str,
@@ -816,6 +1124,7 @@ class CLIAgent:
                     run_timeout,
                     status_callback=status_callback,
                 )
+            response = self._normalize_cli_response(response)
             # If CLI used a server-like launch command in tool calls, auto-persist it.
             # This avoids "it said localhost is up, but the process already exited".
             if response.tool_calls:
@@ -957,6 +1266,97 @@ class CLIAgent:
 
         return None
 
+    @classmethod
+    async def _emit_terminal_stream_event(
+        cls,
+        session_id: str,
+        event: dict,
+        tool_by_id: Dict[str, str],
+        shell_command_by_id: Dict[str, str],
+    ) -> None:
+        event_type = event.get("type")
+        if event_type == "init":
+            await cls._emit_terminal_event(
+                session_id,
+                kind="session_started",
+                text="CLI session started.",
+                status="running",
+            )
+            return
+
+        if event_type == "tool_use":
+            tool_name = str(event.get("tool_name") or "tool")
+            tool_id = str(event.get("tool_id") or "")
+            if not cls._is_shell_tool_name(tool_name):
+                return
+            params = event.get("parameters")
+            if not isinstance(params, dict):
+                params = {}
+            command = cls._safe_preview(
+                params.get("command") or params.get("cmd") or params.get("script"),
+                400,
+            )
+            if tool_id and command:
+                shell_command_by_id[tool_id] = command
+            await cls._emit_terminal_event(
+                session_id,
+                kind="command_started",
+                shell_command=command,
+                text=command or "Running shell command...",
+                status="running",
+            )
+            return
+
+        if event_type == "tool_result":
+            tool_id = str(event.get("tool_id") or "")
+            tool_name = tool_by_id.get(tool_id, "tool")
+            if not cls._is_shell_tool_name(tool_name):
+                return
+            command = shell_command_by_id.get(tool_id, "")
+            output_text = _stringify_terminal_value(event.get("output"))
+            error_text = _stringify_terminal_value(event.get("error"))
+            if event.get("status") == "error":
+                await cls._emit_terminal_event(
+                    session_id,
+                    kind="command_output",
+                    shell_command=command,
+                    text=error_text or "Shell command failed without captured stderr.",
+                    status="error",
+                )
+                return
+
+            await cls._emit_terminal_event(
+                session_id,
+                kind="command_output",
+                shell_command=command,
+                text=output_text or "(command completed with no output)",
+                status="success",
+            )
+            return
+
+        if event_type == "error":
+            await cls._emit_terminal_event(
+                session_id,
+                kind="session_error",
+                text=cls._safe_preview(event.get("message"), 240) or "CLI session failed.",
+                status="error",
+            )
+            return
+
+        if event_type == "result":
+            status = "success" if event.get("status") == "success" else "error"
+            error = event.get("error")
+            if isinstance(error, dict):
+                result_text = cls._safe_preview(error.get("message"), 240)
+            else:
+                result_text = cls._safe_preview(error, 240)
+            await cls._emit_terminal_event(
+                session_id,
+                kind="session_finished" if status == "success" else "session_error",
+                text=result_text or ("CLI session finished." if status == "success" else "CLI session failed."),
+                status=status,
+            )
+
     async def _emit_status(
         self,
         status_callback: Optional[Callable[[str], Awaitable[None]]],
@@ -982,6 +1382,7 @@ class CLIAgent:
         Returns structured response parsed from JSON output.
         """
         cmd = self._build_command(task)
+        session_id = uuid.uuid4().hex[:8]
 
         env = self._build_cli_env()
 
@@ -993,10 +1394,12 @@ class CLIAgent:
             cwd=str(Path.cwd().resolve()),
             env=env,
         )
+        self._register_foreground_process(session_id, process, task)
 
         stdout_lines: List[str] = []
         stderr_lines: List[str] = []
         tool_by_id: Dict[str, str] = {}
+        shell_command_by_id: Dict[str, str] = {}
 
         async def _read_stdout() -> None:
             if process.stdout is None:
@@ -1007,13 +1410,17 @@ class CLIAgent:
                     break
                 line = raw.decode("utf-8", errors="replace").rstrip("\n")
                 stdout_lines.append(line)
-                if not status_callback:
-                    continue
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 status_text = self._status_from_stream_event(event, tool_by_id)
+                await self._emit_terminal_stream_event(
+                    session_id=session_id,
+                    event=event,
+                    tool_by_id=tool_by_id,
+                    shell_command_by_id=shell_command_by_id,
+                )
                 await self._emit_status(status_callback, status_text)
 
         async def _read_stderr() -> None:
@@ -1023,7 +1430,8 @@ class CLIAgent:
                 raw = await process.stderr.readline()
                 if not raw:
                     break
-                stderr_lines.append(raw.decode("utf-8", errors="replace"))
+                decoded = raw.decode("utf-8", errors="replace")
+                stderr_lines.append(decoded)
 
         timed_out = False
         stdout_task = asyncio.create_task(_read_stdout())
@@ -1035,14 +1443,46 @@ class CLIAgent:
                 asyncio.gather(stdout_task, stderr_task, wait_task),
                 timeout=timeout,
             )
+        except asyncio.CancelledError:
+            self._terminate_process_tree_sync({"pid": process.pid})
+            try:
+                await process.wait()
+            except Exception:
+                pass
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            await self._emit_terminal_event(
+                session_id,
+                kind="session_stopped",
+                text="CLI session stopped.",
+                status="stopped",
+            )
+            raise
         except asyncio.TimeoutError:
             timed_out = True
-            process.kill()
-            await process.wait()
+            self._terminate_process_tree_sync({"pid": process.pid})
+            try:
+                await process.wait()
+            except Exception:
+                pass
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            await self._emit_terminal_event(
+                session_id,
+                kind="session_error",
+                text=f"CLI session timed out after {timeout} seconds.",
+                status="error",
+            )
+        finally:
+            self._unregister_foreground_process(session_id)
 
         stdout_text = "\n".join(stdout_lines)
         stderr_text = "".join(stderr_lines)
+        if stderr_text.strip() and not stdout_lines:
+            await self._emit_terminal_event(
+                session_id,
+                kind="session_error",
+                text=_stringify_terminal_value(stderr_text, max_len=1200) or "CLI session failed.",
+                status="error",
+            )
 
         # Parse the output based on format
         if self.output_format == "stream-json":

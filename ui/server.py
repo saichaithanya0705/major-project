@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import time
 from typing import Optional, Tuple
@@ -22,7 +23,15 @@ class VisualizationServer:
     INVERTED_PANEL_DARK_THRESHOLD = 45
     STATUS_INVERTED_PANEL_DARK_THRESHOLD = 132
 
-    def __init__(self, host="127.0.0.1", port=8765, on_overlay_input=None, on_capture_screenshot=None, on_stop_all=None):
+    def __init__(
+        self,
+        host="127.0.0.1",
+        port=8765,
+        on_overlay_input=None,
+        on_capture_screenshot=None,
+        on_stop_all=None,
+        on_transcribe_audio=None,
+    ):
         self.host = host
         self.port = port
         self.clients = set()
@@ -33,6 +42,7 @@ class VisualizationServer:
         self.on_overlay_input = on_overlay_input
         self.on_capture_screenshot = on_capture_screenshot
         self.on_stop_all = on_stop_all
+        self.on_transcribe_audio = on_transcribe_audio
         self._last_screenshot = None
         self._last_screenshot_rgb = None
         self._last_capture_backend = "none"
@@ -339,6 +349,8 @@ class VisualizationServer:
                     await self._broadcast(payload)
                 elif command == "set_background":
                     await self._broadcast(payload)
+                elif command == "terminal_session_event":
+                    await self._broadcast(payload)
                 else:
                     event = payload.get("event")
                     if event == "viewport":
@@ -356,6 +368,42 @@ class VisualizationServer:
                             if asyncio.iscoroutine(result):
                                 result = await result
                             self._store_screenshot(result)
+                        continue
+                    if event == "transcribe_audio":
+                        request_id = payload.get("requestId") or payload.get("request_id")
+                        audio_base64 = payload.get("audioBase64") or payload.get("audio_base64") or ""
+                        mime_type = str(payload.get("mimeType") or payload.get("mime_type") or "audio/webm")
+                        filename = str(payload.get("filename") or "voice-command.webm")
+
+                        if not self.on_transcribe_audio:
+                            await self._send_json(websocket, {
+                                "event": "voice_transcription_error",
+                                "requestId": request_id,
+                                "error": "Voice transcription is not configured.",
+                            })
+                            continue
+
+                        try:
+                            audio_bytes = base64.b64decode(audio_base64, validate=True)
+                            if not audio_bytes:
+                                raise ValueError("Recorded audio was empty.")
+                            result = self.on_transcribe_audio(audio_bytes, mime_type, filename)
+                            if asyncio.iscoroutine(result):
+                                result = await result
+                            text = str(result or "").strip()
+                            if not text:
+                                raise ValueError("No speech was detected in the recording.")
+                            await self._send_json(websocket, {
+                                "event": "voice_transcription_result",
+                                "requestId": request_id,
+                                "text": text,
+                            })
+                        except Exception as exc:
+                            await self._send_json(websocket, {
+                                "event": "voice_transcription_error",
+                                "requestId": request_id,
+                                "error": str(exc) or type(exc).__name__,
+                            })
                         continue
                     if event == "stop_all":
                         if self.on_stop_all:
@@ -399,6 +447,12 @@ class VisualizationServer:
             # Normal path when renderer reloads or disconnects abruptly.
             pass
         finally:
+            self.clients.discard(websocket)
+
+    async def _send_json(self, websocket, payload):
+        try:
+            await websocket.send(json.dumps(payload))
+        except ConnectionClosed:
             self.clients.discard(websocket)
 
     async def _broadcast(self, payload):

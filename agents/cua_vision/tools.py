@@ -362,14 +362,20 @@ def _should_force_zoom(width_px: float, height_px: float) -> bool:
     )
 
 
-def _bbox_to_capture_pixel_box(ymin: float, xmin: float, ymax: float, xmax: float) -> tuple[float, float, float, float]:
+def _bbox_to_capture_pixel_box(
+    ymin: float,
+    xmin: float,
+    ymax: float,
+    xmax: float,
+    context: dict | None = None,
+) -> tuple[float, float, float, float]:
     """
     Map bbox args to pixel coordinates on the stored capture image.
 
     Args are interpreted in logical coordinates (0-1000/0-1/logical px),
     then scaled into capture-image pixels.
     """
-    context = _get_last_capture_context()
+    context = context or _get_last_capture_context()
     if not context:
         capture_active_window()
         context = _get_last_capture_context()

@@ -88,7 +88,7 @@ async def test_chains_multiple_agents_then_finishes() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
-async def test_stops_on_repeated_step_loop() -> None:
+async def test_repeated_step_loop_recovers_and_finishes() -> None:
     original_model_cls = model_module.GeminiModel
     original_run_step = model_module._run_routed_agent_step
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
@@ -114,6 +114,7 @@ async def test_stops_on_repeated_step_loop() -> None:
         {"agent": "cua_cli", "task": "clone repo"},
         {"agent": "cua_cli", "task": "clone repo"},
         {"agent": "cua_cli", "task": "clone repo"},
+        {"agent": "direct", "response_text": "done"},
     ]
 
     model_module._RAPID_CONVERSATION_HISTORY.clear()
@@ -123,8 +124,8 @@ async def test_stops_on_repeated_step_loop() -> None:
     try:
         await model_module.call_gemini("clone this repo and open locally", "rapid", "jarvis")
         assert executed_agents == ["cua_cli", "cua_cli"], executed_agents
-        assert direct_messages, "Expected repeat-loop stop message"
-        assert "kept repeating" in direct_messages[-1].lower(), direct_messages[-1]
+        assert direct_messages, "Expected loop-recovery direct response"
+        assert direct_messages[-1] == "done", direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
@@ -152,7 +153,7 @@ async def test_invalid_route_result_falls_back_to_direct() -> None:
         await model_module.call_gemini("open localhost 3000", "rapid", "jarvis")
         history_entries = list(model_module._RAPID_CONVERSATION_HISTORY)
         assert history_entries, "Expected rapid history entry after fallback"
-        assert any("invalid response shape" in str(entry.get("text", "")).lower() for entry in history_entries), history_entries
+        assert any("invalid routing response shape" in str(entry.get("text", "")).lower() for entry in history_entries), history_entries
     finally:
         model_module.GeminiModel = original_model_cls
         if original_direct_response is not None:
@@ -364,15 +365,62 @@ async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> N
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_window_management_request_reroutes_jarvis_to_cua_vision() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "message": f"{agent} step completed",
+            "source": "rapid",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "jarvis", "query": "Minimize the codex app on my screen"},
+        {"agent": "direct", "response_text": "done"},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "Minimize the codex app on my screen",
+            "rapid",
+            "jarvis",
+        )
+        assert executed_agents == ["cua_vision"], executed_agents
+        assert direct_messages and direct_messages[-1] == "done", direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
 def test_router_refusal_task_is_replaced_with_original_request() -> None:
     model = object.__new__(model_module.GeminiModel)
-    route = model_module.GeminiModel._normalize_ollama_router_decision(
+    route = model_module.GeminiModel._normalize_router_decision(
         model,
         {
             "agent": "browser",
             "task": "I cannot open URLs directly as I am a text-based AI model.",
         },
         "# User's Latest Request:\nopen https://example.com",
+        provider_name="Ollama",
     )
     assert route == {
         "agent": "browser",
@@ -419,16 +467,43 @@ def test_ollama_router_payload_disables_thinking() -> None:
     assert captured_payload["options"]["num_predict"] == 800, captured_payload
 
 
+def test_deterministic_router_is_disabled_after_chain_progress() -> None:
+    prompt = (
+        "\n# Multi-Agent Chaining Mode\n"
+        "Continue from prior delegated work. Choose the single best next tool call.\n"
+        "Original request: clone this repo and open locally\n"
+        "Completed delegated steps (1/6):\n"
+        "1. agent=cua_cli success=True task=clone repo outcome=clone completed\n"
+        "\n# User's Latest Request:\nclone this repo and open locally"
+    )
+    assert model_module._prompt_has_completed_delegated_steps(prompt) is True
+    assert model_module._should_use_deterministic_router(prompt) is False
+
+
+def test_window_management_is_execution_not_visual_explanation() -> None:
+    prompt = "Minimize the codex app on my screen"
+    route = model_module._deterministic_router_decision(
+        f"# User's Latest Request:\n{prompt}"
+    )
+
+    assert model_module._is_execution_request(prompt) is True
+    assert model_module._is_visual_explanation_request(prompt) is False
+    assert route == {"agent": "cua_vision", "task": prompt}
+
+
 async def run_checks() -> None:
+    test_deterministic_router_is_disabled_after_chain_progress()
+    test_window_management_is_execution_not_visual_explanation()
     test_router_refusal_task_is_replaced_with_original_request()
     test_ollama_router_payload_disables_thinking()
     await test_chains_multiple_agents_then_finishes()
-    await test_stops_on_repeated_step_loop()
+    await test_repeated_step_loop_recovers_and_finishes()
     await test_invalid_route_result_falls_back_to_direct()
     await test_direct_response_repeat_artifact_is_sanitized()
     await test_screen_context_then_actionable_agent()
     await test_execution_request_reroutes_jarvis_to_cli()
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
+    await test_window_management_request_reroutes_jarvis_to_cua_vision()
 
 
 if __name__ == "__main__":
