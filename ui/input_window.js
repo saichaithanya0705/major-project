@@ -20,6 +20,7 @@ const chatHide = document.getElementById('chat-hide');
 const chatStop = document.getElementById('chat-stop');
 const chatHistoryToggle = document.getElementById('chat-history-toggle');
 const chatNew = document.getElementById('chat-new');
+const chatBody = document.getElementById('chat-body');
 const chatMain = document.getElementById('chat-main');
 const historyPanel = document.getElementById('history-panel');
 const historyPanelClose = document.getElementById('history-panel-close');
@@ -88,8 +89,6 @@ let isVoiceRecording = false;
 let isVoiceTranscribing = false;
 let voiceDiscardOnStop = false;
 let pendingVoiceRequestId = '';
-let voiceRecordingStartedAt = 0;
-let voiceRecordingTimer = null;
 
 const assistantMessageCache = [];
 const chatHistory = [];
@@ -1051,6 +1050,9 @@ function renderHistoryList() {
 function openHistoryPanel() {
   closeShortcutsPopover();
   isHistoryOpen = true;
+  if (chatBody) {
+    chatBody.dataset.view = 'history';
+  }
   if (historyPanel) {
     historyPanel.hidden = false;
   }
@@ -1065,6 +1067,9 @@ function openHistoryPanel() {
 
 function closeHistoryPanel() {
   isHistoryOpen = false;
+  if (chatBody) {
+    chatBody.dataset.view = 'chat';
+  }
   if (historyPanel) {
     historyPanel.hidden = true;
   }
@@ -1249,48 +1254,6 @@ function isSocketConnected() {
   return Boolean(socket && socket.readyState === WebSocket.OPEN);
 }
 
-function formatVoiceElapsed(ms) {
-  const totalSeconds = Math.max(0, Math.floor(Number(ms) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const paddedSeconds = String(seconds).padStart(2, '0');
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, '0')}:${paddedSeconds}`;
-  }
-  return `${minutes}:${paddedSeconds}`;
-}
-
-function getVoiceRecordingElapsedLabel() {
-  if (!voiceRecordingStartedAt) {
-    return '0:00';
-  }
-  return formatVoiceElapsed(Date.now() - voiceRecordingStartedAt);
-}
-
-function renderVoiceRecordingStatus() {
-  if (!isVoiceRecording) return;
-  setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
-    text: 'Listening for voice command...',
-    detail: `Recording ${getVoiceRecordingElapsedLabel()}`,
-  });
-}
-
-function stopVoiceRecordingTimer() {
-  if (voiceRecordingTimer) {
-    clearInterval(voiceRecordingTimer);
-    voiceRecordingTimer = null;
-  }
-  voiceRecordingStartedAt = 0;
-}
-
-function startVoiceRecordingTimer() {
-  stopVoiceRecordingTimer();
-  voiceRecordingStartedAt = Date.now();
-  renderVoiceRecordingStatus();
-  voiceRecordingTimer = setInterval(renderVoiceRecordingStatus, 1000);
-}
-
 function stopVoiceStream() {
   if (!voiceStream) return;
   for (const track of voiceStream.getTracks()) {
@@ -1304,7 +1267,6 @@ function stopVoiceStream() {
 }
 
 function resetVoiceState() {
-  stopVoiceRecordingTimer();
   stopVoiceStream();
   voiceRecorder = null;
   voiceChunks = [];
@@ -1481,15 +1443,7 @@ function stopVoiceRecording(options = {}) {
   isVoiceRecording = false;
   isVoiceTranscribing = !options.discard;
   voiceDiscardOnStop = Boolean(options.discard);
-  stopVoiceRecordingTimer();
   updateVoiceButtonState();
-
-  if (!options.discard) {
-    setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
-      text: 'Transcribing voice command…',
-      detail: 'Sending the recording to ElevenLabs for transcription.',
-    });
-  }
 
   try {
     voiceRecorder.stop();
@@ -1554,7 +1508,6 @@ async function startVoiceRecording() {
     isVoiceRecording = true;
     isVoiceTranscribing = false;
     updateVoiceButtonState();
-    startVoiceRecordingTimer();
 
     voiceRecorder.start(1000);
   } catch (error) {
@@ -1599,13 +1552,12 @@ function handleVoiceTranscriptionResult(payload) {
 
   if (commandInput) {
     commandInput.value = mergeTranscriptIntoDraft(transcript);
+    commandInput.dispatchEvent(new Event('input', { bubbles: true }));
+    commandInput.selectionStart = commandInput.value.length;
+    commandInput.selectionEnd = commandInput.value.length;
   }
   resizeInput();
   focusCommandInput();
-  setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
-    text: 'Voice command ready',
-    detail: 'Review the transcription and press Enter to send it.',
-  });
 }
 
 function handleVoiceTranscriptionError(payload) {

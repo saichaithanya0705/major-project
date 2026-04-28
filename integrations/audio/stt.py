@@ -4,6 +4,7 @@ Speech-to-Text Integration - ElevenLabs API.
 Provides short-form transcription for voice command capture in the chat UI.
 """
 import os
+import time
 from typing import Any
 
 import requests
@@ -11,13 +12,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.getenv(name) or default).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_float(name: str, default: float) -> float:
+    try:
+        return float(str(os.getenv(name) or default).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 ELEVENLABS_API_BASE = str(os.getenv("ELEVENLABS_API_BASE") or "https://api.elevenlabs.io").rstrip("/")
 ELEVENLABS_API_KEY = str(os.getenv("ELEVENLABS_API_KEY") or "").strip()
 ELEVENLABS_STT_MODEL_ID = str(os.getenv("ELEVENLABS_STT_MODEL_ID") or "scribe_v2").strip()
+ELEVENLABS_STT_RETRIES = max(0, _get_env_int("ELEVENLABS_STT_RETRIES", 2))
+ELEVENLABS_STT_CONNECT_TIMEOUT = max(1.0, _get_env_float("ELEVENLABS_STT_CONNECT_TIMEOUT", 10.0))
+ELEVENLABS_STT_READ_TIMEOUT = max(1.0, _get_env_float("ELEVENLABS_STT_READ_TIMEOUT", 90.0))
+ELEVENLABS_STT_USER_AGENT = "JARVIS/1.0 ElevenLabs-STT"
 
 
 def _get_headers() -> dict[str, str]:
     return {
+        "Accept": "application/json",
+        "Connection": "close",
+        "User-Agent": ELEVENLABS_STT_USER_AGENT,
         "xi-api-key": ELEVENLABS_API_KEY,
     }
 
@@ -42,6 +65,50 @@ def _extract_transcript_text(payload: dict[str, Any]) -> str:
             return " ".join(merged.split())
 
     raise RuntimeError("ElevenLabs returned no transcript text.")
+
+
+def _is_retryable_request_error(exc: requests.exceptions.RequestException) -> bool:
+    return isinstance(
+        exc,
+        (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ChunkedEncodingError,
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.Timeout,
+        ),
+    )
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    return min(0.75 * (2 ** max(0, attempt - 1)), 3.0)
+
+
+def _post_stt_request(data: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> requests.Response:
+    last_error: requests.exceptions.RequestException | None = None
+    max_attempts = ELEVENLABS_STT_RETRIES + 1
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return requests.post(
+                _get_stt_url(),
+                headers=_get_headers(),
+                data=data,
+                files=files,
+                timeout=(ELEVENLABS_STT_CONNECT_TIMEOUT, ELEVENLABS_STT_READ_TIMEOUT),
+            )
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            if attempt >= max_attempts or not _is_retryable_request_error(exc):
+                break
+            time.sleep(_retry_delay_seconds(attempt))
+
+    detail = str(last_error) if last_error else "unknown transport error"
+    if len(detail) > 220:
+        detail = f"{detail[:217].rstrip()}..."
+    raise RuntimeError(
+        "ElevenLabs STT request failed after "
+        f"{max_attempts} attempt{'s' if max_attempts != 1 else ''}: {detail}"
+    ) from last_error
 
 
 def transcribe_audio_bytes(
@@ -69,16 +136,7 @@ def transcribe_audio_bytes(
         ),
     }
 
-    try:
-        response = requests.post(
-            _get_stt_url(),
-            headers=_get_headers(),
-            data=data,
-            files=files,
-            timeout=45,
-        )
-    except requests.exceptions.RequestException as exc:
-        raise RuntimeError(f"ElevenLabs STT request failed: {exc}") from exc
+    response = _post_stt_request(data, files)
 
     if response.status_code != 200:
         detail = response.text.strip()

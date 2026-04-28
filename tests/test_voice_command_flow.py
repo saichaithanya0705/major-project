@@ -106,6 +106,7 @@ def test_transcribe_audio_bytes_posts_expected_request() -> None:
     original_api_key = stt_module.ELEVENLABS_API_KEY
     original_api_base = stt_module.ELEVENLABS_API_BASE
     original_model_id = stt_module.ELEVENLABS_STT_MODEL_ID
+    original_retries = stt_module.ELEVENLABS_STT_RETRIES
     original_post = stt_module.requests.post
     captured = {}
 
@@ -120,6 +121,7 @@ def test_transcribe_audio_bytes_posts_expected_request() -> None:
     stt_module.ELEVENLABS_API_KEY = "test-key"
     stt_module.ELEVENLABS_API_BASE = "https://api.elevenlabs.io"
     stt_module.ELEVENLABS_STT_MODEL_ID = "scribe_v2"
+    stt_module.ELEVENLABS_STT_RETRIES = 0
     stt_module.requests.post = _fake_post
     try:
         transcript = stt_module.transcribe_audio_bytes(
@@ -131,22 +133,59 @@ def test_transcribe_audio_bytes_posts_expected_request() -> None:
         stt_module.ELEVENLABS_API_KEY = original_api_key
         stt_module.ELEVENLABS_API_BASE = original_api_base
         stt_module.ELEVENLABS_STT_MODEL_ID = original_model_id
+        stt_module.ELEVENLABS_STT_RETRIES = original_retries
         stt_module.requests.post = original_post
 
     assert transcript == "open settings", transcript
     assert captured["url"] == "https://api.elevenlabs.io/v1/speech-to-text", captured
-    assert captured["headers"] == {"xi-api-key": "test-key"}, captured
+    assert captured["headers"]["xi-api-key"] == "test-key", captured
+    assert captured["headers"]["Accept"] == "application/json", captured
     assert captured["data"]["model_id"] == "scribe_v2", captured
     assert captured["data"]["tag_audio_events"] == "false", captured
     assert captured["data"]["temperature"] == "0", captured
     assert captured["files"]["file"] == ("voice-command.webm", b"voice-bytes", "audio/webm"), captured
-    assert captured["timeout"] == 45, captured
+    assert captured["timeout"] == (
+        stt_module.ELEVENLABS_STT_CONNECT_TIMEOUT,
+        stt_module.ELEVENLABS_STT_READ_TIMEOUT,
+    ), captured
+
+
+def test_transcribe_audio_bytes_retries_connection_reset() -> None:
+    original_api_key = stt_module.ELEVENLABS_API_KEY
+    original_retries = stt_module.ELEVENLABS_STT_RETRIES
+    original_post = stt_module.requests.post
+    original_sleep = stt_module.time.sleep
+    attempts = {"count": 0}
+
+    def _fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise stt_module.requests.exceptions.ConnectionError(
+                ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+            )
+        return _FakeResponse(200, {"text": "retry worked"})
+
+    stt_module.ELEVENLABS_API_KEY = "test-key"
+    stt_module.ELEVENLABS_STT_RETRIES = 1
+    stt_module.requests.post = _fake_post
+    stt_module.time.sleep = lambda *_args, **_kwargs: None
+    try:
+        transcript = stt_module.transcribe_audio_bytes(b"voice-bytes")
+    finally:
+        stt_module.ELEVENLABS_API_KEY = original_api_key
+        stt_module.ELEVENLABS_STT_RETRIES = original_retries
+        stt_module.requests.post = original_post
+        stt_module.time.sleep = original_sleep
+
+    assert transcript == "retry worked", transcript
+    assert attempts["count"] == 2, attempts
 
 
 async def run_checks() -> None:
     await test_server_voice_transcription_success()
     await test_server_voice_transcription_invalid_payload()
     test_transcribe_audio_bytes_posts_expected_request()
+    test_transcribe_audio_bytes_retries_connection_reset()
 
 
 if __name__ == "__main__":

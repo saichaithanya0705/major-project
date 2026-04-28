@@ -4,13 +4,7 @@ import time
 import shutil
 import subprocess
 from PIL import ImageGrab
-from core.settings import (
-    get_model_configs,
-    get_runtime_state_path,
-    get_screen_size,
-    set_host_and_port,
-    set_screen_size,
-)
+from core.settings import set_host_and_port, set_screen_size, get_model_configs, get_screen_size
 
 from models.models import call_gemini, store_screenshot
 from agents.jarvis.tools import stop_all_actions
@@ -23,7 +17,7 @@ from integrations.audio import transcribe_audio_bytes
 from ui.server import VisualizationServer
 
 
-def maybe_launch_electron_ui(project_root: str, runtime_state_path: str):
+def maybe_launch_electron_ui(project_root: str):
     auto_launch = os.getenv("JARVIS_AUTO_LAUNCH_ELECTRON", "1").strip().lower()
     if auto_launch in {"0", "false", "no", "off"}:
         return
@@ -40,7 +34,6 @@ def maybe_launch_electron_ui(project_root: str, runtime_state_path: str):
         return
 
     env = os.environ.copy()
-    env.setdefault("JARVIS_RUNTIME_STATE_PATH", runtime_state_path)
     electron_binary = os.path.join(
         ui_root,
         "node_modules",
@@ -66,12 +59,11 @@ def maybe_launch_electron_ui(project_root: str, runtime_state_path: str):
 
 
 async def main():
-    # Figure out open port and persist it in runtime state.
+    # Figure out open port and set it in settings.json
     settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-    runtime_state_path = get_runtime_state_path(settings_path)
     host, port = set_host_and_port(settings_path)
 
-    # Figure out dimensions of the user's screen and persist them in runtime state.
+    # Figure out dimensions of the user's screen and set it in settings.json.
     # Fallback to configured size if capture is unavailable at startup.
     try:
         screen_width, screen_height = await asyncio.wait_for(
@@ -161,10 +153,7 @@ async def main():
     )
     await server.start()
     print(f"Visualization server listening at ws://{host}:{port}")
-    maybe_launch_electron_ui(
-        os.path.dirname(__file__),
-        runtime_state_path=runtime_state_path,
-    )
+    maybe_launch_electron_ui(os.path.dirname(__file__))
     print("Waiting for overlay client connection...")
     await server.wait_for_client()
     print("Overlay client connected.")
