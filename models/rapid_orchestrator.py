@@ -88,12 +88,21 @@ async def run_rapid_request(
                 success=False,
             )
         else:
+            direct_text = deps.clean_text(
+                step_result.get("message"),
+                "Task completed.",
+                420,
+            )
+            tool = deps.router_tool_map.get("direct_response")
+            if tool:
+                tool(text=direct_text, source="rapid_response")
+            deps.append_rapid_history("assistant", direct_text, "rapid")
             deps.log_assistant_event(
                 "request_completed",
                 request_id=request_id,
                 agent="jarvis",
                 task=deps.clean_text(user_prompt, "", 420),
-                message=step_result.get("message", ""),
+                message=direct_text,
                 success=True,
             )
         return

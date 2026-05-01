@@ -16,6 +16,7 @@ class ModelRuntimeConfig:
     jarvis_thinking_budget: int
     openrouter_api_key: str
     openrouter_model: str
+    openrouter_vision_model: str
     openrouter_router_model: str
     openrouter_url: str
     openrouter_site_url: str
@@ -68,6 +69,11 @@ def build_model_runtime_config(
         os.getenv("OPENROUTER_ROUTER_MODEL")
         or (rapid_openrouter_model if rapid_model_requests_openrouter else "")
         or default_openrouter_router_model
+    ).strip()
+    openrouter_vision_model = (
+        os.getenv("OPENROUTER_VISION_MODEL")
+        or os.getenv("OPENROUTER_JARVIS_MODEL")
+        or "google/gemma-4-31b-it:free"
     ).strip()
     openrouter_url = (
         os.getenv("OPENROUTER_URL") or "https://openrouter.ai/api/v1/chat/completions"
@@ -144,6 +150,7 @@ def build_model_runtime_config(
         jarvis_thinking_budget=jarvis_thinking_budget,
         openrouter_api_key=openrouter_api_key,
         openrouter_model=openrouter_model,
+        openrouter_vision_model=openrouter_vision_model,
         openrouter_router_model=openrouter_router_model,
         openrouter_url=openrouter_url,
         openrouter_site_url=openrouter_site_url,

@@ -40,6 +40,7 @@ const chatGuidanceHideShortcut = document.getElementById('chat-guidance-hide-sho
 const terminalPanel = document.getElementById('terminal-panel');
 const terminalPanelMeta = document.getElementById('terminal-panel-meta');
 const terminalPanelOutput = document.getElementById('terminal-panel-output');
+const terminalPanelToggle = document.getElementById('terminal-panel-toggle');
 const terminalPanelStop = document.getElementById('terminal-panel-stop');
 
 const platform = window.api?.getPlatform ? window.api.getPlatform() : 'win32';
@@ -51,9 +52,10 @@ const MAX_PERSISTED_MESSAGES = 300;
 const SESSION_SAVE_DEBOUNCE_MS = 250;
 const MAX_ASSISTANT_CACHE = 120;
 const ASSISTANT_THINKING_TEXT = 'Waiting for model response…';
-const CHAT_HIDDEN_AGENT_SOURCES = new Set(['jarvis']);
+const CHAT_REPLY_SOURCES = new Set(['rapid_response']);
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 16000;
-const MAX_TERMINAL_CHAT_CHARS = 2200;
+const MAX_TERMINAL_SUMMARY_SOURCE_CHARS = 2200;
+const MAX_TERMINAL_SUMMARY_CHARS = 360;
 const DEFAULT_INPUT_PLACEHOLDER = 'Describe the next task for JARVIS…';
 const ARCHIVED_INPUT_PLACEHOLDER = 'Archived chats are read-only. Start a new chat to continue.';
 const VOICE_MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
@@ -69,8 +71,13 @@ let saveTimer = null;
 let isHydratingSession = false;
 let activeTerminalSessionId = '';
 let activeTerminalRunning = false;
+let isTerminalPanelMinimized = true;
 let terminalChatBuffer = [];
 let terminalChatReady = false;
+let terminalChatCommand = '';
+let terminalChatStatus = 'idle';
+let pendingTerminalSummaryEl = null;
+let terminalSummaryPersisted = false;
 let isHistoryOpen = false;
 let historyFilter = 'active';
 let retentionDays = 30;
@@ -98,7 +105,9 @@ function normalizeAgentSource(value) {
 }
 
 function shouldDisplayReplyInChat(payload) {
-  return !CHAT_HIDDEN_AGENT_SOURCES.has(normalizeAgentSource(payload?.source));
+  const source = normalizeAgentSource(payload?.source);
+  if (!source) return true;
+  return CHAT_REPLY_SOURCES.has(source);
 }
 
 function normalizeTerminalText(value, maxChars = MAX_TERMINAL_TRANSCRIPT_CHARS) {
@@ -109,7 +118,7 @@ function normalizeTerminalText(value, maxChars = MAX_TERMINAL_TRANSCRIPT_CHARS) 
 }
 
 function truncateTerminalChatText(value) {
-  return normalizeTerminalText(value, MAX_TERMINAL_CHAT_CHARS);
+  return normalizeTerminalText(value, MAX_TERMINAL_SUMMARY_SOURCE_CHARS);
 }
 
 function pushTerminalChatLine(text) {
@@ -118,12 +127,93 @@ function pushTerminalChatLine(text) {
   terminalChatBuffer.push(value);
 }
 
-function flushTerminalChatBuffer() {
-  if (!terminalChatReady || terminalChatBuffer.length === 0) {
+function resetTerminalChatSummary() {
+  terminalChatBuffer = [];
+  terminalChatReady = false;
+  terminalChatCommand = '';
+  terminalChatStatus = 'idle';
+  pendingTerminalSummaryEl = null;
+  terminalSummaryPersisted = false;
+}
+
+function getTerminalStatusLabel(status) {
+  if (status === 'failed') return 'Failed';
+  if (status === 'stopped') return 'Stopped';
+  if (status === 'stopping') return 'Stopping';
+  if (status === 'running') return 'Running';
+  return 'Completed';
+}
+
+function getTerminalSummaryPreview() {
+  const source = normalizeTerminalText(terminalChatBuffer.join('\n\n'), MAX_TERMINAL_SUMMARY_SOURCE_CHARS);
+  if (!source) return '';
+
+  const lines = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('$ ') && !/^cli session started\.?$/i.test(line));
+
+  const packetLine = lines.find((line) => /packets:\s*sent\s*=/i.test(line));
+  const timingLine = lines.find((line) => /minimum\s*=.*maximum\s*=.*average\s*=/i.test(line));
+  if (packetLine || timingLine) {
+    return [packetLine, timingLine].filter(Boolean).join('\n');
+  }
+
+  const failureLine = lines.find((line) => /error|failed|denied|not recognized|not found|timed out|could not|cannot/i.test(line));
+  if (failureLine) {
+    return truncateText(failureLine, MAX_TERMINAL_SUMMARY_CHARS);
+  }
+
+  const interestingLines = lines
+    .filter((line) => !/^reply from /i.test(line))
+    .slice(-2);
+
+  return truncateText(interestingLines.join('\n'), MAX_TERMINAL_SUMMARY_CHARS);
+}
+
+function buildTerminalChatSummary(status = terminalChatStatus) {
+  const label = getTerminalStatusLabel(status);
+  const command = terminalChatCommand ? `$ ${terminalChatCommand}` : 'Shell command';
+  const preview = getTerminalSummaryPreview();
+  return preview ? `${label}: ${command}\n${preview}` : `${label}: ${command}`;
+}
+
+function isTerminalSummaryPending(status) {
+  return status === 'running' || status === 'stopping';
+}
+
+function updateTerminalChatSummary(status = terminalChatStatus, options = {}) {
+  terminalChatStatus = status || terminalChatStatus || 'completed';
+  const text = buildTerminalChatSummary(terminalChatStatus);
+  if (!text) return;
+
+  const ts = Date.now();
+  const pending = isTerminalSummaryPending(terminalChatStatus);
+
+  if (pendingTerminalSummaryEl && pendingTerminalSummaryEl.isConnected) {
+    setMessageElementText(pendingTerminalSummaryEl, text, { role: 'terminal', pending, ts });
+  } else {
+    pendingTerminalSummaryEl = appendMessage('terminal', text, { pending, persist: false, ts });
+  }
+
+  if (options.persist && !pending && !terminalSummaryPersisted) {
+    const message = rememberMessage('terminal', text, ts);
+    if (message) {
+      terminalSummaryPersisted = true;
+      syncCurrentSessionMetadataFromHistory(message.ts);
+      queuePersistChatHistory();
+    }
+  }
+
+  renderConversationDecorators();
+}
+
+function finalizeTerminalChatSummary(status = terminalChatStatus) {
+  if (!terminalChatReady && !pendingTerminalSummaryEl) {
     return;
   }
-  appendMessage('terminal', terminalChatBuffer.join('\n\n'), { pending: false, persist: true });
-  terminalChatBuffer = [];
+  updateTerminalChatSummary(status || 'completed', { persist: true });
   terminalChatReady = false;
 }
 
@@ -270,6 +360,12 @@ function updateActionAvailability() {
   const blocked = hasActiveWork();
   if (chatNew) {
     chatNew.disabled = blocked;
+  }
+  if (terminalPanelStop) {
+    terminalPanelStop.disabled = !activeTerminalRunning;
+  }
+  if (terminalPanel) {
+    terminalPanel.dataset.running = activeTerminalRunning ? 'true' : 'false';
   }
 }
 
@@ -436,9 +532,44 @@ function setTerminalMeta(text) {
   terminalPanelMeta.textContent = typeof text === 'string' && text.trim() ? text.trim() : 'Waiting for CLI activity...';
 }
 
+function updateTerminalPanelControls() {
+  const expanded = !isTerminalPanelMinimized;
+  if (terminalPanel) {
+    terminalPanel.dataset.state = expanded ? 'expanded' : 'minimized';
+    terminalPanel.dataset.running = activeTerminalRunning ? 'true' : 'false';
+  }
+  if (terminalPanelOutput) {
+    terminalPanelOutput.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+  }
+  if (terminalPanelToggle) {
+    terminalPanelToggle.textContent = expanded ? 'Minimize' : 'Expand';
+    terminalPanelToggle.title = expanded ? 'Minimize terminal output' : 'Expand terminal output';
+    terminalPanelToggle.setAttribute(
+      'aria-label',
+      expanded ? 'Minimize terminal output' : 'Expand terminal output',
+    );
+    terminalPanelToggle.setAttribute('aria-expanded', String(expanded));
+  }
+}
+
+function setTerminalPanelMinimized(minimized) {
+  isTerminalPanelMinimized = Boolean(minimized);
+  updateTerminalPanelControls();
+  if (!isTerminalPanelMinimized) {
+    scrollTerminalToBottom();
+  }
+}
+
 function showTerminalPanel() {
   if (terminalPanel) {
     terminalPanel.hidden = false;
+    updateTerminalPanelControls();
+  }
+}
+
+function hideTerminalPanel() {
+  if (terminalPanel) {
+    terminalPanel.hidden = true;
   }
 }
 
@@ -469,27 +600,36 @@ function resetTerminalSession(options = {}) {
   const { hide = false } = options;
   activeTerminalSessionId = '';
   activeTerminalRunning = false;
-  terminalChatBuffer = [];
-  terminalChatReady = false;
+  isTerminalPanelMinimized = true;
+  resetTerminalChatSummary();
   clearTerminalTranscript();
   setTerminalMeta('Waiting for CLI activity...');
   if (hide && terminalPanel) {
-    terminalPanel.hidden = true;
+    hideTerminalPanel();
   }
+  updateTerminalPanelControls();
   updateActionAvailability();
 }
 
 function ensureTerminalSession(sessionId) {
   const nextId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  const isNewTerminalSession = nextId && activeTerminalSessionId !== nextId;
   if (nextId && activeTerminalSessionId && activeTerminalSessionId !== nextId) {
     clearTerminalTranscript();
-    terminalChatBuffer = [];
-    terminalChatReady = false;
+    resetTerminalChatSummary();
   }
   if (nextId) {
     activeTerminalSessionId = nextId;
   }
+  if (isNewTerminalSession) {
+    isTerminalPanelMinimized = true;
+  }
   showTerminalPanel();
+}
+
+function finishTerminalPanel() {
+  setTerminalPanelMinimized(true);
+  updateTerminalPanelControls();
 }
 
 function updatePendingAssistantStatus(text) {
@@ -559,14 +699,16 @@ function handleTerminalSessionEvent(payload) {
     activeTerminalRunning = true;
     setTerminalMeta(text || 'CLI session started.');
     appendTerminalTranscript(text || 'CLI session started.');
-    terminalChatBuffer = [];
-    terminalChatReady = false;
+    resetTerminalChatSummary();
+    terminalChatStatus = 'running';
     updateActionAvailability();
   } else if (kind === 'command_started') {
     activeTerminalRunning = true;
+    terminalChatCommand = shellCommand;
     setTerminalMeta(shellCommand ? `Running: ${shellCommand}` : 'Running shell command...');
     appendTerminalTranscript(shellCommand ? `$ ${shellCommand}` : '$ [shell command]');
     pushTerminalChatLine(shellCommand ? `$ ${shellCommand}` : '$ [shell command]');
+    updateTerminalChatSummary('running');
     updateActionAvailability();
   } else if (kind === 'command_output') {
     const transcript = text || '(command completed with no output)';
@@ -577,10 +719,13 @@ function handleTerminalSessionEvent(payload) {
       activeTerminalRunning = false;
       terminalChatReady = true;
       updateActionAvailability();
+      finalizeTerminalChatSummary('failed');
+      finishTerminalPanel();
     } else {
       setTerminalMeta('Command completed.');
       appendTerminalTranscript(transcript);
       pushTerminalChatLine(transcript);
+      updateTerminalChatSummary('running');
     }
   } else if (kind === 'session_finished') {
     activeTerminalRunning = false;
@@ -590,6 +735,8 @@ function handleTerminalSessionEvent(payload) {
     }
     terminalChatReady = true;
     updateActionAvailability();
+    finalizeTerminalChatSummary('completed');
+    finishTerminalPanel();
   } else if (kind === 'session_error') {
     activeTerminalRunning = false;
     setTerminalMeta(text || 'CLI session failed.');
@@ -597,6 +744,8 @@ function handleTerminalSessionEvent(payload) {
     pushTerminalChatLine(`[session error]\n${text || 'CLI session failed.'}`);
     terminalChatReady = true;
     updateActionAvailability();
+    finalizeTerminalChatSummary('failed');
+    finishTerminalPanel();
   } else if (kind === 'session_stopped') {
     activeTerminalRunning = false;
     setTerminalMeta(text || 'Terminal session stopped.');
@@ -604,6 +753,8 @@ function handleTerminalSessionEvent(payload) {
     pushTerminalChatLine(`[stopped] ${text || 'Terminal session stopped.'}`);
     terminalChatReady = true;
     updateActionAvailability();
+    finalizeTerminalChatSummary('stopped');
+    finishTerminalPanel();
   }
 
   const lifecycle = getTerminalLifecycleSnapshot(kind, status, shellCommand, text);
@@ -863,7 +1014,9 @@ function finalizePendingAssistant(text) {
   if (assistantMessageCache.length > MAX_ASSISTANT_CACHE) {
     assistantMessageCache.shift();
   }
-  flushTerminalChatBuffer();
+  if (terminalChatReady) {
+    finalizeTerminalChatSummary();
+  }
   updateActionAvailability();
   renderConversationDecorators();
 }
@@ -874,7 +1027,7 @@ function clearPendingAssistant() {
   }
   pendingAssistantEl = null;
   if (terminalChatReady) {
-    flushTerminalChatBuffer();
+    finalizeTerminalChatSummary();
   }
   updateActionAvailability();
   renderConversationDecorators();
@@ -1593,9 +1746,17 @@ function handleStopUi(detailText, options = {}) {
   if (activeTerminalSessionId) {
     showTerminalPanel();
     setTerminalMeta(options.pending ? 'Stopping terminal…' : 'Stopped');
-    appendTerminalTranscript(options.pending
+    const stopTranscript = options.pending
       ? '[stop requested] Stop signal sent from chat controls.'
-      : '[stopped] Stop signal received.');
+      : '[stopped] Stop signal received.';
+    appendTerminalTranscript(stopTranscript);
+    pushTerminalChatLine(stopTranscript);
+    if (options.pending) {
+      updateTerminalChatSummary('stopping');
+    } else {
+      terminalChatReady = true;
+      finalizeTerminalChatSummary('stopped');
+    }
   }
 
   clearPendingAssistant();
@@ -1667,6 +1828,10 @@ async function connectSocket() {
         return;
       }
       finalizePendingAssistant(payload.text || '');
+      setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
+        text: 'Completed',
+        detail: 'Latest response is ready.',
+      });
       return;
     }
 
@@ -1686,14 +1851,16 @@ async function connectSocket() {
       const responseText = payload.responseText || payload.text || '';
       if (shouldDisplayReplyInChat(payload)) {
         finalizePendingAssistant(responseText);
+        setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
+          text: 'Completed',
+          detail: responseText ? 'Latest response is ready.' : 'The latest action finished successfully.',
+        });
       } else {
-        clearPendingAssistant();
+        setLifecyclePhase(EXECUTION_PHASES.RUNNING, {
+          text: 'Checking result…',
+          detail: 'Verifying whether more steps are needed.',
+        });
       }
-
-      setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
-        text: 'Completed',
-        detail: responseText ? 'Latest response is ready.' : 'The latest action finished successfully.',
-      });
       return;
     }
 
@@ -1835,6 +2002,10 @@ chatStop?.addEventListener('click', () => {
   focusCommandInput();
 });
 
+terminalPanelToggle?.addEventListener('click', () => {
+  setTerminalPanelMinimized(!isTerminalPanelMinimized);
+});
+
 terminalPanelStop?.addEventListener('click', () => {
   if (window.api?.requestStopAll) {
     window.api.requestStopAll();
@@ -1899,6 +2070,7 @@ window.addEventListener('beforeunload', () => {
 
 async function initializeInputWindow() {
   updateShortcutUi();
+  updateTerminalPanelControls();
   resizeInput();
   updateHistoryRetentionCopy();
   updateComposerState();

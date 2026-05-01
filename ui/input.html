@@ -85,14 +85,6 @@
         <div id="history-list" role="list"></div>
       </section>
         <div id="chat-main">
-          <section id="terminal-panel" hidden aria-label="CLI terminal transcript">
-            <div id="terminal-panel-header">
-              <span id="terminal-panel-title">CLI Terminal</span>
-              <button id="terminal-panel-stop" type="button" aria-label="Stop terminal session">Stop Terminal</button>
-            </div>
-            <div id="terminal-panel-meta">Waiting for CLI activity...</div>
-            <pre id="terminal-panel-output"></pre>
-          </section>
           <div id="chat-messages" aria-live="polite">
             <div id="chat-session-marker" hidden></div>
           <div id="chat-empty-state" hidden>
@@ -101,6 +93,27 @@
               <div id="chat-empty-meta">Terminal · Browser · Desktop</div>
             </div>
           </div>
+          <section id="terminal-panel" hidden aria-label="Terminal session">
+            <div id="terminal-panel-header">
+              <div id="terminal-panel-summary">
+                <span id="terminal-panel-title">Terminal</span>
+                <span id="terminal-panel-meta">Waiting for CLI activity...</span>
+              </div>
+              <div id="terminal-panel-controls">
+                <button
+                  id="terminal-panel-toggle"
+                  type="button"
+                  aria-label="Expand terminal output"
+                  aria-controls="terminal-panel-output"
+                  aria-expanded="false"
+                >
+                  Expand
+                </button>
+                <button id="terminal-panel-stop" type="button" aria-label="Stop terminal session">Stop</button>
+              </div>
+            </div>
+            <pre id="terminal-panel-output"></pre>
+          </section>
           <div id="input-row">
             <div id="input-stack">
               <label id="command-input-label" for="command-input">Command</label>

@@ -4,6 +4,7 @@ Provider-specific router backend clients (OpenRouter and Ollama).
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Optional
 
 import requests
@@ -27,6 +28,7 @@ def call_openrouter_text_sync(
     max_tokens: int,
     clean_text: CleanText,
     response_format: Optional[dict[str, Any]] = None,
+    image_data_url: Optional[str] = None,
 ) -> str:
     headers = {
         "Authorization": f"Bearer {openrouter_api_key}",
@@ -37,11 +39,20 @@ def call_openrouter_text_sync(
     if openrouter_site_name:
         headers["X-Title"] = openrouter_site_name
 
+    user_content: str | list[dict[str, Any]]
+    if image_data_url:
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {"type": "image_url", "image_url": {"url": image_data_url}},
+        ]
+    else:
+        user_content = user_prompt
+
     payload = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -89,6 +100,116 @@ def call_openrouter_text_sync(
         raise RuntimeError("OpenRouter returned empty message content.")
 
     return text
+
+
+def call_openrouter_tool_sync(
+    *,
+    openrouter_api_key: str,
+    openrouter_url: str,
+    openrouter_site_url: str,
+    openrouter_site_name: str,
+    openrouter_timeout_seconds: int,
+    model_name: str,
+    system_prompt: str,
+    user_prompt: str,
+    function_declarations: list[dict[str, Any]],
+    temperature: float,
+    max_tokens: int,
+    clean_text: CleanText,
+    image_data_url: Optional[str] = None,
+) -> dict[str, Any]:
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json",
+    }
+    if openrouter_site_url:
+        headers["HTTP-Referer"] = openrouter_site_url
+    if openrouter_site_name:
+        headers["X-Title"] = openrouter_site_name
+
+    user_content: str | list[dict[str, Any]]
+    if image_data_url:
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {"type": "image_url", "image_url": {"url": image_data_url}},
+        ]
+    else:
+        user_content = user_prompt
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": declaration.get("name"),
+                "description": declaration.get("description", ""),
+                "parameters": declaration.get("parameters", {"type": "object", "properties": {}}),
+            },
+        }
+        for declaration in function_declarations
+        if isinstance(declaration, dict) and declaration.get("name")
+    ]
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+
+    response = requests.post(
+        openrouter_url,
+        headers=headers,
+        json=payload,
+        timeout=openrouter_timeout_seconds,
+    )
+    if response.status_code >= 400:
+        body = clean_text(response.text, "", 420)
+        raise RuntimeError(f"OpenRouter HTTP {response.status_code}: {body}")
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("OpenRouter returned a non-object response.")
+
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("OpenRouter returned no choices.")
+
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message") if isinstance(first.get("message"), dict) else {}
+    content = message.get("content")
+    text = content.strip() if isinstance(content, str) else ""
+
+    parsed_tool_calls: list[dict[str, Any]] = []
+    for raw_call in message.get("tool_calls") or []:
+        if not isinstance(raw_call, dict):
+            continue
+        function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+        name = str(function.get("name") or "").strip()
+        if not name:
+            continue
+        raw_arguments = function.get("arguments")
+        arguments: dict[str, Any] = {}
+        if isinstance(raw_arguments, dict):
+            arguments = raw_arguments
+        elif isinstance(raw_arguments, str) and raw_arguments.strip():
+            try:
+                parsed = json.loads(raw_arguments)
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except json.JSONDecodeError:
+                arguments = {}
+        parsed_tool_calls.append({"name": name, "arguments": arguments})
+
+    if not text and not parsed_tool_calls:
+        raise RuntimeError("OpenRouter returned neither text nor tool calls.")
+
+    return {"text": text, "tool_calls": parsed_tool_calls}
 
 
 def call_openrouter_router_sync(

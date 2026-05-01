@@ -30,6 +30,14 @@ from agents.browser.task_policy import (
     steer_task_for_existing_page,
     task_to_search_query,
 )
+from models.openrouter_fallback import (
+    get_openrouter_api_key,
+    get_openrouter_base_url,
+    get_openrouter_models,
+    get_openrouter_site_name,
+    get_openrouter_site_url,
+    is_gemini_quota_error,
+)
 
 _RETAINED_BROWSER_HANDLES: list[dict[str, Any]] = []
 
@@ -277,29 +285,53 @@ class BrowserAgent:
         session = await self._get_or_create_browser_use_session()
         self._session = session
 
-        llm = ChatGoogle(model=self.model_name, api_key=os.getenv("GEMINI_API_KEY"))
         available_file_paths = self._extract_available_file_paths_from_task(task)
         if available_file_paths:
             print(f"[Browser Agent] available_file_paths: {available_file_paths}")
 
-        agent = Agent(
-            task=task,
-            llm=llm,
-            browser_session=session,
-            available_file_paths=available_file_paths,
-        )
-
-        try:
+        async def run_with_llm(llm):
+            agent = Agent(
+                task=task,
+                llm=llm,
+                browser_session=session,
+                available_file_paths=available_file_paths,
+            )
             history = await agent.run()
             if close_when_done:
                 await type(self)._close_shared_resources()
             else:
                 print("[Browser Agent] Reusing persistent browser window for future tasks.")
             return {"success": True, "result": history, "error": None}
+
+        try:
+            llm = ChatGoogle(model=self.model_name, api_key=os.getenv("GEMINI_API_KEY"))
+            return await run_with_llm(llm)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return {"success": False, "result": None, "error": str(exc)}
+            if not is_gemini_quota_error(exc):
+                return {"success": False, "result": None, "error": str(exc)}
+            fallback_error = str(exc)
+            for model_name in get_openrouter_models("browser"):
+                try:
+                    from browser_use.llm.openrouter.chat import ChatOpenRouter
+
+                    print(f"[Browser Agent] Gemini quota hit; retrying via OpenRouter model {model_name}.")
+                    llm = ChatOpenRouter(
+                        model=model_name,
+                        api_key=get_openrouter_api_key(),
+                        http_referer=get_openrouter_site_url() or None,
+                        base_url=get_openrouter_base_url(),
+                        temperature=0,
+                        default_headers={"X-Title": get_openrouter_site_name()},
+                    )
+                    return await run_with_llm(llm)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as fallback_exc:
+                    fallback_error = str(fallback_exc)
+                    print(f"[Browser Agent] OpenRouter fallback failed with {model_name}: {fallback_exc}")
+            return {"success": False, "result": None, "error": fallback_error}
         finally:
             self._session = type(self)._shared_browser_use_session
 

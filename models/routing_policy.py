@@ -587,8 +587,12 @@ def _router_provider_order(
             providers.append(provider)
 
     prefer_openrouter = router_provider == "openrouter"
-    add("openrouter", prefer_openrouter and openrouter_enabled)
-    add("ollama", (not prefer_openrouter) and ollama_enabled)
+    if prefer_openrouter:
+        add("openrouter", openrouter_enabled)
+        add("ollama", ollama_enabled)
+    else:
+        add("ollama", ollama_enabled)
+        add("openrouter", openrouter_enabled)
     return providers
 
 

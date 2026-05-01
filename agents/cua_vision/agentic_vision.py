@@ -22,6 +22,18 @@ from agents.cua_vision.keyboard import (
     click_double_left_click,
     click_right_click,
 )
+from models.openrouter_fallback import (
+    get_openrouter_api_key,
+    get_openrouter_chat_url,
+    get_openrouter_models,
+    get_openrouter_site_name,
+    get_openrouter_site_url,
+    get_openrouter_timeout_seconds,
+    image_to_data_url,
+    is_gemini_quota_error,
+)
+from models.router_backends import call_openrouter_text_sync
+from models.routing_policy import _clean_text
 
 
 DEFAULT_LOCATOR_MODEL = "gemini-3-flash-preview"
@@ -207,6 +219,43 @@ def _check_stop(should_stop):
         raise InterruptedError("Stop requested")
 
 
+def _openrouter_localize_bbox(cropped, prompt: str) -> str | None:
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        print("[AgenticVision] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
+        return None
+
+    image_data_url = image_to_data_url(cropped)
+    for model_name in get_openrouter_models("locator"):
+        try:
+            text = call_openrouter_text_sync(
+                openrouter_api_key=api_key,
+                openrouter_url=get_openrouter_chat_url(),
+                openrouter_site_url=get_openrouter_site_url(),
+                openrouter_site_name=get_openrouter_site_name(),
+                openrouter_timeout_seconds=get_openrouter_timeout_seconds(),
+                model_name=model_name,
+                system_prompt=(
+                    "You localize one clickable UI target in a cropped screenshot. "
+                    "Return only [ymin, xmin, ymax, xmax]."
+                ),
+                user_prompt=prompt,
+                temperature=0.1,
+                max_tokens=64,
+                clean_text=lambda value, fallback, max_len: _clean_text(
+                    value,
+                    fallback,
+                    max_len=max_len,
+                ),
+                image_data_url=image_data_url,
+            )
+            print(f"[AgenticVision] OpenRouter locator fallback succeeded with {model_name}.")
+            return text
+        except Exception as exc:
+            print(f"[AgenticVision] OpenRouter locator fallback failed with {model_name}: {exc}")
+    return None
+
+
 def crop_and_search_click(
     screenshot,
     crop_bounds: tuple[float, float, float, float],
@@ -267,20 +316,28 @@ Rules:
 
     _check_stop(should_stop)
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    response = client.models.generate_content(
-        model=model_name or DEFAULT_LOCATOR_MODEL,
-        contents=[cropped, prompt],
-        config=types.GenerateContentConfig(
-            temperature=0.1,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=64,
-            thinking_config=_minimal_thinking_config(),
-        ),
-    )
+    try:
+        response = client.models.generate_content(
+            model=model_name or DEFAULT_LOCATOR_MODEL,
+            contents=[cropped, prompt],
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                top_p=0.95,
+                top_k=64,
+                max_output_tokens=64,
+                thinking_config=_minimal_thinking_config(),
+            ),
+        )
+        response_text = response.text
+    except Exception as exc:
+        if not is_gemini_quota_error(exc):
+            raise
+        response_text = _openrouter_localize_bbox(cropped, prompt)
+        if not response_text:
+            raise
 
     _check_stop(should_stop)
-    local_ymin, local_xmin, local_ymax, local_xmax = _parse_bbox(response.text)
+    local_ymin, local_xmin, local_ymax, local_xmax = _parse_bbox(response_text)
 
     local_top = _to_pixels(local_ymin, crop_h)
     local_left = _to_pixels(local_xmin, crop_w)

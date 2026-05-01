@@ -26,6 +26,12 @@ from models.router_backends import (
     call_ollama_router_sync,
     call_openrouter_router_sync,
     call_openrouter_text_sync,
+    call_openrouter_tool_sync,
+)
+from models.openrouter_fallback import (
+    get_openrouter_models,
+    image_to_data_url,
+    openrouter_tool_result_to_genai_response,
 )
 from models.runtime_config import build_model_runtime_config
 from models.routing_policy import (
@@ -52,6 +58,7 @@ from models.routing_policy import (
 
 # Import JARVIS agent components
 from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
+from agents.jarvis.tool_declarations import JARVIS_FUNCTION_DECLARATIONS
 
 # Attempt to import Gemini libraries
 try:
@@ -233,6 +240,7 @@ class GeminiModel:
         self.jarvis_thinking_budget = runtime_config.jarvis_thinking_budget
         self.openrouter_api_key = runtime_config.openrouter_api_key
         self.openrouter_model = runtime_config.openrouter_model
+        self.openrouter_vision_model = runtime_config.openrouter_vision_model
         self.openrouter_router_model = runtime_config.openrouter_router_model
         self.openrouter_url = runtime_config.openrouter_url
         self.openrouter_site_url = runtime_config.openrouter_site_url
@@ -317,6 +325,7 @@ class GeminiModel:
         *,
         model: Optional[str] = None,
         response_format: Optional[dict[str, Any]] = None,
+        image_data_url: Optional[str] = None,
     ) -> str:
         model_name = (model or self.openrouter_model or "").strip()
         if not self._openrouter_model_enabled(model_name):
@@ -338,6 +347,41 @@ class GeminiModel:
                 max_len=max_len,
             ),
             response_format=response_format,
+            image_data_url=image_data_url,
+        )
+
+    def _call_openrouter_tool_sync(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        function_declarations: list[dict[str, Any]],
+        temperature: float,
+        max_tokens: int,
+        *,
+        model: Optional[str] = None,
+        image_data_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        model_name = (model or self.openrouter_vision_model or self.openrouter_model or "").strip()
+        if not self._openrouter_model_enabled(model_name):
+            raise RuntimeError("OpenRouter tool fallback is not configured.")
+        return call_openrouter_tool_sync(
+            openrouter_api_key=self.openrouter_api_key,
+            openrouter_url=self.openrouter_url,
+            openrouter_site_url=self.openrouter_site_url,
+            openrouter_site_name=self.openrouter_site_name,
+            openrouter_timeout_seconds=self.openrouter_timeout_seconds,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            function_declarations=function_declarations,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            clean_text=lambda value, fallback, max_len: _clean_text(
+                value,
+                fallback,
+                max_len=max_len,
+            ),
+            image_data_url=image_data_url,
         )
 
     def _call_openrouter_router_sync(self, prompt: str) -> dict[str, Any]:
@@ -367,29 +411,87 @@ class GeminiModel:
         user_prompt: str,
         temperature: float = 0.2,
         max_tokens: int = 700,
+        purpose: str = "text",
+        image: Any = None,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         if not self._openrouter_enabled():
             print(f"[{label}] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
             return None
 
-        try:
-            await set_model_name(f"{self.openrouter_model} (OpenRouter)")
-        except Exception as exc:
-            print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
+        image_data_url = image_to_data_url(image)
+        models_to_try = get_openrouter_models(purpose)
+        if purpose == "text" and self.openrouter_model not in models_to_try:
+            models_to_try.insert(0, self.openrouter_model)
+        elif purpose != "text" and self.openrouter_vision_model not in models_to_try:
+            models_to_try.insert(0, self.openrouter_vision_model)
 
-        try:
-            text = await asyncio.to_thread(
-                self._call_openrouter_text_sync,
-                system_prompt,
-                user_prompt,
-                temperature,
-                max_tokens,
-            )
-            print(f"[{label}] OpenRouter fallback succeeded with model {self.openrouter_model}")
-            return text
-        except Exception as fallback_exc:
-            print(f"[{label}] OpenRouter fallback failed: {fallback_exc}")
+        for model_name in [model for model in models_to_try if model]:
+            try:
+                await set_model_name(f"{model_name} (OpenRouter)")
+            except Exception as exc:
+                print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
+
+            try:
+                text = await asyncio.to_thread(
+                    self._call_openrouter_text_sync,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    max_tokens,
+                    model=model_name,
+                    response_format=response_format,
+                    image_data_url=image_data_url,
+                )
+                print(f"[{label}] OpenRouter fallback succeeded with model {model_name}")
+                return text
+            except Exception as fallback_exc:
+                print(f"[{label}] OpenRouter fallback failed with {model_name}: {fallback_exc}")
+        return None
+
+    async def _try_openrouter_tool_fallback(
+        self,
+        *,
+        label: str,
+        system_prompt: str,
+        user_prompt: str,
+        function_declarations: list[dict[str, Any]],
+        image: Any = None,
+        temperature: float = 0.2,
+        max_tokens: int = 1200,
+        purpose: str = "vision",
+    ):
+        if not self._openrouter_enabled():
+            print(f"[{label}] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
             return None
+
+        image_data_url = image_to_data_url(image)
+        models_to_try = get_openrouter_models(purpose)
+        if self.openrouter_vision_model and self.openrouter_vision_model not in models_to_try:
+            models_to_try.insert(0, self.openrouter_vision_model)
+
+        for model_name in [model for model in models_to_try if model]:
+            try:
+                await set_model_name(f"{model_name} (OpenRouter)")
+            except Exception as exc:
+                print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
+
+            try:
+                result = await asyncio.to_thread(
+                    self._call_openrouter_tool_sync,
+                    system_prompt,
+                    user_prompt,
+                    function_declarations,
+                    temperature,
+                    max_tokens,
+                    model=model_name,
+                    image_data_url=image_data_url,
+                )
+                print(f"[{label}] OpenRouter tool fallback succeeded with model {model_name}")
+                return openrouter_tool_result_to_genai_response(result)
+            except Exception as fallback_exc:
+                print(f"[{label}] OpenRouter tool fallback failed with {model_name}: {fallback_exc}")
+        return None
 
     def _call_ollama_router_sync(self, prompt: str) -> dict[str, Any]:
         return call_ollama_router_sync(
@@ -564,7 +666,8 @@ class GeminiModel:
                 fallback_text = await self._try_openrouter_text_fallback(
                     label="ScreenJudge",
                     system_prompt=(
-                        "You are Screen Judge fallback without image access.\n"
+                        "You are Screen Judge for a computer-use orchestrator.\n"
+                        "Analyze the screenshot when one is attached.\n"
                         "Return JSON only with fields: summary, repo_url, local_url,"
                         " recommended_agent, recommended_task, hints.\n"
                         "If you are uncertain, keep fields empty and explain uncertainty in"
@@ -573,10 +676,13 @@ class GeminiModel:
                     user_prompt=(
                         f"User request: {user_request}\n"
                         f"Focus: {focus_text if focus_text else 'general execution context'}\n"
-                        "No screenshot is available in fallback mode."
+                        "Extract only high-signal routing context."
                     ),
                     temperature=0.1,
                     max_tokens=420,
+                    purpose="screen",
+                    image=image,
+                    response_format={"type": "json_object"},
                 )
                 if fallback_text:
                     parsed = _parse_json_object_from_text(fallback_text)
@@ -648,27 +754,42 @@ class GeminiModel:
                 )
                 self.jarvis_model = self.gemini_backup_model
             elif self._is_gemini_quota_error(exc):
-                fallback_text = await self._try_openrouter_text_fallback(
+                fallback_response = await self._try_openrouter_tool_fallback(
                     label="JARVIS",
                     system_prompt=(
-                        "You are JARVIS fallback without screenshot access.\n"
-                        "Give a concise response to the user request. If the request depends on"
-                        " seeing the current screen, be explicit that visual analysis is"
-                        " unavailable in fallback mode and ask them to retry shortly."
+                        "You are JARVIS, a screen annotation assistant. "
+                        "Use the available tools when annotation or direct response is needed."
                     ),
-                    user_prompt=_extract_latest_request(prompt),
+                    user_prompt=prompt,
+                    function_declarations=JARVIS_FUNCTION_DECLARATIONS,
+                    image=image,
                     temperature=0.2,
-                    max_tokens=700,
+                    max_tokens=1800,
+                    purpose="jarvis",
                 )
-                if fallback_text:
-                    return {
-                        "response": None,
-                        "summary": _clean_text(
-                            f"Gemini quota reached. {fallback_text}",
-                            "Gemini quota reached. Please retry shortly.",
-                            max_len=420,
+                if fallback_response is not None:
+                    response = fallback_response
+                else:
+                    fallback_text = await self._try_openrouter_text_fallback(
+                        label="JARVIS",
+                        system_prompt=(
+                            "You are JARVIS fallback. Give a concise response to the user request."
                         ),
-                    }
+                        user_prompt=_extract_latest_request(prompt),
+                        temperature=0.2,
+                        max_tokens=700,
+                        purpose="jarvis",
+                        image=image,
+                    )
+                    if fallback_text:
+                        return {
+                            "response": None,
+                            "summary": _clean_text(
+                                f"Gemini quota reached. {fallback_text}",
+                                "Gemini quota reached. Please retry shortly.",
+                                max_len=420,
+                            ),
+                        }
             else:
                 raise
         elapsed = time.monotonic() - started

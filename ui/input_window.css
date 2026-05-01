@@ -113,6 +113,7 @@ input {
 #history-panel-close,
 #history-filter button,
 .history-item-action,
+#terminal-panel-toggle,
 #terminal-panel-stop,
 #command-voice,
 #command-send {
@@ -141,6 +142,7 @@ input {
 }
 
 #history-panel-close,
+#terminal-panel-toggle,
 #terminal-panel-stop {
   min-height: 40px;
   min-width: 40px;
@@ -181,7 +183,8 @@ input {
 #chat-hide:hover,
 #history-panel-close:hover,
 #history-filter button:hover,
-.history-item-action:hover {
+.history-item-action:hover,
+#terminal-panel-toggle:hover {
   background: rgba(39, 46, 56, 0.96);
   border-color: rgba(151, 163, 176, 0.32);
 }
@@ -193,7 +196,8 @@ input {
 }
 
 #chat-shortcuts-toggle[aria-expanded="true"],
-#chat-history-toggle[aria-pressed="true"] {
+#chat-history-toggle[aria-pressed="true"],
+#terminal-panel-toggle[aria-expanded="false"] {
   background: rgba(127, 157, 138, 0.2);
   border-color: rgba(151, 179, 162, 0.34);
   color: rgba(238, 245, 240, 0.96);
@@ -597,12 +601,13 @@ input {
 }
 
 #terminal-panel {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 14px 14px 0;
+  margin: 0 14px 8px;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--surface-alt);
   border: 1px solid rgba(127, 157, 138, 0.22);
 }
@@ -616,24 +621,42 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 34px;
+}
+
+#terminal-panel-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 #terminal-panel-title {
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
+  white-space: nowrap;
+}
+
+#terminal-panel-controls {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 #terminal-panel-meta {
   font-size: 11.5px;
   color: var(--text-muted);
+  min-width: 0;
 }
 
 #terminal-panel-output {
   margin: 0;
   padding: 12px;
-  min-height: 112px;
-  max-height: 236px;
+  min-height: 104px;
+  max-height: min(236px, 34vh);
   overflow: auto;
   border-radius: 9px;
   background: var(--surface-elevated);
@@ -642,6 +665,44 @@ input {
   font: 12.5px/1.55 Consolas, "SFMono-Regular", Menlo, Monaco, monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+#terminal-panel[data-state="minimized"] {
+  gap: 0;
+  padding: 8px 10px;
+}
+
+#terminal-panel[data-state="minimized"] #terminal-panel-header {
+  min-height: 32px;
+}
+
+#terminal-panel[data-state="minimized"] #terminal-panel-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+#terminal-panel[data-state="minimized"] #terminal-panel-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#terminal-panel #terminal-panel-toggle,
+#terminal-panel #terminal-panel-stop {
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+}
+
+#terminal-panel[data-state="minimized"] #terminal-panel-output {
+  display: none;
+}
+
+#terminal-panel[data-running="false"] #terminal-panel-stop {
+  display: none;
 }
 
 #chat-messages {
@@ -728,8 +789,10 @@ input {
 .chat-msg.terminal {
   align-self: stretch;
   max-width: 100%;
-  background: var(--surface-elevated);
-  border-color: rgba(127, 157, 138, 0.26);
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(13, 16, 20, 0.96);
+  border-color: rgba(127, 157, 138, 0.2);
 }
 
 .chat-msg-meta {
@@ -761,7 +824,7 @@ input {
 }
 
 .chat-msg.terminal .chat-msg-role {
-  color: rgba(191, 223, 204, 0.92);
+  color: rgba(191, 223, 204, 0.9);
 }
 
 .chat-msg-time {
@@ -782,8 +845,9 @@ input {
 }
 
 .chat-msg.terminal .chat-msg-content {
-  font: 12.5px/1.55 Consolas, "SFMono-Regular", Menlo, Monaco, monospace;
-  color: rgba(220, 239, 228, 0.96);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(220, 232, 225, 0.94);
 }
 
 .chat-msg.pending .chat-msg-content {
@@ -981,6 +1045,7 @@ kbd {
 #history-filter button:focus-visible,
 .history-item-main:focus-visible,
 .history-item-action:focus-visible,
+#terminal-panel-toggle:focus-visible,
 #terminal-panel-stop:focus-visible,
 #command-voice:focus-visible,
 #command-send:focus-visible {

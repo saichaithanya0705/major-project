@@ -33,6 +33,18 @@ from ui.visualization_api.cursor_status import (
     update_cursor_status,
     hide_cursor_status,
 )
+from models.openrouter_fallback import (
+    get_openrouter_api_key,
+    get_openrouter_chat_url,
+    get_openrouter_models,
+    get_openrouter_site_name,
+    get_openrouter_site_url,
+    get_openrouter_timeout_seconds,
+    image_to_data_url,
+    is_gemini_quota_error,
+)
+from models.router_backends import call_openrouter_text_sync
+from models.routing_policy import _clean_text
 
 
 def _dispatch_now(coro):
@@ -45,6 +57,43 @@ def _dispatch_now(coro):
             asyncio.run(coro)
         except RuntimeError:
             pass
+
+
+def _openrouter_find_bbox(screenshot, model_prompt: str) -> str | None:
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        print("[LegacyLocator] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
+        return None
+
+    image_data_url = image_to_data_url(screenshot)
+    for model_name in get_openrouter_models("locator"):
+        try:
+            text = call_openrouter_text_sync(
+                openrouter_api_key=api_key,
+                openrouter_url=get_openrouter_chat_url(),
+                openrouter_site_url=get_openrouter_site_url(),
+                openrouter_site_name=get_openrouter_site_name(),
+                openrouter_timeout_seconds=get_openrouter_timeout_seconds(),
+                model_name=model_name,
+                system_prompt=(
+                    "You localize one clickable UI element in a screenshot. "
+                    "Return only [ymin, xmin, ymax, xmax]."
+                ),
+                user_prompt=model_prompt,
+                temperature=0.1,
+                max_tokens=64,
+                clean_text=lambda value, fallback, max_len: _clean_text(
+                    value,
+                    fallback,
+                    max_len=max_len,
+                ),
+                image_data_url=image_data_url,
+            )
+            print(f"[LegacyLocator] OpenRouter locator fallback succeeded with {model_name}.")
+            return text
+        except Exception as exc:
+            print(f"[LegacyLocator] OpenRouter locator fallback failed with {model_name}: {exc}")
+    return None
 
 def legacy_find_and_click_element(
     type_of_click: str,
@@ -100,14 +149,22 @@ Return a bounding box for the {element_description}. Do NOT output any words:
 [ymin, xmin, ymax, xmax]
 """
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[screenshot, model_prompt],
-            config=config,
-        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[screenshot, model_prompt],
+                config=config,
+            )
+            response_text = response.text
+        except Exception as exc:
+            if not is_gemini_quota_error(exc):
+                raise
+            response_text = _openrouter_find_bbox(screenshot, model_prompt)
+            if not response_text:
+                raise
 
         _dispatch_now(update_cursor_status("Target located. Moving cursor...", source="cua_vision"))
-        temp_list = response.text.strip()
+        temp_list = response_text.strip()
         temp_list = temp_list[1:-1]
         coords = [float(item) for item in temp_list.split(", ")]
 

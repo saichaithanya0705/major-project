@@ -14,6 +14,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
 import models.models as model_module
+import models.openrouter_fallback as openrouter_fallback_module
 import models.router_backends as router_backends_module
 
 
@@ -274,6 +275,47 @@ async def test_screen_context_then_actionable_agent() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_visual_fast_path_finishes_with_router_response() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    direct_messages: list[str] = []
+
+    class _VisualRouterModel:
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+        return {
+            "agent": "jarvis",
+            "task": routing_result.get("query", ""),
+            "success": True,
+            "message": "The screen analysis is complete.",
+            "source": "jarvis",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _VisualRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "what do you see on my screen?",
+            "rapid",
+            "jarvis",
+        )
+        assert direct_messages == ["The screen analysis is complete."], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
 async def test_execution_request_reroutes_jarvis_to_cli() -> None:
     original_model_cls = model_module.GeminiModel
     original_run_step = model_module._run_routed_agent_step
@@ -468,6 +510,184 @@ def test_ollama_router_payload_disables_thinking() -> None:
     assert captured_payload["options"]["num_predict"] == 800, captured_payload
 
 
+def test_router_provider_order_uses_fallback_provider() -> None:
+    assert model_module._router_provider_order(
+        router_provider="openrouter",
+        openrouter_enabled=True,
+        ollama_enabled=True,
+    ) == ["openrouter", "ollama"]
+    assert model_module._router_provider_order(
+        router_provider="ollama",
+        openrouter_enabled=True,
+        ollama_enabled=True,
+    ) == ["ollama", "openrouter"]
+
+
+def test_openrouter_free_vision_defaults_prefer_gemma() -> None:
+    originals = {
+        key: os.environ.get(key)
+        for key in ("OPENROUTER_VISION_MODEL", "OPENROUTER_JARVIS_MODEL", "OPENROUTER_BROWSER_MODEL")
+    }
+    try:
+        for key in originals:
+            os.environ.pop(key, None)
+        models = openrouter_fallback_module.get_openrouter_models("vision")
+        assert models[:3] == [
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "openrouter/free",
+        ], models
+    finally:
+        for key, value in originals.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_openrouter_text_payload_supports_image_content() -> None:
+    captured_payload: dict[str, Any] = {}
+    original_post = router_backends_module.requests.post
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def _fake_post(url, headers, json, timeout):
+        del url, headers, timeout
+        captured_payload.update(json)
+        return _FakeResponse()
+
+    router_backends_module.requests.post = _fake_post
+    try:
+        text = router_backends_module.call_openrouter_text_sync(
+            openrouter_api_key="key",
+            openrouter_url="https://openrouter.example/chat/completions",
+            openrouter_site_url="",
+            openrouter_site_name="JARVIS",
+            openrouter_timeout_seconds=10,
+            model_name="google/gemma-4-31b-it:free",
+            system_prompt="system",
+            user_prompt="look",
+            temperature=0.1,
+            max_tokens=20,
+            clean_text=lambda value, fallback, max_len: str(value or fallback)[:max_len],
+            image_data_url="data:image/png;base64,abc",
+        )
+    finally:
+        router_backends_module.requests.post = original_post
+
+    assert text == "ok"
+    content = captured_payload["messages"][1]["content"]
+    assert content[0] == {"type": "text", "text": "look"}
+    assert content[1]["image_url"]["url"] == "data:image/png;base64,abc"
+
+
+def test_openrouter_tool_payload_parses_tool_calls() -> None:
+    original_post = router_backends_module.requests.post
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "type": "function",
+                                    "function": {
+                                        "name": "go_to_element",
+                                        "arguments": "{\"target_description\":\"button\"}",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+    def _fake_post(url, headers, json, timeout):
+        del url, headers, json, timeout
+        return _FakeResponse()
+
+    router_backends_module.requests.post = _fake_post
+    try:
+        result = router_backends_module.call_openrouter_tool_sync(
+            openrouter_api_key="key",
+            openrouter_url="https://openrouter.example/chat/completions",
+            openrouter_site_url="",
+            openrouter_site_name="JARVIS",
+            openrouter_timeout_seconds=10,
+            model_name="google/gemma-4-31b-it:free",
+            system_prompt="system",
+            user_prompt="click",
+            function_declarations=[
+                {
+                    "name": "go_to_element",
+                    "description": "Move",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            temperature=0.1,
+            max_tokens=20,
+            clean_text=lambda value, fallback, max_len: str(value or fallback)[:max_len],
+        )
+    finally:
+        router_backends_module.requests.post = original_post
+
+    assert result == {
+        "text": "",
+        "tool_calls": [
+            {
+                "name": "go_to_element",
+                "arguments": {"target_description": "button"},
+            }
+        ],
+    }
+
+
+async def test_openrouter_router_failure_falls_back_to_ollama() -> None:
+    model = object.__new__(model_module.GeminiModel)
+    model.router_provider = "openrouter"
+    model.openrouter_api_key = "bad-key"
+    model.openrouter_router_model = "openrouter-router"
+    model.openrouter_url = "https://openrouter.invalid"
+    model.ollama_router_model = "ollama-router"
+    model.ollama_base_url = "http://127.0.0.1:11434"
+
+    calls: list[str] = []
+
+    def _failing_openrouter(prompt: str) -> dict[str, Any]:
+        calls.append("openrouter")
+        raise RuntimeError("OpenRouter HTTP 401: User not found")
+
+    def _working_ollama(prompt: str) -> dict[str, Any]:
+        calls.append("ollama")
+        return {"agent": "direct", "response_text": "done"}
+
+    async def _fake_set_model_name(name: str) -> None:
+        return None
+
+    original_set_model_name = model_module.set_model_name
+    model._call_openrouter_router_sync = _failing_openrouter
+    model._call_ollama_router_sync = _working_ollama
+    model_module.set_model_name = _fake_set_model_name
+    try:
+        route = await model.route_request("# User's Latest Request:\nhello")
+    finally:
+        model_module.set_model_name = original_set_model_name
+
+    assert calls == ["openrouter", "ollama"], calls
+    assert route == {"agent": "direct", "response_text": "done"}, route
+
+
 def test_deterministic_router_is_disabled_after_chain_progress() -> None:
     prompt = (
         "\n# Multi-Agent Chaining Mode\n"
@@ -497,11 +717,17 @@ async def run_checks() -> None:
     test_window_management_is_execution_not_visual_explanation()
     test_router_refusal_task_is_replaced_with_original_request()
     test_ollama_router_payload_disables_thinking()
+    test_router_provider_order_uses_fallback_provider()
+    test_openrouter_free_vision_defaults_prefer_gemma()
+    test_openrouter_text_payload_supports_image_content()
+    test_openrouter_tool_payload_parses_tool_calls()
+    await test_openrouter_router_failure_falls_back_to_ollama()
     await test_chains_multiple_agents_then_finishes()
     await test_repeated_step_loop_recovers_and_finishes()
     await test_invalid_route_result_falls_back_to_direct()
     await test_direct_response_repeat_artifact_is_sanitized()
     await test_screen_context_then_actionable_agent()
+    await test_visual_fast_path_finishes_with_router_response()
     await test_execution_request_reroutes_jarvis_to_cli()
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
     await test_window_management_request_reroutes_jarvis_to_cua_vision()
