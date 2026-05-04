@@ -27,6 +27,7 @@ from models.router_backends import (
     call_openrouter_router_sync,
     call_openrouter_text_sync,
     call_openrouter_tool_sync,
+    validate_ollama_router_model_sync,
 )
 from models.openrouter_fallback import (
     get_openrouter_models,
@@ -38,7 +39,6 @@ from models.routing_policy import (
     _apply_routing_guardrails,
     _choose_actionable_agent,
     _clean_text,
-    _deterministic_router_decision,
     _extract_latest_request,
     _finalize_direct_response_text,
     _format_chain_state_for_prompt,
@@ -47,12 +47,10 @@ from models.routing_policy import (
     _normalize_router_decision_payload,
     _normalize_screen_context_payload,
     _parse_json_object_from_text,
-    _prompt_has_completed_delegated_steps,
     _router_provider_order,
     _routing_signature,
     _routing_task_text,
     _screen_context_message,
-    _should_use_deterministic_router,
     _user_requested_repeat,
 )
 
@@ -97,6 +95,55 @@ def _extract_openrouter_model_name(model_name: str) -> str:
     if cleaned.lower().startswith("openrouter:"):
         return cleaned.split(":", 1)[1].strip()
     return cleaned
+
+
+def preflight_router_configuration(rapid_response_model: str) -> Optional[str]:
+    runtime_config = build_model_runtime_config(
+        rapid_response_model,
+        default_openrouter_router_model=_DEFAULT_OPENROUTER_ROUTER_MODEL,
+        default_openrouter_fallback_model=_DEFAULT_OPENROUTER_FALLBACK_MODEL,
+        looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
+        extract_openrouter_model_name=_extract_openrouter_model_name,
+    )
+    provider_order = _router_provider_order(
+        router_provider=runtime_config.router_provider,
+        openrouter_enabled=bool(runtime_config.openrouter_api_key and runtime_config.openrouter_router_model),
+        ollama_enabled=bool(runtime_config.ollama_router_model and runtime_config.ollama_base_url),
+    )
+    if not provider_order:
+        return (
+            "Router provider is not configured. Set OPENROUTER_API_KEY for OpenRouter "
+            "or configure an Ollama router model."
+        )
+    if provider_order[0] == "ollama":
+        return validate_ollama_router_model_sync(
+            ollama_base_url=runtime_config.ollama_base_url,
+            ollama_router_model=runtime_config.ollama_router_model,
+            timeout_seconds=min(runtime_config.ollama_router_timeout_seconds, 3),
+            clean_text=lambda value, fallback, max_len: _clean_text(
+                value,
+                fallback,
+                max_len=max_len,
+            ),
+        )
+    if provider_order[0] == "openrouter" and not runtime_config.openrouter_api_key:
+        return "OpenRouter router provider is selected but OPENROUTER_API_KEY is not set."
+    return None
+
+
+def _resume_interrupted_agent_route(user_prompt: str) -> Optional[dict[str, str]]:
+    try:
+        from agents.browser.agent import BrowserAgent
+    except Exception:
+        return None
+
+    browser_task = BrowserAgent.resolve_resume_task(user_prompt)
+    if browser_task:
+        return {
+            "agent": "browser",
+            "task": browser_task,
+        }
+    return None
 
 def store_screenshot():
     """Capture and store a screenshot (called before overlay appears)."""
@@ -171,7 +218,6 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
                 fallback,
                 max_len=max_len,
             ),
-            is_visual_explanation_request=_is_visual_explanation_request,
             format_chain_state_for_prompt=_format_chain_state_for_prompt,
             apply_routing_guardrails=_apply_routing_guardrails,
             routing_task_text=_routing_task_text,
@@ -545,20 +591,6 @@ class GeminiModel:
         """
         print(f"[Router] Processing via {self.router_provider}...")
         started = time.monotonic()
-
-        deterministic_route = _deterministic_router_decision(prompt) if _should_use_deterministic_router(prompt) else None
-        if deterministic_route:
-            routed = _normalize_router_decision_payload(
-                deterministic_route,
-                prompt,
-                provider_name="Deterministic",
-            )
-            elapsed = time.monotonic() - started
-            print(
-                f"[Router] Deterministic route selected in {elapsed:.2f}s "
-                f"with agent={routed.get('agent')}"
-            )
-            return routed
 
         provider_order = _router_provider_order(
             router_provider=self.router_provider,

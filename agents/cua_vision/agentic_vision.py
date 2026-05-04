@@ -7,14 +7,7 @@ This module implements a crop-and-search flow:
 3) Map localized coordinates back to full-screen space and click
 """
 
-import os
 import re
-
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    print('Google Gemini dependencies have not been installed')
 
 from agents.cua_vision.keyboard import (
     move_cursor,
@@ -23,6 +16,10 @@ from agents.cua_vision.keyboard import (
     click_right_click,
 )
 from models.openrouter_fallback import (
+    get_nvidia_api_key,
+    get_nvidia_chat_url,
+    get_nvidia_models,
+    get_nvidia_timeout_seconds,
     get_openrouter_api_key,
     get_openrouter_chat_url,
     get_openrouter_models,
@@ -30,13 +27,12 @@ from models.openrouter_fallback import (
     get_openrouter_site_url,
     get_openrouter_timeout_seconds,
     image_to_data_url,
-    is_gemini_quota_error,
 )
 from models.router_backends import call_openrouter_text_sync
 from models.routing_policy import _clean_text
 
 
-DEFAULT_LOCATOR_MODEL = "gemini-3-flash-preview"
+DEFAULT_LOCATOR_MODEL = ""
 MIN_CROP_SIZE_PX = 32
 DEFAULT_CROP_PAD_PX = 400
 
@@ -85,16 +81,6 @@ def _to_pixels(value: float, size: int) -> float:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
-
-
-def _minimal_thinking_config():
-    """Return a minimal-thinking config across supported SDK variants."""
-    try:
-        return types.ThinkingConfig(
-            thinking_level=types.ThinkingLevel.MINIMAL,
-        )
-    except Exception:
-        return types.ThinkingConfig(thinking_budget=0)
 
 
 def _apply_padding(
@@ -219,40 +205,71 @@ def _check_stop(should_stop):
         raise InterruptedError("Stop requested")
 
 
-def _openrouter_localize_bbox(cropped, prompt: str) -> str | None:
-    api_key = get_openrouter_api_key()
-    if not api_key:
-        print("[AgenticVision] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
+def _provider_localize_bbox(cropped, prompt: str, preferred_model: str = "") -> str | None:
+    preferred_model = str(preferred_model or "").strip()
+    nvidia_models = get_nvidia_models("locator")
+    openrouter_models = get_openrouter_models("locator")
+    if preferred_model and "gemini" not in preferred_model.lower():
+        if preferred_model not in nvidia_models:
+            nvidia_models = [preferred_model, *nvidia_models]
+        if preferred_model not in openrouter_models:
+            openrouter_models = [preferred_model, *openrouter_models]
+
+    providers = [
+        {
+            "label": "NVIDIA",
+            "api_key": get_nvidia_api_key(),
+            "url": get_nvidia_chat_url(),
+            "site_url": "",
+            "site_name": "",
+            "timeout": get_nvidia_timeout_seconds(),
+            "models": nvidia_models,
+        },
+        {
+            "label": "OpenRouter",
+            "api_key": get_openrouter_api_key(),
+            "url": get_openrouter_chat_url(),
+            "site_url": get_openrouter_site_url(),
+            "site_name": get_openrouter_site_name(),
+            "timeout": get_openrouter_timeout_seconds(),
+            "models": openrouter_models,
+        },
+    ]
+    if not any(provider["api_key"] for provider in providers):
+        print("[AgenticVision] No NVIDIA_API_KEY or OPENROUTER_API_KEY configured.")
         return None
 
     image_data_url = image_to_data_url(cropped)
-    for model_name in get_openrouter_models("locator"):
-        try:
-            text = call_openrouter_text_sync(
-                openrouter_api_key=api_key,
-                openrouter_url=get_openrouter_chat_url(),
-                openrouter_site_url=get_openrouter_site_url(),
-                openrouter_site_name=get_openrouter_site_name(),
-                openrouter_timeout_seconds=get_openrouter_timeout_seconds(),
-                model_name=model_name,
-                system_prompt=(
-                    "You localize one clickable UI target in a cropped screenshot. "
-                    "Return only [ymin, xmin, ymax, xmax]."
-                ),
-                user_prompt=prompt,
-                temperature=0.1,
-                max_tokens=64,
-                clean_text=lambda value, fallback, max_len: _clean_text(
-                    value,
-                    fallback,
-                    max_len=max_len,
-                ),
-                image_data_url=image_data_url,
-            )
-            print(f"[AgenticVision] OpenRouter locator fallback succeeded with {model_name}.")
-            return text
-        except Exception as exc:
-            print(f"[AgenticVision] OpenRouter locator fallback failed with {model_name}: {exc}")
+    for provider in providers:
+        if not provider["api_key"] or not provider["models"]:
+            continue
+        for model_name in provider["models"]:
+            try:
+                text = call_openrouter_text_sync(
+                    openrouter_api_key=provider["api_key"],
+                    openrouter_url=provider["url"],
+                    openrouter_site_url=provider["site_url"],
+                    openrouter_site_name=provider["site_name"],
+                    openrouter_timeout_seconds=provider["timeout"],
+                    model_name=model_name,
+                    system_prompt=(
+                        "You localize one clickable UI target in a cropped screenshot. "
+                        "Return only [ymin, xmin, ymax, xmax]."
+                    ),
+                    user_prompt=prompt,
+                    temperature=0.1,
+                    max_tokens=64,
+                    clean_text=lambda value, fallback, max_len: _clean_text(
+                        value,
+                        fallback,
+                        max_len=max_len,
+                    ),
+                    image_data_url=image_data_url,
+                )
+                print(f"[AgenticVision] {provider['label']} locator succeeded with {model_name}.")
+                return text
+            except Exception as exc:
+                print(f"[AgenticVision] {provider['label']} locator failed with {model_name}: {exc}")
     return None
 
 
@@ -279,7 +296,7 @@ def crop_and_search_click(
         type_of_click: left click | double left click | right click
         window_offset: Active-window top-left screen offset (x, y).
         window_scale: Image pixel to logical coordinate scale (x, y).
-        model_name: Gemini model used for secondary localization.
+        model_name: Optional preferred provider model for secondary localization.
         should_stop: Optional callback returning True when cancellation is requested.
         perform_click: Whether to click after localization (default False).
         pad_pixels: Fixed padding applied to each side of crop bounds.
@@ -315,26 +332,9 @@ Rules:
 """
 
     _check_stop(should_stop)
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    try:
-        response = client.models.generate_content(
-            model=model_name or DEFAULT_LOCATOR_MODEL,
-            contents=[cropped, prompt],
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                top_p=0.95,
-                top_k=64,
-                max_output_tokens=64,
-                thinking_config=_minimal_thinking_config(),
-            ),
-        )
-        response_text = response.text
-    except Exception as exc:
-        if not is_gemini_quota_error(exc):
-            raise
-        response_text = _openrouter_localize_bbox(cropped, prompt)
-        if not response_text:
-            raise
+    response_text = _provider_localize_bbox(cropped, prompt, model_name or DEFAULT_LOCATOR_MODEL)
+    if not response_text:
+        raise RuntimeError("Vision locator providers failed to return a bounding box.")
 
     _check_stop(should_stop)
     local_ymin, local_xmin, local_ymax, local_xmax = _parse_bbox(response_text)

@@ -61,6 +61,41 @@ def test_create_save_and_load_chat_session_roundtrip(tmp_path: Path) -> None:
     assert result["roles"] == ["user", "assistant"]
 
 
+def test_chat_session_preserves_assistant_agent_trace(tmp_path: Path) -> None:
+    result = _run_chat_sessions_eval(
+        tmp_path,
+        (
+            "manager.initialize();\n"
+            "const state = manager.getChatSessionState();\n"
+            "const sessionId = state.currentSessionId;\n"
+            "manager.saveChatSessionMessages(sessionId, [\n"
+            "  {\n"
+            "    role: 'assistant',\n"
+            "    text: 'Done',\n"
+            "    ts: 2,\n"
+            "    agentTrace: {\n"
+            "      isOpen: false,\n"
+            "      status: 'completed',\n"
+            "      summary: 'CLI task completed.',\n"
+            "      entries: [\n"
+            "        { label: 'CLI', source: 'cua_cli', status: 'running', text: 'Running CLI task...' },\n"
+            "        { label: 'CLI', source: 'cua_cli', status: 'completed', text: 'CLI task completed.' }\n"
+            "      ]\n"
+            "    }\n"
+            "  }\n"
+            "]);\n"
+            "const loaded = manager.loadChatSessionData(sessionId);\n"
+            "process.stdout.write(JSON.stringify(loaded.messages[0]));"
+        ),
+    )
+
+    assert result["role"] == "assistant"
+    assert result["agentTrace"]["isOpen"] is False
+    assert result["agentTrace"]["status"] == "completed"
+    assert result["agentTrace"]["summary"] == "CLI task completed."
+    assert result["agentTrace"]["entries"][-1]["text"] == "CLI task completed."
+
+
 def test_archiving_current_session_moves_it_to_archived_list(tmp_path: Path) -> None:
     result = _run_chat_sessions_eval(
         tmp_path,

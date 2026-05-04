@@ -84,7 +84,11 @@ invoke_browser_declaration = {
 
 invoke_cua_cli_declaration = {
     "name": "invoke_cua_cli",
-    "description": "Delegate to the CLI Agent for shell-based desktop control. Use for running commands, coding/codebase tasks, opening apps via terminal, file operations, and script execution.",
+    "description": (
+        "Delegate to the CLI Agent for shell-based desktop control. Use for running commands, "
+        "coding/codebase tasks, opening apps via terminal, file operations, script execution, "
+        "and read-only local machine state inspection when the state can be queried programmatically."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
@@ -96,7 +100,12 @@ invoke_cua_cli_declaration = {
 
 invoke_cua_vision_declaration = {
     "name": "invoke_cua_vision",
-    "description": "Delegate to the Vision Agent for GUI-based desktop control. Use for clicking buttons, interacting with visual interfaces, and tasks requiring screen understanding.",
+    "description": (
+        "Delegate to the Vision Agent for GUI-based desktop control. Use for clicking buttons, "
+        "typing into visible interfaces, pointer/keyboard workflows, and tasks where the needed "
+        "information exists only on screen. Do not choose this solely because a GUI app can display "
+        "the same local state a shell command can inspect."
+    ),
     "parameters": {
         "type": "object",
         "properties": {

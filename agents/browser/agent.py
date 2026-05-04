@@ -10,6 +10,7 @@ import asyncio
 import atexit
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 import shutil
@@ -21,12 +22,17 @@ from agents.browser.task_policy import (
     build_fallback_summary,
     extract_available_file_paths_from_task,
     extract_direct_url,
+    has_browser_interaction_intent,
     is_current_tab_context_task,
     is_open_new_tab_task,
     must_avoid_search,
     should_close_after_task,
+    should_extract_page_content,
     should_fallback_to_playwright,
+    should_search_before_direct_navigation,
     should_reuse_existing_page,
+    should_summarize_page_content,
+    should_use_playwright_fast_path,
     steer_task_for_existing_page,
     task_to_search_query,
 )
@@ -59,6 +65,11 @@ class BrowserAgent:
     _shared_playwright_headless: bool = False
     _cleanup_registered: bool = False
     _browser_use_resolution_checked: bool = False
+    _active_browser_use_agents: set[Any] = set()
+    _browser_use_stop_requested: bool = False
+    _interrupted_browser_use_state: Any = None
+    _interrupted_browser_use_task: str = ""
+    _interrupted_browser_use_summary: str = ""
 
     def __init__(self, model_name: str):
         self.model_name = model_name
@@ -107,6 +118,116 @@ class BrowserAgent:
             )
 
         cls._browser_use_resolution_checked = True
+
+    @classmethod
+    def clear_stop_request(cls) -> None:
+        cls._browser_use_stop_requested = False
+
+    @classmethod
+    def _register_active_browser_use_agent(cls, agent: Any) -> None:
+        cls._active_browser_use_agents.add(agent)
+
+    @classmethod
+    def _unregister_active_browser_use_agent(cls, agent: Any) -> None:
+        cls._active_browser_use_agents.discard(agent)
+
+    @classmethod
+    def request_stop_all(cls) -> int:
+        cls._browser_use_stop_requested = True
+        stopped = 0
+        for agent in list(cls._active_browser_use_agents):
+            stop = getattr(agent, "stop", None)
+            if not callable(stop):
+                continue
+            try:
+                stop()
+                stopped += 1
+            except Exception:
+                pass
+        return stopped
+
+    @classmethod
+    async def _should_stop_browser_use_agent(cls) -> bool:
+        return cls._browser_use_stop_requested
+
+    @staticmethod
+    def _normalize_resume_text(value: str) -> str:
+        return " ".join(str(value or "").split()).strip().lower()
+
+    @classmethod
+    def _is_resume_request(cls, task: str) -> bool:
+        lowered = cls._normalize_resume_text(task)
+        if not lowered:
+            return False
+        return any(
+            marker in lowered
+            for marker in (
+                "continue",
+                "resume",
+                "keep going",
+                "carry on",
+                "pick up where",
+                "where you left off",
+                "from where you left",
+            )
+        )
+
+    @classmethod
+    def has_interrupted_work(cls) -> bool:
+        return cls._interrupted_browser_use_state is not None and bool(
+            cls._interrupted_browser_use_task.strip()
+        )
+
+    @classmethod
+    def resolve_resume_task(cls, user_prompt: str) -> str | None:
+        if not cls.has_interrupted_work() or not cls._is_resume_request(user_prompt):
+            return None
+        return cls._interrupted_browser_use_task
+
+    @classmethod
+    def _remember_interrupted_browser_use_agent(
+        cls,
+        agent: Any,
+        *,
+        task: str,
+        summary: str = "",
+    ) -> None:
+        state = getattr(agent, "state", None)
+        if state is None:
+            return
+        cls._interrupted_browser_use_state = state
+        cls._interrupted_browser_use_task = str(task or "").strip()
+        cls._interrupted_browser_use_summary = str(summary or "").strip()
+
+    @classmethod
+    def _clear_interrupted_browser_use_agent(cls, task: str = "") -> None:
+        if task and cls._normalize_resume_text(task) != cls._normalize_resume_text(cls._interrupted_browser_use_task):
+            return
+        cls._interrupted_browser_use_state = None
+        cls._interrupted_browser_use_task = ""
+        cls._interrupted_browser_use_summary = ""
+
+    @classmethod
+    def _consume_resume_state_for_task(cls, task: str) -> Any:
+        if not cls.has_interrupted_work():
+            return None
+
+        normalized_task = cls._normalize_resume_text(task)
+        normalized_interrupted = cls._normalize_resume_text(cls._interrupted_browser_use_task)
+        if normalized_task != normalized_interrupted and not cls._is_resume_request(task):
+            return None
+
+        state = cls._interrupted_browser_use_state
+        for attr, value in (
+            ("paused", False),
+            ("stopped", False),
+            ("follow_up_task", True),
+        ):
+            try:
+                setattr(state, attr, value)
+            except Exception:
+                pass
+        return state
 
     @classmethod
     async def _close_shared_resources(cls) -> None:
@@ -249,6 +370,14 @@ class BrowserAgent:
                 pre_extracted_url=original_direct_url,
             )
 
+        if self._should_use_playwright_fast_path(task):
+            return await self._execute_with_playwright(
+                task,
+                bootstrap_error="deterministic_fast_path",
+                close_when_done=close_when_done,
+                pre_extracted_url=original_direct_url,
+            )
+
         # Always try browser_use first — it can actually interact with pages.
         # Playwright fallback is a last resort for navigation-only tasks.
         try:
@@ -284,19 +413,54 @@ class BrowserAgent:
 
         session = await self._get_or_create_browser_use_session()
         self._session = session
+        agent_task = type(self).resolve_resume_task(task) or task
+        resume_state = type(self)._consume_resume_state_for_task(agent_task)
+        if resume_state is not None:
+            print("[Browser Agent] Resuming interrupted browser-use task.")
 
-        available_file_paths = self._extract_available_file_paths_from_task(task)
+        available_file_paths = self._extract_available_file_paths_from_task(agent_task)
         if available_file_paths:
             print(f"[Browser Agent] available_file_paths: {available_file_paths}")
 
         async def run_with_llm(llm):
             agent = Agent(
-                task=task,
+                task=agent_task,
                 llm=llm,
                 browser_session=session,
                 available_file_paths=available_file_paths,
+                register_should_stop_callback=type(self)._should_stop_browser_use_agent,
+                injected_agent_state=resume_state,
             )
-            history = await agent.run()
+            type(self)._register_active_browser_use_agent(agent)
+            try:
+                history = await agent.run()
+            except asyncio.CancelledError:
+                try:
+                    agent.stop()
+                except Exception:
+                    pass
+                type(self)._remember_interrupted_browser_use_agent(
+                    agent,
+                    task=agent_task,
+                    summary="Browser task interrupted by user.",
+                )
+                raise
+            finally:
+                type(self)._unregister_active_browser_use_agent(agent)
+
+            if type(self)._browser_use_stop_requested or getattr(agent.state, "stopped", False):
+                type(self)._remember_interrupted_browser_use_agent(
+                    agent,
+                    task=agent_task,
+                    summary="Browser task stopped by user.",
+                )
+                return {
+                    "success": False,
+                    "result": history,
+                    "error": "Browser task stopped by user. Say 'continue' to resume it.",
+                }
+
+            type(self)._clear_interrupted_browser_use_agent(agent_task)
             if close_when_done:
                 await type(self)._close_shared_resources()
             else:
@@ -340,6 +504,7 @@ class BrowserAgent:
         # to avoid false matches from steering preamble text.
         direct_url = pre_extracted_url if pre_extracted_url is not None else self._extract_direct_url(task)
         avoid_search = self._must_avoid_search(task)
+        prefer_search = self._should_search_before_direct_navigation(task)
         used_search = False
         page, used_headless = await self._get_or_create_playwright_page()
         action_mode = "direct_navigation"
@@ -357,7 +522,7 @@ class BrowserAgent:
 
         if action_mode.startswith("new_tab"):
             pass
-        elif direct_url:
+        elif direct_url and not prefer_search:
             await page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
             action_mode = "direct_navigation"
         elif avoid_search:
@@ -383,8 +548,19 @@ class BrowserAgent:
         await page.wait_for_timeout(1000)
         final_url = page.url
         title = await page.title()
+        content_requested = self._should_extract_page_content(task)
+        content_response = ""
+        if content_requested:
+            page_text = await self._extract_playwright_page_text(page)
+            content_response = self._build_page_content_response(
+                task=task,
+                page_title=title,
+                final_url=final_url,
+                page_text=page_text,
+            )
+        complete = bool(content_response) if content_requested else not has_browser_interaction_intent(task)
 
-        summary = self._build_fallback_summary(
+        summary = content_response or self._build_fallback_summary(
             task=task,
             final_url=final_url,
             page_title=title,
@@ -392,6 +568,19 @@ class BrowserAgent:
             used_headless=used_headless,
             action_mode=action_mode,
         )
+        if content_requested and not content_response:
+            summary = f"{summary}; page content extraction did not return readable text."
+        if not complete:
+            if content_requested:
+                summary = (
+                    f"{summary}; additional browser content extraction is required "
+                    "to finish the user's request."
+                )
+            else:
+                summary = (
+                    f"{summary}; interactive browser automation is still required "
+                    "to finish the user's request."
+                )
 
         if close_when_done:
             await type(self)._close_shared_resources()
@@ -407,8 +596,10 @@ class BrowserAgent:
                 "url": final_url,
                 "title": title,
                 "bootstrap_error": bootstrap_error,
+                "complete": complete,
             },
             "error": None,
+            "complete": complete,
         }
 
     async def _open_first_duckduckgo_result(self, page) -> None:
@@ -529,6 +720,14 @@ class BrowserAgent:
         return should_fallback_to_playwright(exc)
 
     @staticmethod
+    def _should_use_playwright_fast_path(task: str) -> bool:
+        return should_use_playwright_fast_path(task)
+
+    @staticmethod
+    def _should_search_before_direct_navigation(task: str) -> bool:
+        return should_search_before_direct_navigation(task)
+
+    @staticmethod
     def _extract_direct_url(task: str) -> str | None:
         return extract_direct_url(task)
 
@@ -558,6 +757,140 @@ class BrowserAgent:
     def _must_avoid_search(cls, task: str) -> bool:
         del cls
         return must_avoid_search(task)
+
+    @staticmethod
+    def _should_extract_page_content(task: str) -> bool:
+        return should_extract_page_content(task)
+
+    @staticmethod
+    def _should_summarize_page_content(task: str) -> bool:
+        return should_summarize_page_content(task)
+
+    @staticmethod
+    def _clean_page_text(value: str) -> str:
+        text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+        cleaned: list[str] = []
+        previous_blank = False
+        for line in lines:
+            if not line:
+                if cleaned and not previous_blank:
+                    cleaned.append("")
+                previous_blank = True
+                continue
+            cleaned.append(line)
+            previous_blank = False
+        return "\n".join(cleaned).strip()
+
+    @staticmethod
+    def _truncate_text(value: str, max_chars: int) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if len(text) <= max_chars:
+            return text
+        clipped = text[:max_chars].rsplit(" ", 1)[0].strip()
+        return f"{clipped}..."
+
+    @classmethod
+    def _extractive_page_summary(cls, page_text: str) -> str:
+        text = cls._clean_page_text(page_text)
+        paragraphs = [
+            paragraph.strip()
+            for paragraph in re.split(r"\n\s*\n+", text)
+            if paragraph.strip()
+        ]
+        candidate = " ".join(paragraphs[:4]) if paragraphs else text
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", candidate)
+            if sentence.strip()
+        ]
+        selected: list[str] = []
+        for sentence in sentences:
+            proposed = " ".join([*selected, sentence]).strip()
+            if selected and len(proposed) > 1200:
+                break
+            selected.append(sentence)
+            if len(selected) >= 5:
+                break
+        if selected:
+            return cls._truncate_text(" ".join(selected), 1200)
+        return cls._truncate_text(candidate, 1200)
+
+    @classmethod
+    def _build_page_content_response(
+        cls,
+        *,
+        task: str,
+        page_title: str,
+        final_url: str,
+        page_text: str,
+    ) -> str:
+        text = cls._clean_page_text(page_text)
+        if not text:
+            return ""
+
+        title_text = page_title.strip() if isinstance(page_title, str) else ""
+        source = title_text or final_url or "page"
+        if final_url and final_url not in source:
+            source = f"{source} ({final_url})"
+
+        if cls._should_summarize_page_content(task):
+            content = cls._extractive_page_summary(text)
+            return f"Summary of {source}:\n{content}"
+
+        content = cls._truncate_text(text, 1800)
+        return f"Page content from {source}:\n{content}"
+
+    @classmethod
+    async def _extract_playwright_page_text(cls, page) -> str:
+        script = """
+() => {
+  const selectors = [
+    '#mw-content-text .mw-parser-output',
+    'article',
+    'main',
+    '[role="main"]',
+    'body'
+  ];
+  const root = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
+  if (!root) {
+    return document.body ? document.body.innerText : '';
+  }
+  const clone = root.cloneNode(true);
+  clone.querySelectorAll([
+    'script',
+    'style',
+    'noscript',
+    'nav',
+    'header',
+    'footer',
+    'aside',
+    'form',
+    'table',
+    'figure',
+    'sup',
+    '.mw-editsection',
+    '.reference',
+    '.reflist',
+    '.navbox',
+    '.infobox',
+    '.sidebar'
+  ].join(',')).forEach((element) => element.remove());
+  const blocks = Array.from(clone.querySelectorAll('p, li'));
+  const textBlocks = blocks
+    .map((element) => (element.innerText || '').replace(/\\s+/g, ' ').trim())
+    .filter((text) => text.length > 40);
+  if (textBlocks.length > 0) {
+    return textBlocks.join('\\n\\n');
+  }
+  return clone.innerText || '';
+}
+"""
+        try:
+            value = await page.evaluate(script)
+        except Exception:
+            return ""
+        return cls._clean_page_text(str(value or ""))
 
     async def _select_relevant_existing_page(self, task: str, default_page):
         """Return a matching open page, or None if no relevant page is found."""

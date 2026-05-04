@@ -98,7 +98,7 @@ async def _finish_non_rapid_status(message: str, success: bool, source: str):
         complete_status_bubble(
             message,
             done_text=done_text,
-            delay_ms=2000,
+            delay_ms=700,
             source=source,
         ),
         "complete_status_bubble",
@@ -119,14 +119,18 @@ async def run_routed_agent_step(
         success: bool,
         message: str,
         source: str,
+        complete: bool | None = None,
     ) -> dict[str, Any]:
-        return RoutedStepResult(
+        payload = RoutedStepResult(
             agent=agent,
             task=task,
             success=success,
             message=message,
             source=source,
         ).as_dict()
+        if complete is not None:
+            payload["complete"] = complete
+        return payload
 
     agent_name = routing_result.get("agent")
     task_text = _routing_task_text(routing_result)
@@ -257,6 +261,7 @@ async def run_routed_agent_step(
             success=bool(result.get("success", False)),
             message=message,
             source="browser_use",
+            complete=bool(result.get("complete", True)),
         )
 
     if agent_name == "cua_cli":

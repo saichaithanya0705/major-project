@@ -39,6 +39,26 @@ def _assert_implemented(names: tuple[str, ...], tool_map: dict, label: str) -> N
     assert not non_callable, f"{label} tool map has non-callable entries: {non_callable}"
 
 
+def _normalize_declaration(value):
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_none=True, mode="json")
+    if isinstance(value, dict):
+        normalized = {}
+        for key, child in value.items():
+            if key == "type" and isinstance(child, str):
+                normalized[key] = child.lower()
+            else:
+                normalized[key] = _normalize_declaration(child)
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_declaration(item) for item in value]
+    return value
+
+
+def _normalize_declarations(declarations):
+    return [_normalize_declaration(declaration) for declaration in declarations]
+
+
 def run_checks() -> None:
     _assert_names_match(VISION_FUNCTION_DECLARATIONS, VISION_DECLARED_TOOL_NAMES, "Vision")
     _assert_names_match(JARVIS_FUNCTION_DECLARATIONS, JARVIS_DECLARED_TOOL_NAMES, "JARVIS")
@@ -48,8 +68,12 @@ def run_checks() -> None:
 
     assert len(VISION_TOOLS) == 1, "Vision should expose exactly one function-calling tool bundle."
     assert len(JARVIS_TOOLS) == 1, "JARVIS should expose exactly one function-calling tool bundle."
-    assert VISION_TOOLS[0].function_declarations == VISION_FUNCTION_DECLARATIONS
-    assert JARVIS_TOOLS[0].function_declarations == JARVIS_FUNCTION_DECLARATIONS
+    assert _normalize_declarations(
+        VISION_TOOLS[0].function_declarations
+    ) == _normalize_declarations(VISION_FUNCTION_DECLARATIONS)
+    assert _normalize_declarations(
+        JARVIS_TOOLS[0].function_declarations
+    ) == _normalize_declarations(JARVIS_FUNCTION_DECLARATIONS)
 
 
 if __name__ == "__main__":

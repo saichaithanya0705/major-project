@@ -14,6 +14,130 @@ CleanText = Callable[[object, str, int], str]
 ParseJsonObject = Callable[[str], dict[str, Any]]
 
 
+def _extract_message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            piece = item.get("text")
+            if isinstance(piece, str) and piece.strip():
+                parts.append(piece.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    if isinstance(raw_arguments, str) and raw_arguments.strip():
+        try:
+            parsed = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _normalize_tool_call(
+    raw_call: Any,
+    valid_tool_names: set[str],
+) -> Optional[dict[str, Any]]:
+    if not isinstance(raw_call, dict):
+        return None
+
+    function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+    function_call = (
+        raw_call.get("function_call")
+        if isinstance(raw_call.get("function_call"), dict)
+        else {}
+    )
+    source = function or function_call or raw_call
+    name = str(
+        source.get("name")
+        or source.get("tool")
+        or source.get("tool_name")
+        or raw_call.get("name")
+        or raw_call.get("tool")
+        or raw_call.get("tool_name")
+        or ""
+    ).strip()
+    if not name or (valid_tool_names and name not in valid_tool_names):
+        return None
+
+    raw_arguments = (
+        source.get("arguments")
+        if "arguments" in source
+        else source.get("args")
+        if "args" in source
+        else raw_call.get("arguments")
+        if "arguments" in raw_call
+        else raw_call.get("args")
+    )
+    return {"name": name, "arguments": _parse_tool_arguments(raw_arguments)}
+
+
+def _parse_json_value_from_text(text: str) -> Any:
+    candidates: list[str] = []
+    stripped = text.strip()
+    if stripped:
+        candidates.append(stripped)
+
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3 and lines[-1].strip() == "```":
+            candidates.append("\n".join(lines[1:-1]).strip())
+
+    for opener, closer in [("{", "}"), ("[", "]")]:
+        start = stripped.find(opener)
+        end = stripped.rfind(closer)
+        if start >= 0 and end > start:
+            candidates.append(stripped[start : end + 1])
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _tool_calls_from_json_payload(
+    payload: Any,
+    valid_tool_names: set[str],
+) -> list[dict[str, Any]]:
+    raw_calls: list[Any] = []
+    if isinstance(payload, list):
+        raw_calls = payload
+    elif isinstance(payload, dict):
+        for key in ("tool_calls", "function_calls", "calls", "tools"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                raw_calls.extend(value)
+        if not raw_calls:
+            raw_calls = [payload]
+
+    parsed: list[dict[str, Any]] = []
+    for raw_call in raw_calls:
+        call = _normalize_tool_call(raw_call, valid_tool_names)
+        if call:
+            parsed.append(call)
+    return parsed
+
+
+def _parse_text_tool_calls(
+    text: str,
+    valid_tool_names: set[str],
+) -> list[dict[str, Any]]:
+    payload = _parse_json_value_from_text(text)
+    if payload is None:
+        return []
+    return _tool_calls_from_json_payload(payload, valid_tool_names)
+
+
 def call_openrouter_text_sync(
     *,
     openrouter_api_key: str,
@@ -68,36 +192,24 @@ def call_openrouter_text_sync(
     )
     if response.status_code >= 400:
         body = clean_text(response.text, "", 320)
-        raise RuntimeError(f"OpenRouter HTTP {response.status_code}: {body}")
+        raise RuntimeError(f"Provider HTTP {response.status_code}: {body}")
 
     data = response.json()
     if not isinstance(data, dict):
-        raise RuntimeError("OpenRouter returned a non-object response.")
+        raise RuntimeError("Provider returned a non-object response.")
 
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise RuntimeError("OpenRouter returned no choices.")
+        raise RuntimeError("Provider returned no choices.")
 
     first = choices[0] if isinstance(choices[0], dict) else {}
     message = first.get("message") if isinstance(first.get("message"), dict) else {}
     content = message.get("content")
 
-    if isinstance(content, str):
-        text = content.strip()
-    elif isinstance(content, list):
-        parts = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            piece = item.get("text")
-            if isinstance(piece, str) and piece.strip():
-                parts.append(piece.strip())
-        text = "\n".join(parts).strip()
-    else:
-        text = ""
+    text = _extract_message_text(content)
 
     if not text:
-        raise RuntimeError("OpenRouter returned empty message content.")
+        raise RuntimeError("Provider returned empty message content.")
 
     return text
 
@@ -170,44 +282,37 @@ def call_openrouter_tool_sync(
     )
     if response.status_code >= 400:
         body = clean_text(response.text, "", 420)
-        raise RuntimeError(f"OpenRouter HTTP {response.status_code}: {body}")
+        raise RuntimeError(f"Provider HTTP {response.status_code}: {body}")
 
     data = response.json()
     if not isinstance(data, dict):
-        raise RuntimeError("OpenRouter returned a non-object response.")
+        raise RuntimeError("Provider returned a non-object response.")
 
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise RuntimeError("OpenRouter returned no choices.")
+        raise RuntimeError("Provider returned no choices.")
 
     first = choices[0] if isinstance(choices[0], dict) else {}
     message = first.get("message") if isinstance(first.get("message"), dict) else {}
     content = message.get("content")
-    text = content.strip() if isinstance(content, str) else ""
+    text = _extract_message_text(content)
 
     parsed_tool_calls: list[dict[str, Any]] = []
+    valid_tool_names = {
+        str(declaration.get("name") or "").strip()
+        for declaration in function_declarations
+        if isinstance(declaration, dict) and declaration.get("name")
+    }
     for raw_call in message.get("tool_calls") or []:
-        if not isinstance(raw_call, dict):
-            continue
-        function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
-        name = str(function.get("name") or "").strip()
-        if not name:
-            continue
-        raw_arguments = function.get("arguments")
-        arguments: dict[str, Any] = {}
-        if isinstance(raw_arguments, dict):
-            arguments = raw_arguments
-        elif isinstance(raw_arguments, str) and raw_arguments.strip():
-            try:
-                parsed = json.loads(raw_arguments)
-                if isinstance(parsed, dict):
-                    arguments = parsed
-            except json.JSONDecodeError:
-                arguments = {}
-        parsed_tool_calls.append({"name": name, "arguments": arguments})
+        call = _normalize_tool_call(raw_call, valid_tool_names)
+        if call:
+            parsed_tool_calls.append(call)
+
+    if not parsed_tool_calls and text:
+        parsed_tool_calls.extend(_parse_text_tool_calls(text, valid_tool_names))
 
     if not text and not parsed_tool_calls:
-        raise RuntimeError("OpenRouter returned neither text nor tool calls.")
+        raise RuntimeError("Provider returned neither text nor tool calls.")
 
     return {"text": text, "tool_calls": parsed_tool_calls}
 
@@ -304,3 +409,52 @@ def call_ollama_router_sync(
     if not isinstance(parsed, dict) or not parsed:
         raise RuntimeError(f"Ollama router returned non-JSON payload: {content}")
     return parsed
+
+
+def validate_ollama_router_model_sync(
+    *,
+    ollama_base_url: str,
+    ollama_router_model: str,
+    timeout_seconds: int,
+    clean_text: CleanText,
+) -> str | None:
+    model_name = (ollama_router_model or "").strip()
+    if not model_name:
+        return "Ollama router model is not configured."
+
+    url = f"{ollama_base_url.rstrip('/')}/api/tags"
+    try:
+        response = requests.get(url, timeout=timeout_seconds)
+    except Exception as exc:
+        return (
+            "Unable to validate Ollama router model at startup: "
+            f"{type(exc).__name__}: {clean_text(str(exc), '', 240)}"
+        )
+
+    if response.status_code >= 400:
+        body = clean_text(response.text, "", 240)
+        return f"Unable to validate Ollama router model: HTTP {response.status_code}: {body}"
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        return f"Unable to validate Ollama router model: invalid /api/tags JSON ({type(exc).__name__})."
+
+    available: set[str] = set()
+    for item in data.get("models") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("name", "model"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                available.add(value.strip())
+
+    if model_name in available:
+        return None
+
+    short_available = ", ".join(sorted(available)[:8]) or "none"
+    return (
+        f"Ollama router model '{model_name}' was not found. "
+        "Run `ollama pull <model>` or set OLLAMA_ROUTER_MODEL / rapid_response_model "
+        f"to an installed model. Installed models: {short_available}."
+    )

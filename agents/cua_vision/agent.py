@@ -5,22 +5,12 @@ This agent can see the user's screen and interact with it by clicking elements,
 typing, and using keyboard shortcuts. It uses a vision model to understand
 what's on screen and decide what actions to take.
 """
-import os
 import time
 
 from dotenv import load_dotenv
 from PIL import Image
 
-try:
-    from google import genai
-    from google.genai import types
-    from google.api_core.exceptions import ResourceExhausted
-except ImportError:
-    print('Google Gemini dependencies have not been installed')
-
 from agents.cua_vision.tools import (
-    VISION_TOOLS,
-    TOOL_CONFIG,
     reset_state,
     clear_stop_request,
     capture_active_window,
@@ -28,7 +18,8 @@ from agents.cua_vision.tools import (
     execute_tool_call,
 )
 from integrations.audio import tts_speak
-from agents.cua_vision.single_call import SingleCallVisionEngine
+from agents.cua_vision.single_call import OpenRouterFallbackError, SingleCallVisionEngine
+from agents.cua_vision.tool_declarations import VISION_FUNCTION_DECLARATIONS
 from agents.cua_vision.prompts import (
     LOOK_AT_SCREEN_PROMPT,
     WATCH_SCREEN_PROMPT,
@@ -36,17 +27,6 @@ from agents.cua_vision.prompts import (
 from agents.cua_vision.image import image_change, reset_image_state
 
 load_dotenv()
-
-
-def _minimal_thinking_config():
-    """Return a minimal-thinking config across supported SDK variants."""
-    try:
-        return types.ThinkingConfig(
-            thinking_level=types.ThinkingLevel.MINIMAL,
-        )
-    except Exception:
-        # Fallback for older variants that may not expose thinking_level.
-        return types.ThinkingConfig(thinking_budget=0)
 
 
 class VisionAgent:
@@ -62,34 +42,17 @@ class VisionAgent:
     - Continuous screen watching
     """
 
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    def __init__(self, model_name: str = "nvidia/openrouter-vision"):
+        # Kept for compatibility with callers that inspect these attributes. CUA
+        # vision requests are executed through NVIDIA first, then OpenRouter.
+        self.client = None
         self.model_name = model_name
-        self.backup_model_name = (os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash").strip()
+        self.backup_model_name = ""
         self.max_retries = 3
         self.retries = 0
 
-        # Configuration for screen interaction (low temperature for consistency)
-        self.interaction_config = types.GenerateContentConfig(
-            temperature=0.2,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=100,
-            thinking_config=_minimal_thinking_config(),
-            tools=VISION_TOOLS,
-            tool_config=TOOL_CONFIG,
-        )
-
-        # Configuration for screen analysis (higher temperature for flexibility)
-        self.analysis_config = types.GenerateContentConfig(
-            temperature=1.0,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=3000,
-            thinking_config=_minimal_thinking_config(),
-            tools=VISION_TOOLS,
-            tool_config=TOOL_CONFIG,
-        )
+        self.interaction_config = None
+        self.analysis_config = None
 
         # Chat history for multi-turn interaction
         self.chat_history = []
@@ -130,53 +93,17 @@ class VisionAgent:
         self.chat_history = []
 
         try:
-            models_to_try = [self.model_name]
-            if self.backup_model_name and self.backup_model_name not in models_to_try:
-                models_to_try.append(self.backup_model_name)
-
-            last_error: Exception | None = None
-            for candidate_model in models_to_try:
-                self.model_name = candidate_model
-                try:
-                    await self._interact_with_screen(task)
-                    return {
-                        "success": True,
-                        "result": "Task completed",
-                        "error": None
-                    }
-                except ResourceExhausted as e:
-                    last_error = e
-                    if candidate_model != models_to_try[-1]:
-                        print(f"[VisionAgent] Model {candidate_model} exhausted; retrying with backup.")
-                        continue
-                    return {
-                        "success": False,
-                        "result": None,
-                        "error": f"Vision model rate limit exceeded: {e}"
-                    }
-                except Exception as e:
-                    last_error = e
-                    if self._is_temporary_model_error(e) and candidate_model != models_to_try[-1]:
-                        print(
-                            f"[VisionAgent] Model {candidate_model} unavailable; "
-                            f"retrying with backup {models_to_try[-1]}."
-                        )
-                        continue
-                    return {
-                        "success": False,
-                        "result": None,
-                        "error": (
-                            "Vision model is temporarily unavailable. "
-                            f"Last error: {e}"
-                            if self._is_temporary_model_error(e)
-                            else str(e)
-                        )
-                    }
-
+            await self._interact_with_screen(task)
+            return {
+                "success": True,
+                "result": "Task completed",
+                "error": None
+            }
+        except OpenRouterFallbackError as e:
             return {
                 "success": False,
                 "result": None,
-                "error": str(last_error) if last_error else "Vision task failed."
+                "error": str(e)
             }
         except Exception as e:
             return {
@@ -225,10 +152,15 @@ class VisionAgent:
         Now respond to this prompt: {prompt}
         """
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model_name,
-            contents=[prompt, screenshot, model_prompt],
-            config=self.analysis_config
+        engine = SingleCallVisionEngine(self)
+        response = await engine._generate_provider_step_response(
+            model_prompt,
+            screenshot,
+            system_prompt=system_instruction,
+            function_declarations=VISION_FUNCTION_DECLARATIONS,
+            temperature=0.2,
+            max_tokens=900,
+            status_prefix="Analyzing screen",
         )
 
         # Process function calls
@@ -258,13 +190,7 @@ class VisionAgent:
         reset_image_state()
         active_window = get_active_window_title()
 
-        config = types.GenerateContentConfig(
-            temperature=1,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=5000,
-            thinking_config=_minimal_thinking_config(),
-        )
+        engine = SingleCallVisionEngine(self)
 
         while get_active_window_title() == active_window:
             time.sleep(0.2)
@@ -278,10 +204,14 @@ class VisionAgent:
                     Analyze ALL text on screen. Translate if not in English.
                     """
 
-                    response = await self.client.aio.models.generate_content(
-                        model=self.model_name,
-                        contents=[screenshot, watch_prompt],
-                        config=config
+                    response = await engine._generate_provider_step_response(
+                        watch_prompt,
+                        screenshot,
+                        system_prompt=WATCH_SCREEN_PROMPT,
+                        function_declarations=[],
+                        temperature=0.2,
+                        max_tokens=900,
+                        status_prefix="Watching screen",
                     )
 
                     if response.text:

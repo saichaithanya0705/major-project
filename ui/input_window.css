@@ -854,6 +854,208 @@ input {
   color: rgba(226, 236, 230, 0.94);
 }
 
+.chat-msg.chat-msg-generating {
+  border-color: rgba(127, 157, 138, 0.36);
+}
+
+.chat-msg-content--generating {
+  min-width: 150px;
+}
+
+.chat-generating-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  color: rgba(226, 236, 230, 0.94);
+}
+
+.chat-generating-label {
+  white-space: nowrap;
+}
+
+.chat-generating-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 26px;
+}
+
+.chat-generating-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(190, 218, 203, 0.9);
+  opacity: 0.35;
+  animation: chat-generating-dot-pulse 1100ms ease-in-out infinite;
+}
+
+@keyframes chat-generating-dot-pulse {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  35% {
+    opacity: 0.95;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-generating-dot {
+    animation: none;
+    opacity: 0.7;
+    transform: none;
+  }
+}
+
+.agent-work-trace {
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 157, 138, 0.22);
+  background: rgba(9, 12, 15, 0.48);
+}
+
+.agent-work-trace-toggle {
+  width: 100%;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-work-trace-toggle:hover {
+  background: rgba(39, 46, 56, 0.45);
+}
+
+.agent-work-trace-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+.agent-work-trace-caret {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+
+.agent-work-trace[data-open="false"] .agent-work-trace-caret {
+  transform: rotate(0deg);
+}
+
+.agent-work-trace-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-work-trace-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(221, 232, 226, 0.94);
+}
+
+.agent-work-trace-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.agent-work-trace-status {
+  justify-self: end;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 157, 138, 0.28);
+  background: rgba(127, 157, 138, 0.14);
+  color: rgba(222, 238, 229, 0.94);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agent-work-trace[data-status="failed"] {
+  border-color: rgba(202, 118, 118, 0.34);
+}
+
+.agent-work-trace[data-status="failed"] .agent-work-trace-status {
+  border-color: rgba(202, 118, 118, 0.34);
+  background: rgba(82, 32, 32, 0.28);
+  color: rgba(255, 224, 224, 0.96);
+}
+
+.agent-work-trace-body {
+  border-top: 1px solid rgba(127, 138, 149, 0.16);
+  max-height: min(220px, 28vh);
+  overflow-y: auto;
+}
+
+.agent-work-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+
+.agent-work-trace-entry {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid rgba(127, 138, 149, 0.1);
+}
+
+.agent-work-trace-entry:first-child {
+  border-top: 0;
+}
+
+.agent-work-trace-entry-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(191, 223, 204, 0.88);
+}
+
+.agent-work-trace-entry-text {
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(214, 222, 232, 0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-work-trace-entry[data-status="failed"] .agent-work-trace-entry-label,
+.agent-work-trace-entry[data-status="failed"] .agent-work-trace-entry-text {
+  color: rgba(255, 224, 224, 0.94);
+}
+
 kbd {
   display: inline-flex;
   align-items: center;

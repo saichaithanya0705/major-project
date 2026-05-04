@@ -15,12 +15,16 @@ from agents.browser.task_policy import (
     build_fallback_summary,
     extract_available_file_paths_from_task,
     extract_direct_url,
+    has_browser_interaction_intent,
     is_current_tab_context_task,
     is_open_new_tab_task,
     must_avoid_search,
     should_close_after_task,
+    should_extract_page_content,
     should_fallback_to_playwright,
     should_reuse_existing_page,
+    should_summarize_page_content,
+    should_use_playwright_fast_path,
     steer_task_for_existing_page,
     task_to_search_query,
 )
@@ -60,6 +64,18 @@ def run_checks() -> None:
 
     assert task_to_search_query("Go to OpenAI") == "Go to OpenAI"
     assert task_to_search_query("OpenAI docs").endswith("official website")
+    assert task_to_search_query("fetch me the summary of world war 1 wikipedia page") == (
+        "world war 1 wikipedia page"
+    )
+    chatgpt_task = "goto chat.openai.com website and ask it for top 3 ml learning resources"
+    assert has_browser_interaction_intent(chatgpt_task), chatgpt_task
+    assert not should_use_playwright_fast_path(chatgpt_task), chatgpt_task
+    assert not has_browser_interaction_intent("open the task tracker homepage")
+    assert should_extract_page_content("fetch me the summary of world war 1 wikipedia page")
+    assert should_summarize_page_content("open https://example.com and summarize the page")
+    assert should_extract_page_content("read the contents of the currently open page")
+    assert not should_extract_page_content("open youtube.com")
+    assert not should_use_playwright_fast_path("open https://example.com and summarize the page")
 
     summary = build_fallback_summary(
         task="open docs",

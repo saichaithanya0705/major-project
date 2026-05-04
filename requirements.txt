@@ -7,7 +7,6 @@ websockets==16.0
 # CUA Vision Agent dependencies
 pyautogui>=0.9.54
 pygetwindow>=0.0.9
-keyboard>=0.13.5
 numpy==2.4.3
 
 # Browser Agent dependencies
@@ -17,4 +16,3 @@ psutil==7.2.2
 
 # TTS Integration (ElevenLabs)
 requests==2.32.5
-python-vlc>=3.0.18122

@@ -10,13 +10,6 @@ import json
 import os
 import time
 
-try:
-    from google.api_core.exceptions import InternalServerError
-except ImportError:
-    class InternalServerError(Exception):
-        """Fallback exception type when google-api-core is unavailable."""
-        pass
-
 from integrations.audio import tts_speak
 from agents.cua_vision.action_guard import (
     ClickLoopState,
@@ -32,7 +25,10 @@ from agents.cua_vision.interaction_policy import (
     describe_action_for_feedback,
     resolve_target_description,
 )
-from agents.cua_vision.prompts import VISION_AGENT_SYSTEM_PROMPT
+from agents.cua_vision.prompts import (
+    VISION_AGENT_SYSTEM_PROMPT,
+    WINDOWS_APP_LAUNCH_WORKFLOW,
+)
 from agents.cua_vision.image import image_change, reset_image_state
 from agents.cua_vision.runtime_state import (
     get_last_capture_context as _get_last_capture_context,
@@ -55,6 +51,10 @@ from agents.cua_vision.tools import (
 )
 from agents.cua_vision.tool_declarations import VISION_FUNCTION_DECLARATIONS
 from models.openrouter_fallback import (
+    get_nvidia_api_key,
+    get_nvidia_chat_url,
+    get_nvidia_models,
+    get_nvidia_timeout_seconds,
     get_openrouter_api_key,
     get_openrouter_chat_url,
     get_openrouter_models,
@@ -62,8 +62,7 @@ from models.openrouter_fallback import (
     get_openrouter_site_url,
     get_openrouter_timeout_seconds,
     image_to_data_url,
-    is_gemini_quota_error,
-    openrouter_tool_result_to_genai_response,
+    tool_result_to_vision_response,
 )
 from models.router_backends import call_openrouter_tool_sync
 from models.routing_policy import _clean_text
@@ -117,6 +116,10 @@ def _is_truthy_env(value: str | None) -> bool:
 
 class DebugStopAfterFirstGoTo(RuntimeError):
     """Raised when debug mode intentionally stops after first go_to_element."""
+
+
+class OpenRouterFallbackError(RuntimeError):
+    """Raised when no configured vision provider responds."""
 
 
 class SingleCallVisionEngine:
@@ -185,90 +188,122 @@ class SingleCallVisionEngine:
         self._thinking_index += 1
         await self._set_status(thinking_text)
 
-        model_task = asyncio.create_task(
-            self.agent.client.aio.models.generate_content(
-                model=self.agent.model_name,
-                contents=[model_prompt, screenshot],
-                config=getattr(
-                    self.agent,
-                    "interaction_config",
-                    getattr(self.agent, "analysis_config", None),
-                ),
-            )
-        )
-        try:
-            while True:
-                self._raise_if_stopped()
-                done, _ = await asyncio.wait({model_task}, timeout=0.15)
-                if done:
-                    response = model_task.result()
-                    self.agent.retries = 0
-                    return response
-        except asyncio.CancelledError:
-            model_task.cancel()
-            raise
-        except InternalServerError as e:
-            self.agent.retries += 1
-            if self.agent.retries < self.agent.max_retries:
-                await self._set_status(
-                    f"Model error. Retrying ({self.agent.retries}/{self.agent.max_retries})..."
-                )
-                await asyncio.sleep(1)
-                self._raise_if_stopped()
-                return await self._generate_step_response(task)
-            raise e
-        except Exception as e:
-            if not is_gemini_quota_error(e):
-                raise
-            fallback_response = await self._generate_openrouter_step_response(model_prompt, screenshot)
-            if fallback_response is not None:
-                self.agent.retries = 0
-                return fallback_response
-            raise
+        response = await self._generate_provider_step_response(model_prompt, screenshot)
+        self.agent.retries = 0
+        return response
 
-    async def _generate_openrouter_step_response(self, model_prompt: str, screenshot):
+    async def _generate_provider_step_response(
+        self,
+        model_prompt: str,
+        screenshot,
+        *,
+        system_prompt: str | None = None,
+        function_declarations: list[dict] | None = None,
+        temperature: float = 0.2,
+        max_tokens: int = 900,
+        status_prefix: str = "Calling vision model",
+    ):
+        nvidia_api_key = get_nvidia_api_key()
         api_key = get_openrouter_api_key()
-        if not api_key:
-            print("[VisionAgent] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
-            return None
+        if not api_key and not nvidia_api_key:
+            message = (
+                "CUA vision requires NVIDIA_API_KEY or OPENROUTER_API_KEY. "
+                "Gemini is not used for vision."
+            )
+            print(f"[VisionAgent] {message}")
+            raise OpenRouterFallbackError(message)
 
         image_data_url = image_to_data_url(screenshot)
-        system_prompt = (
+        system_prompt = system_prompt or (
             "You are a computer-use vision agent. Analyze the screenshot and choose the next "
             "tool call. Use task_is_complete when the user's goal is complete."
         )
-        last_error = ""
-        for model_name in get_openrouter_models("vision"):
-            try:
-                await self._set_status(f"Gemini quota hit. Retrying with OpenRouter {model_name}...")
-                result = await asyncio.to_thread(
-                    call_openrouter_tool_sync,
-                    openrouter_api_key=api_key,
-                    openrouter_url=get_openrouter_chat_url(),
-                    openrouter_site_url=get_openrouter_site_url(),
-                    openrouter_site_name=get_openrouter_site_name(),
-                    openrouter_timeout_seconds=get_openrouter_timeout_seconds(),
-                    model_name=model_name,
-                    system_prompt=system_prompt,
-                    user_prompt=model_prompt,
-                    function_declarations=VISION_FUNCTION_DECLARATIONS,
-                    temperature=0.2,
-                    max_tokens=900,
-                    clean_text=lambda value, fallback, max_len: _clean_text(
-                        value,
-                        fallback,
-                        max_len=max_len,
-                    ),
-                    image_data_url=image_data_url,
-                )
-                print(f"[VisionAgent] OpenRouter fallback succeeded with model {model_name}.")
-                return openrouter_tool_result_to_genai_response(result)
-            except Exception as fallback_exc:
-                last_error = str(fallback_exc)
-                print(f"[VisionAgent] OpenRouter fallback failed with {model_name}: {fallback_exc}")
-        if last_error:
-            await self._set_status("OpenRouter fallback failed after Gemini quota was hit.")
-        return None
+        function_declarations = (
+            VISION_FUNCTION_DECLARATIONS
+            if function_declarations is None
+            else function_declarations
+        )
+        attempts: list[str] = []
+        errors: list[str] = []
+        nvidia_models_to_try = get_nvidia_models("vision") if nvidia_api_key else []
+        openrouter_models_to_try = get_openrouter_models("vision") if api_key else []
+        if not openrouter_models_to_try and not nvidia_models_to_try:
+            raise OpenRouterFallbackError(
+                "No NVIDIA or OpenRouter vision models are configured."
+            )
+
+        providers_to_try = [
+            {
+                "label": "NVIDIA",
+                "api_key": nvidia_api_key,
+                "url": get_nvidia_chat_url() if nvidia_api_key else "",
+                "site_url": "",
+                "site_name": "",
+                "timeout": get_nvidia_timeout_seconds(),
+                "models": nvidia_models_to_try,
+            },
+            {
+                "label": "OpenRouter",
+                "api_key": api_key,
+                "url": get_openrouter_chat_url() if api_key else "",
+                "site_url": get_openrouter_site_url() if api_key else "",
+                "site_name": get_openrouter_site_name() if api_key else "",
+                "timeout": get_openrouter_timeout_seconds(),
+                "models": openrouter_models_to_try,
+            },
+        ]
+
+        for provider in providers_to_try:
+            if not provider["api_key"] or not provider["models"]:
+                continue
+            for model_name in provider["models"]:
+                self._raise_if_stopped()
+                attempt_label = f"{provider['label']}:{model_name}"
+                attempts.append(attempt_label)
+                try:
+                    await self._set_status(
+                        f"{status_prefix}: {provider['label']} {model_name}..."
+                    )
+                    result = await asyncio.to_thread(
+                        call_openrouter_tool_sync,
+                        openrouter_api_key=provider["api_key"],
+                        openrouter_url=provider["url"],
+                        openrouter_site_url=provider["site_url"],
+                        openrouter_site_name=provider["site_name"],
+                        openrouter_timeout_seconds=provider["timeout"],
+                        model_name=model_name,
+                        system_prompt=system_prompt,
+                        user_prompt=model_prompt,
+                        function_declarations=function_declarations,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        clean_text=lambda value, fallback, max_len: _clean_text(
+                            value,
+                            fallback,
+                            max_len=max_len,
+                        ),
+                        image_data_url=image_data_url,
+                    )
+                    print(
+                        f"[VisionAgent] {provider['label']} fallback succeeded with "
+                        f"model {model_name}."
+                    )
+                    return tool_result_to_vision_response(result)
+                except Exception as fallback_exc:
+                    error = f"{attempt_label}: {fallback_exc}"
+                    errors.append(error)
+                    print(f"[VisionAgent] {provider['label']} fallback failed with {model_name}: {fallback_exc}")
+        if errors:
+            await self._set_status("Vision provider fallback failed.")
+            raise OpenRouterFallbackError(
+                f"Vision providers failed after trying "
+                f"{', '.join(attempts)}. Last fallback error: {errors[-1]}"
+            )
+        raise OpenRouterFallbackError("Vision provider fallback did not run.")
+
+    async def _generate_openrouter_step_response(self, model_prompt: str, screenshot):
+        """Backward-compatible wrapper for the provider-based vision call."""
+        return await self._generate_provider_step_response(model_prompt, screenshot)
 
     def _build_model_prompt(self, task: str, active_window: str, memory_text):
         memory_json = json.dumps(memory_text)
@@ -314,12 +349,7 @@ IMPORTANT:
 - Treat "Recent controller observations" as factual feedback from executed actions and follow-up screenshots.
 - If an action was reported as having no visible effect, do not repeat it unchanged. Adjust the target or strategy.
 - When the task is fully complete, call `task_is_complete` and do not call any other function.
-- App-launch tasks on macOS should prefer keyboard flow:
-  1) `press_ctrl_hotkey(key="space")` (maps to Command+Space on macOS)
-  2) `type_string(string="<app name>", submit=true)`
-  3) continue the rest of the task after app opens
-- Avoid clicking tiny menu bar Spotlight icons when shortcut launch is available.
-- Do not stop immediately after opening an app if the user asked for more actions.
+{WINDOWS_APP_LAUNCH_WORKFLOW}
 """
 
     def _extract_function_calls(self, response):

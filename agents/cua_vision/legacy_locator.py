@@ -6,16 +6,7 @@ used as an internal fallback when direct single-call actions fail repeatedly.
 """
 
 import asyncio
-import os
 import random
-
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = None
-    types = None
-    print('Google Gemini dependencies have not been installed')
 
 from agents.cua_vision.keyboard import (
     move_cursor,
@@ -34,6 +25,10 @@ from ui.visualization_api.cursor_status import (
     hide_cursor_status,
 )
 from models.openrouter_fallback import (
+    get_nvidia_api_key,
+    get_nvidia_chat_url,
+    get_nvidia_models,
+    get_nvidia_timeout_seconds,
     get_openrouter_api_key,
     get_openrouter_chat_url,
     get_openrouter_models,
@@ -41,7 +36,6 @@ from models.openrouter_fallback import (
     get_openrouter_site_url,
     get_openrouter_timeout_seconds,
     image_to_data_url,
-    is_gemini_quota_error,
 )
 from models.router_backends import call_openrouter_text_sync
 from models.routing_policy import _clean_text
@@ -59,40 +53,62 @@ def _dispatch_now(coro):
             pass
 
 
-def _openrouter_find_bbox(screenshot, model_prompt: str) -> str | None:
-    api_key = get_openrouter_api_key()
-    if not api_key:
-        print("[LegacyLocator] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
+def _provider_find_bbox(screenshot, model_prompt: str) -> str | None:
+    providers = [
+        {
+            "label": "NVIDIA",
+            "api_key": get_nvidia_api_key(),
+            "url": get_nvidia_chat_url(),
+            "site_url": "",
+            "site_name": "",
+            "timeout": get_nvidia_timeout_seconds(),
+            "models": get_nvidia_models("locator"),
+        },
+        {
+            "label": "OpenRouter",
+            "api_key": get_openrouter_api_key(),
+            "url": get_openrouter_chat_url(),
+            "site_url": get_openrouter_site_url(),
+            "site_name": get_openrouter_site_name(),
+            "timeout": get_openrouter_timeout_seconds(),
+            "models": get_openrouter_models("locator"),
+        },
+    ]
+    if not any(provider["api_key"] for provider in providers):
+        print("[LegacyLocator] No NVIDIA_API_KEY or OPENROUTER_API_KEY configured.")
         return None
 
     image_data_url = image_to_data_url(screenshot)
-    for model_name in get_openrouter_models("locator"):
-        try:
-            text = call_openrouter_text_sync(
-                openrouter_api_key=api_key,
-                openrouter_url=get_openrouter_chat_url(),
-                openrouter_site_url=get_openrouter_site_url(),
-                openrouter_site_name=get_openrouter_site_name(),
-                openrouter_timeout_seconds=get_openrouter_timeout_seconds(),
-                model_name=model_name,
-                system_prompt=(
-                    "You localize one clickable UI element in a screenshot. "
-                    "Return only [ymin, xmin, ymax, xmax]."
-                ),
-                user_prompt=model_prompt,
-                temperature=0.1,
-                max_tokens=64,
-                clean_text=lambda value, fallback, max_len: _clean_text(
-                    value,
-                    fallback,
-                    max_len=max_len,
-                ),
-                image_data_url=image_data_url,
-            )
-            print(f"[LegacyLocator] OpenRouter locator fallback succeeded with {model_name}.")
-            return text
-        except Exception as exc:
-            print(f"[LegacyLocator] OpenRouter locator fallback failed with {model_name}: {exc}")
+    for provider in providers:
+        if not provider["api_key"] or not provider["models"]:
+            continue
+        for model_name in provider["models"]:
+            try:
+                text = call_openrouter_text_sync(
+                    openrouter_api_key=provider["api_key"],
+                    openrouter_url=provider["url"],
+                    openrouter_site_url=provider["site_url"],
+                    openrouter_site_name=provider["site_name"],
+                    openrouter_timeout_seconds=provider["timeout"],
+                    model_name=model_name,
+                    system_prompt=(
+                        "You localize one clickable UI element in a screenshot. "
+                        "Return only [ymin, xmin, ymax, xmax]."
+                    ),
+                    user_prompt=model_prompt,
+                    temperature=0.1,
+                    max_tokens=64,
+                    clean_text=lambda value, fallback, max_len: _clean_text(
+                        value,
+                        fallback,
+                        max_len=max_len,
+                    ),
+                    image_data_url=image_data_url,
+                )
+                print(f"[LegacyLocator] {provider['label']} locator succeeded with {model_name}.")
+                return text
+            except Exception as exc:
+                print(f"[LegacyLocator] {provider['label']} locator failed with {model_name}: {exc}")
     return None
 
 def legacy_find_and_click_element(
@@ -118,24 +134,12 @@ def legacy_find_and_click_element(
     print(f"[LegacyLocator] Searching for: {element_description}")
 
     try:
-        if genai is None or types is None:
-            print("[LegacyLocator] Gemini dependencies unavailable; skipping legacy fallback.")
-            return False
-
         if callable(should_stop) and should_stop():
             print("[LegacyLocator] Stop requested before fallback lookup; aborting.")
             return False
 
         screenshot = _capture_active_window()
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         _dispatch_now(update_cursor_status(initial_status, source="cua_vision"))
-
-        config = types.GenerateContentConfig(
-            temperature=0.1,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=30,
-        )
 
         model_prompt = f"""
 This image is a screenshot of {_get_active_window_title()} - an application that contains many interactive elements.
@@ -149,19 +153,9 @@ Return a bounding box for the {element_description}. Do NOT output any words:
 [ymin, xmin, ymax, xmax]
 """
 
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[screenshot, model_prompt],
-                config=config,
-            )
-            response_text = response.text
-        except Exception as exc:
-            if not is_gemini_quota_error(exc):
-                raise
-            response_text = _openrouter_find_bbox(screenshot, model_prompt)
-            if not response_text:
-                raise
+        response_text = _provider_find_bbox(screenshot, model_prompt)
+        if not response_text:
+            raise RuntimeError("Vision locator providers failed to return a bounding box.")
 
         _dispatch_now(update_cursor_status("Target located. Moving cursor...", source="cua_vision"))
         temp_list = response_text.strip()

@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 const MAX_PERSISTED_CHAT_MESSAGES = 300;
+const MAX_PERSISTED_AGENT_TRACE_ENTRIES = 24;
+const MAX_PERSISTED_AGENT_TRACE_TEXT = 1400;
 const CHAT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 const CHAT_ARCHIVED_DELETE_AFTER_DAYS = 30;
 const CHAT_AUTO_ARCHIVE_MS = CHAT_AUTO_ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
@@ -81,6 +83,46 @@ function createChatSessionManager({
     return 'No messages yet';
   }
 
+  function normalizeAgentTraceStatus(value) {
+    const status = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (['idle', 'running', 'completed', 'failed'].includes(status)) {
+      return status;
+    }
+    return 'completed';
+  }
+
+  function sanitizeAgentTrace(trace) {
+    if (!trace || typeof trace !== 'object') return null;
+
+    const entries = Array.isArray(trace.entries)
+      ? trace.entries
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const text = truncateText(entry.text, MAX_PERSISTED_AGENT_TRACE_TEXT);
+          if (!text) return null;
+          const label = truncateText(entry.label, 48) || 'Agent';
+          const source = truncateText(entry.source, 64);
+          const status = normalizeAgentTraceStatus(entry.status);
+          return source ? { label, source, status, text } : { label, status, text };
+        })
+        .filter(Boolean)
+        .slice(-MAX_PERSISTED_AGENT_TRACE_ENTRIES)
+      : [];
+
+    if (entries.length === 0) return null;
+
+    const status = normalizeAgentTraceStatus(trace.status || entries[entries.length - 1]?.status);
+    const summary = truncateText(trace.summary, MAX_PERSISTED_AGENT_TRACE_TEXT)
+      || entries[entries.length - 1].text;
+
+    return {
+      isOpen: Boolean(trace.isOpen) && status !== 'completed',
+      status,
+      summary,
+      entries,
+    };
+  }
+
   function createChatSessionId() {
     const baseId = new Date().toISOString().replace(/[:.]/g, '-');
     let sessionId = baseId;
@@ -102,7 +144,12 @@ function createChatSessionManager({
       const ts = typeof item.ts === 'number' ? item.ts : Date.now();
       if (!role || !text) continue;
       if (!['user', 'assistant', 'system', 'terminal'].includes(role)) continue;
-      out.push({ role, text, ts });
+      const message = { role, text, ts };
+      const agentTrace = role === 'assistant' ? sanitizeAgentTrace(item.agentTrace) : null;
+      if (agentTrace) {
+        message.agentTrace = agentTrace;
+      }
+      out.push(message);
     }
     return out.slice(-MAX_PERSISTED_CHAT_MESSAGES);
   }

@@ -39,7 +39,7 @@ type_string_declaration = {
 
 press_ctrl_hotkey_declaration = {
     "name": "press_ctrl_hotkey",
-    "description": "Press a control-style hotkey. On macOS this maps to Command automatically; on other OSes it uses Control.",
+    "description": "Press a Windows Control hotkey.",
     "parameters": {
         "type": "object",
         "properties": _with_status_text({

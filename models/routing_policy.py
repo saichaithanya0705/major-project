@@ -148,6 +148,44 @@ _WINDOW_MANAGEMENT_MARKERS = (
     "switch window",
     "focus window",
 )
+_DESKTOP_SURFACE_MARKERS = (
+    "desktop app",
+    "installed app",
+    "native app",
+    "local app",
+    "application",
+    "app window",
+    "desktop window",
+    "existing window",
+    "already open",
+    "currently open",
+    "active window",
+    "current window",
+    "my browser",
+    "my installed browser",
+    "use my browser",
+    "open my browser",
+)
+_SPECIFIC_BROWSER_CONTEXT_MARKERS = (
+    "profile",
+    "work profile",
+    "personal profile",
+    "browser profile",
+    "specific profile",
+)
+_BROWSER_SURFACE_MARKERS = (
+    "browser",
+    "new tab",
+    "tab",
+    "web",
+    "website",
+    "web site",
+    "webpage",
+    "url",
+    "http://",
+    "https://",
+    "www.",
+)
 _ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
 
 
@@ -249,6 +287,8 @@ def _format_chain_state_for_prompt(
             "\n# Multi-Agent Chaining Mode\n"
             "This task may require multiple delegated tools.\n"
             "Pick the best first tool call, and treat this as step 1 of a multi-step execution.\n"
+            "Before choosing, compare agent capabilities against the underlying data source and required action.\n"
+            "Prefer CLI for programmatically inspectable local state; use CUA vision only for intrinsic visual UI interaction.\n"
             "If the request depends on currently visible UI context, call `request_screen_context` first.\n"
             "For action/execution requests ('do X for me', clone/run/open/click/type), do NOT use `invoke_jarvis`.\n"
             "Use `invoke_jarvis` only for explanation/annotation requests.\n"
@@ -260,8 +300,9 @@ def _format_chain_state_for_prompt(
 
     lines = []
     for idx, step in enumerate(chain_steps, start=1):
+        complete = step.get("complete", True) is not False
         lines.append(
-            f"{idx}. agent={step.get('agent')} success={step.get('success')} "
+            f"{idx}. agent={step.get('agent')} success={step.get('success')} complete={complete} "
             f"task={step.get('task')} outcome={step.get('message')}"
         )
 
@@ -269,6 +310,9 @@ def _format_chain_state_for_prompt(
         "\n# Multi-Agent Chaining Mode\n"
         "Continue from prior delegated work. Choose the single best next tool call.\n"
         "If the original request is complete, call `direct_response` now.\n"
+        "If any recent delegated step has complete=False, do NOT call `direct_response`; choose a different agent or verification step to finish the remaining work.\n"
+        "Before choosing, compare agent capabilities against the underlying data source and required action.\n"
+        "Prefer CLI for programmatically inspectable local state; use CUA vision only for intrinsic visual UI interaction.\n"
         "Avoid repeating the exact same delegated step unless something materially changed.\n"
         "If you still need visible context, call `request_screen_context` again.\n"
         "For action/execution requests, do NOT use `invoke_jarvis`.\n"
@@ -397,6 +441,25 @@ def _is_window_management_request(text: str) -> bool:
     return _matches_any_marker(text, _WINDOW_MANAGEMENT_MARKERS)
 
 
+def _requires_desktop_control_surface(text: str) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return False
+
+    if _is_window_management_request(lowered):
+        return True
+
+    has_desktop_surface = _matches_any_marker(lowered, _DESKTOP_SURFACE_MARKERS)
+    has_specific_browser_context = _matches_any_marker(lowered, _SPECIFIC_BROWSER_CONTEXT_MARKERS)
+    has_browser_surface = _matches_any_marker(lowered, _BROWSER_SURFACE_MARKERS)
+
+    if has_desktop_surface and (has_browser_surface or has_specific_browser_context):
+        return True
+    if has_specific_browser_context and has_browser_surface and _is_execution_request(lowered):
+        return True
+    return False
+
+
 def _is_visual_explanation_request(user_prompt: str) -> bool:
     lowered = (user_prompt or "").lower().strip()
     if not lowered:
@@ -453,40 +516,6 @@ def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dic
     if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS):
         return "cua_vision"
     return "cua_cli"
-
-
-def _deterministic_router_decision(prompt: str) -> Optional[dict[str, Any]]:
-    latest_request = _clean_text(_extract_latest_request_from_router_prompt(prompt), "", max_len=420)
-    lowered = latest_request.lower()
-    if not latest_request:
-        return None
-
-    if _is_visual_explanation_request(latest_request):
-        return {"agent": "jarvis", "query": latest_request}
-
-    if _is_window_management_request(lowered):
-        return {"agent": "cua_vision", "task": latest_request}
-    if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
-        return {"agent": "cua_cli", "task": latest_request}
-    if _matches_any_marker(lowered, _BROWSER_EXECUTION_MARKERS):
-        return {"agent": "browser", "task": latest_request}
-    if _matches_any_marker(lowered, _VISION_EXECUTION_MARKERS) and _is_execution_request(latest_request):
-        return {"agent": "cua_vision", "task": latest_request}
-
-    if _is_execution_request(latest_request):
-        return {"agent": _choose_actionable_agent(latest_request, None), "task": latest_request}
-
-    return None
-
-
-def _prompt_has_completed_delegated_steps(prompt: str) -> bool:
-    return "Completed delegated steps (" in (prompt or "")
-
-
-def _should_use_deterministic_router(prompt: str) -> bool:
-    if _prompt_has_completed_delegated_steps(prompt):
-        return False
-    return _deterministic_router_decision(prompt) is not None
 
 
 def _looks_like_router_refusal(text: str) -> bool:
@@ -604,6 +633,19 @@ def _apply_routing_guardrails(
     agent = str(routing_result.get("agent") or "").strip().lower()
     execution_request = _is_execution_request(user_prompt)
 
+    try:
+        from agents.browser.agent import BrowserAgent
+
+        resume_task = BrowserAgent.resolve_resume_task(user_prompt)
+    except Exception:
+        resume_task = None
+
+    if resume_task:
+        return {
+            "agent": "browser",
+            "task": resume_task,
+        }
+
     if (
         execution_request
         and agent == "screen_context"
@@ -636,6 +678,15 @@ def _apply_routing_guardrails(
             "agent": actionable_agent,
             "task": task_text,
         }
+
+    if execution_request and agent == "browser":
+        task_text = _routing_task_text(routing_result) or _clean_text(user_prompt, "", max_len=420)
+        if _requires_desktop_control_surface(task_text):
+            print("[Router][CapabilityGate] Browser route needs desktop/profile/window control -> cua_vision")
+            return {
+                "agent": "cua_vision",
+                "task": task_text,
+            }
 
     return routing_result
 

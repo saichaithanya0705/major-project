@@ -10,38 +10,28 @@ import inspect
 from dotenv import load_dotenv
 from PIL import ImageGrab
 
-try:
-    from google.genai import types as _genai_types
-except ImportError:
-    _genai_types = None
-    print('Google Gemini dependencies have not been installed')
+class _FunctionCallingConfig:
+    def __init__(self, mode: str):
+        self.mode = mode
 
 
-if _genai_types is None:
-    class _FunctionCallingConfig:
-        def __init__(self, mode: str):
-            self.mode = mode
+class _ToolConfig:
+    def __init__(self, function_calling_config):
+        self.function_calling_config = function_calling_config
 
 
-    class _ToolConfig:
-        def __init__(self, function_calling_config):
-            self.function_calling_config = function_calling_config
+class _Tool:
+    def __init__(self, function_declarations):
+        self.function_declarations = function_declarations
 
 
-    class _Tool:
-        def __init__(self, function_declarations):
-            self.function_declarations = function_declarations
+class _VisionToolTypes:
+    Tool = _Tool
+    ToolConfig = _ToolConfig
+    FunctionCallingConfig = _FunctionCallingConfig
 
 
-    class _TypesShim:
-        Tool = _Tool
-        ToolConfig = _ToolConfig
-        FunctionCallingConfig = _FunctionCallingConfig
-
-
-    types = _TypesShim()
-else:
-    types = _genai_types
+types = _VisionToolTypes()
 
 from agents.cua_vision.keyboard import (
     move_cursor,
@@ -229,11 +219,15 @@ def _get_precision_locator_model_name() -> str:
     """Get the model name used by the crop-and-search precision locator."""
     try:
         model_name = get_jarvis_model()
-        if isinstance(model_name, str) and model_name.strip():
+        if (
+            isinstance(model_name, str)
+            and model_name.strip()
+            and "gemini" not in model_name.strip().lower()
+        ):
             return model_name.strip()
     except Exception:
         pass
-    return "gemini-3-flash-preview"
+    return ""
 
 
 def crop_and_search(

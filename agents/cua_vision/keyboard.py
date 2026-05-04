@@ -4,7 +4,6 @@ CUA Vision Agent - Keyboard and Mouse Control
 Provides functions for emulating keyboard and mouse input.
 """
 import time
-import platform
 
 try:
     import pyautogui as _pyautogui
@@ -156,16 +155,12 @@ def release_held_key(key: str) -> None:
 
 
 def press_ctrl_hotkey(key: str):
-    """Press a control-style hotkey.
-
-    On macOS, many app-launcher and system shortcuts use Command instead of
-    Control, so we transparently map ctrl -> command.
+    """Press a Control hotkey on Windows.
 
     Args:
         key: The key to be pressed along with control
     """
-    modifier = 'command' if platform.system() == 'Darwin' else 'ctrl'
-    pyautogui.hotkey(modifier, key)
+    pyautogui.hotkey('ctrl', key)
 
 
 def press_alt_hotkey(key: str):
@@ -175,47 +170,3 @@ def press_alt_hotkey(key: str):
         key: The key to be pressed along with alt
     """
     pyautogui.hotkey('alt', key)
-
-
-def press_command_hotkey(key: str):
-    """Press down a key along with the command key to emulate a hotkey."""
-    pyautogui.hotkey('command', key)
-
-
-def press_hotkey_combo(keys: str):
-    """
-    Press a multi-key combo simultaneously.
-
-    Accepted formats:
-    - "command+shift+4"
-    - "ctrl + alt + delete"
-    - "cmd,space"
-    """
-    if not isinstance(keys, str) or not keys.strip():
-        raise ValueError("keys must be a non-empty string like 'command+shift+4'")
-
-    normalized = keys.replace(",", "+")
-    raw_parts = [part.strip().lower() for part in normalized.split("+") if part.strip()]
-    if len(raw_parts) < 2:
-        raise ValueError("hotkey combo must include at least two keys")
-
-    aliases = {
-        "cmd": "command",
-        "command": "command",
-        "meta": "command",
-        "super": "command",
-        "ctrl": "ctrl",
-        "control": "ctrl",
-        "alt": "alt",
-        "option": "alt",
-        "shift": "shift",
-        "enter": "enter",
-        "return": "enter",
-        "esc": "esc",
-        "escape": "esc",
-        "space": "space",
-        "tab": "tab",
-        "del": "delete",
-    }
-    resolved = [aliases.get(part, part) for part in raw_parts]
-    pyautogui.hotkey(*resolved)

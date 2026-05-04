@@ -19,6 +19,7 @@ class _FakePage:
     def __init__(self, url: str, title_text: str):
         self.url = url
         self._title_text = title_text
+        self.body_text = ""
         self.goto_calls: list[str] = []
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 30000):
@@ -30,6 +31,10 @@ class _FakePage:
 
     async def title(self) -> str:
         return self._title_text
+
+    async def evaluate(self, script: str):
+        del script
+        return self.body_text
 
     def is_closed(self) -> bool:
         return False
@@ -92,6 +97,48 @@ async def _run_backend_reuse_check() -> None:
         agent._execute_with_playwright = original_execute_playwright
 
 
+async def _run_playwright_fast_path_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_backend = cls._shared_backend
+    original_execute_browser_use = agent._execute_with_browser_use
+    original_execute_playwright = agent._execute_with_playwright
+
+    calls: list[str] = []
+
+    async def _fake_execute_browser_use(task: str, close_when_done: bool):
+        calls.append(f"browser_use:{task}")
+        return {"success": True, "result": task, "error": None}
+
+    async def _fake_execute_playwright(
+        task: str,
+        bootstrap_error: str,
+        close_when_done: bool,
+        pre_extracted_url: str | None = None,
+    ):
+        del bootstrap_error, close_when_done, pre_extracted_url
+        calls.append(f"playwright:{task}")
+        return {"success": True, "result": task, "error": None}
+
+    agent._execute_with_browser_use = _fake_execute_browser_use
+    agent._execute_with_playwright = _fake_execute_playwright
+    try:
+        cls._shared_backend = None
+        result = await agent.execute("open https://example.com")
+        assert result["success"]
+        assert calls[-1] == "playwright:open https://example.com", calls
+
+        cls._shared_backend = None
+        result = await agent.execute("open https://example.com and submit the form")
+        assert result["success"]
+        assert calls[-1] == "browser_use:open https://example.com and submit the form", calls
+    finally:
+        cls._shared_backend = original_backend
+        agent._execute_with_browser_use = original_execute_browser_use
+        agent._execute_with_playwright = original_execute_playwright
+
+
 async def _run_no_search_when_reusing_page_check() -> None:
     agent = BrowserAgent(model_name="test-model")
     cls = BrowserAgent
@@ -131,6 +178,86 @@ async def _run_no_search_when_reusing_page_check() -> None:
         agent._open_first_duckduckgo_result = original_open_result
 
 
+async def _run_playwright_interaction_is_partial_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_context = cls._shared_playwright_context
+    original_page = cls._shared_playwright_page
+    original_get_page = agent._get_or_create_playwright_page
+
+    page = _FakePage("about:blank", "ChatGPT")
+    context = _FakeContext([page])
+
+    async def _fake_get_or_create_playwright_page():
+        return page, False
+
+    cls._shared_playwright_context = context
+    cls._shared_playwright_page = page
+    agent._get_or_create_playwright_page = _fake_get_or_create_playwright_page
+    try:
+        result = await agent._execute_with_playwright(
+            "goto chat.openai.com website and ask it for top 3 ml learning resources",
+            bootstrap_error="browser_use unavailable",
+            close_when_done=False,
+        )
+        assert result["success"], result
+        assert result["complete"] is False, result
+        assert result["result"]["complete"] is False, result
+        assert "interactive browser automation is still required" in result["result"]["summary"], result
+    finally:
+        cls._shared_playwright_context = original_context
+        cls._shared_playwright_page = original_page
+        agent._get_or_create_playwright_page = original_get_page
+
+
+async def _run_playwright_page_summary_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_context = cls._shared_playwright_context
+    original_page = cls._shared_playwright_page
+    original_get_page = agent._get_or_create_playwright_page
+    original_open_result = agent._open_first_duckduckgo_result
+
+    page = _FakePage("about:blank", "DuckDuckGo")
+    page.body_text = (
+        "World War I was a global conflict between two coalitions, the Allies and the Central Powers. "
+        "Fighting took place throughout Europe, the Middle East, Africa, the Pacific, and parts of Asia. "
+        "The war lasted from 1914 to 1918 and reshaped the political order of Europe."
+    )
+    context = _FakeContext([page])
+
+    async def _fake_get_or_create_playwright_page():
+        return page, False
+
+    async def _fake_open_first_result(opened_page):
+        opened_page.url = "https://en.wikipedia.org/wiki/World_War_I"
+        opened_page._title_text = "World War I - Wikipedia"
+
+    cls._shared_playwright_context = context
+    cls._shared_playwright_page = page
+    agent._get_or_create_playwright_page = _fake_get_or_create_playwright_page
+    agent._open_first_duckduckgo_result = _fake_open_first_result
+    try:
+        result = await agent._execute_with_playwright(
+            "fetch me the summary of world war 1 wikipedia page",
+            bootstrap_error="browser_use unavailable",
+            close_when_done=False,
+        )
+        assert result["success"], result
+        assert result["complete"] is True, result
+        summary = result["result"]["summary"]
+        assert "World War I - Wikipedia" in summary, summary
+        assert "global conflict between two coalitions" in summary, summary
+        assert "Browser task completed via search fallback" not in summary, summary
+    finally:
+        cls._shared_playwright_context = original_context
+        cls._shared_playwright_page = original_page
+        agent._get_or_create_playwright_page = original_get_page
+        agent._open_first_duckduckgo_result = original_open_result
+
+
 def run_checks() -> None:
     assert BrowserAgent._extract_direct_url("Go to https://slac.stanford.edu please") == "https://slac.stanford.edu"
     assert BrowserAgent._extract_direct_url("open stanford.edu") == "https://stanford.edu"
@@ -141,6 +268,17 @@ def run_checks() -> None:
     assert BrowserAgent._should_fallback_to_playwright(ModuleNotFoundError("No module named 'x'"))
     assert BrowserAgent._should_fallback_to_playwright(ImportError("Failed to import BrowserSession"))
     assert not BrowserAgent._should_fallback_to_playwright(RuntimeError("Task execution failed after startup"))
+    assert BrowserAgent._should_use_playwright_fast_path("open https://example.com")
+    assert BrowserAgent._should_use_playwright_fast_path(
+        "open google.com and search for free machine learning courses and open the starting point"
+    )
+    assert not BrowserAgent._should_use_playwright_fast_path("open https://example.com and submit the form")
+    assert not BrowserAgent._should_use_playwright_fast_path(
+        "goto chat.openai.com website and ask it for top 3 ml learning resources"
+    )
+    assert not BrowserAgent._should_use_playwright_fast_path(
+        "open https://example.com and summarize the page"
+    )
 
     q1 = BrowserAgent._task_to_search_query("Go to the Stanford SLAC website")
     q2 = BrowserAgent._task_to_search_query("Stanford Linear Accelerator Center")
@@ -173,7 +311,10 @@ def run_checks() -> None:
     assert plain == "Open youtube.com"
 
     asyncio.run(_run_backend_reuse_check())
+    asyncio.run(_run_playwright_fast_path_check())
     asyncio.run(_run_no_search_when_reusing_page_check())
+    asyncio.run(_run_playwright_interaction_is_partial_check())
+    asyncio.run(_run_playwright_page_summary_check())
 
 
 if __name__ == "__main__":

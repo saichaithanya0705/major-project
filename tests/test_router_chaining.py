@@ -135,6 +135,120 @@ async def test_repeated_step_loop_recovers_and_finishes() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_single_full_agent_step_finishes_without_followup_router() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+
+    class _CountingRouterModel(_FakeRouterModel):
+        route_calls = 0
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            type(self).route_calls += 1
+            return await super().route_request(prompt)
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "message": "Browser task completed quickly.",
+            "source": "browser_use",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _CountingRouterModel.sequence = [
+        {
+            "agent": "browser",
+            "task": "open google.com and search for free machine learning courses",
+        },
+        {"agent": "direct", "response_text": "This second route should not run."},
+    ]
+    _CountingRouterModel.route_calls = 0
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _CountingRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "open google.com and search for free machine learning courses",
+            "rapid",
+            "jarvis",
+        )
+        assert executed_agents == ["browser"], executed_agents
+        assert _CountingRouterModel.route_calls == 1, _CountingRouterModel.route_calls
+        assert direct_messages == ["Browser task completed quickly."], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+async def test_partial_browser_step_continues_with_visual_agent_before_finishing() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+    user_request = "goto chat.openai.com website and ask it for top 3 ml learning resources"
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        if agent == "browser":
+            return {
+                "agent": "browser",
+                "task": routing_result.get("task", ""),
+                "success": True,
+                "complete": False,
+                "message": (
+                    "Browser fallback opened https://chat.openai.com, but interactive "
+                    "browser automation is still required."
+                ),
+                "source": "browser_use",
+            }
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "message": f"{agent} step completed",
+            "source": "rapid",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "browser", "task": user_request},
+        {"agent": "browser", "task": user_request},
+        {"agent": "direct", "response_text": "All done"},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(user_request, "rapid", "jarvis")
+        assert executed_agents == ["browser", "cua_vision"], executed_agents
+        assert direct_messages == ["All done"], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
 async def test_invalid_route_result_falls_back_to_direct() -> None:
     original_model_cls = model_module.GeminiModel
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
@@ -275,20 +389,29 @@ async def test_screen_context_then_actionable_agent() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
-async def test_visual_fast_path_finishes_with_router_response() -> None:
+async def test_visual_question_uses_router_then_jarvis() -> None:
     original_model_cls = model_module.GeminiModel
     original_run_step = model_module._run_routed_agent_step
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
 
+    executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    class _VisualRouterModel:
+    class _VisualRouterModel(_FakeRouterModel):
+        route_calls = 0
+
         def __init__(self, jarvis_model: str, rapid_response_model: str):
-            pass
+            super().__init__(jarvis_model, rapid_response_model)
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            type(self).route_calls += 1
+            return await super().route_request(prompt)
 
     async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
         return {
-            "agent": "jarvis",
+            "agent": agent,
             "task": routing_result.get("query", ""),
             "success": True,
             "message": "The screen analysis is complete.",
@@ -297,6 +420,12 @@ async def test_visual_fast_path_finishes_with_router_response() -> None:
 
     def _fake_direct_response(**kwargs):
         direct_messages.append(str(kwargs.get("text", "")))
+
+    _VisualRouterModel.sequence = [
+        {"agent": "jarvis", "query": "what do you see on my screen?"},
+        {"agent": "direct", "response_text": "The screen analysis is complete."},
+    ]
+    _VisualRouterModel.route_calls = 0
 
     model_module._RAPID_CONVERSATION_HISTORY.clear()
     model_module.GeminiModel = _VisualRouterModel
@@ -308,6 +437,8 @@ async def test_visual_fast_path_finishes_with_router_response() -> None:
             "rapid",
             "jarvis",
         )
+        assert executed_agents == ["jarvis"], executed_agents
+        assert _VisualRouterModel.route_calls == 2, _VisualRouterModel.route_calls
         assert direct_messages == ["The screen analysis is complete."], direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
@@ -354,7 +485,7 @@ async def test_execution_request_reroutes_jarvis_to_cli() -> None:
             "jarvis",
         )
         assert executed_agents == ["cua_cli"], executed_agents
-        assert direct_messages and direct_messages[-1] == "done", direct_messages
+        assert direct_messages and direct_messages[-1] == "cua_cli step completed", direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
@@ -400,7 +531,7 @@ async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> N
             "jarvis",
         )
         assert executed_agents == ["browser"], executed_agents
-        assert direct_messages and direct_messages[-1] == "done", direct_messages
+        assert direct_messages and direct_messages[-1] == "browser step completed", direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
@@ -446,7 +577,7 @@ async def test_window_management_request_reroutes_jarvis_to_cua_vision() -> None
             "jarvis",
         )
         assert executed_agents == ["cua_vision"], executed_agents
-        assert direct_messages and direct_messages[-1] == "done", direct_messages
+        assert direct_messages and direct_messages[-1] == "cua_vision step completed", direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
@@ -526,17 +657,31 @@ def test_router_provider_order_uses_fallback_provider() -> None:
 def test_openrouter_free_vision_defaults_prefer_gemma() -> None:
     originals = {
         key: os.environ.get(key)
-        for key in ("OPENROUTER_VISION_MODEL", "OPENROUTER_JARVIS_MODEL", "OPENROUTER_BROWSER_MODEL")
+        for key in (
+            "OPENROUTER_VISION_MODEL",
+            "OPENROUTER_JARVIS_MODEL",
+            "OPENROUTER_BROWSER_MODEL",
+            "OPENROUTER_MODEL",
+            "OPENROUTER_FALLBACK_MODEL",
+        )
     }
     try:
         for key in originals:
-            os.environ.pop(key, None)
+            os.environ[key] = ""
         models = openrouter_fallback_module.get_openrouter_models("vision")
-        assert models[:3] == [
+        assert models[:5] == [
             "google/gemma-4-31b-it:free",
             "google/gemma-4-26b-a4b-it:free",
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            "nvidia/nemotron-nano-12b-v2-vl:free",
             "openrouter/free",
         ], models
+
+        os.environ["OPENROUTER_VISION_MODEL"] = "google/gemma-4-31b-it:free"
+        pinned_models = openrouter_fallback_module.get_openrouter_models("vision")
+        assert pinned_models[0] == "google/gemma-4-31b-it:free", pinned_models
+        assert "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" in pinned_models
+        assert "openrouter/free" in pinned_models
     finally:
         for key, value in originals.items():
             if value is None:
@@ -688,23 +833,12 @@ async def test_openrouter_router_failure_falls_back_to_ollama() -> None:
     assert route == {"agent": "direct", "response_text": "done"}, route
 
 
-def test_deterministic_router_is_disabled_after_chain_progress() -> None:
-    prompt = (
-        "\n# Multi-Agent Chaining Mode\n"
-        "Continue from prior delegated work. Choose the single best next tool call.\n"
-        "Original request: clone this repo and open locally\n"
-        "Completed delegated steps (1/6):\n"
-        "1. agent=cua_cli success=True task=clone repo outcome=clone completed\n"
-        "\n# User's Latest Request:\nclone this repo and open locally"
-    )
-    assert model_module._prompt_has_completed_delegated_steps(prompt) is True
-    assert model_module._should_use_deterministic_router(prompt) is False
-
-
 def test_window_management_is_execution_not_visual_explanation() -> None:
     prompt = "Minimize the codex app on my screen"
-    route = model_module._deterministic_router_decision(
-        f"# User's Latest Request:\n{prompt}"
+    route = model_module._apply_routing_guardrails(
+        user_prompt=prompt,
+        routing_result={"agent": "jarvis", "query": prompt},
+        latest_screen_context=None,
     )
 
     assert model_module._is_execution_request(prompt) is True
@@ -713,7 +847,6 @@ def test_window_management_is_execution_not_visual_explanation() -> None:
 
 
 async def run_checks() -> None:
-    test_deterministic_router_is_disabled_after_chain_progress()
     test_window_management_is_execution_not_visual_explanation()
     test_router_refusal_task_is_replaced_with_original_request()
     test_ollama_router_payload_disables_thinking()
@@ -724,10 +857,12 @@ async def run_checks() -> None:
     await test_openrouter_router_failure_falls_back_to_ollama()
     await test_chains_multiple_agents_then_finishes()
     await test_repeated_step_loop_recovers_and_finishes()
+    await test_single_full_agent_step_finishes_without_followup_router()
+    await test_partial_browser_step_continues_with_visual_agent_before_finishing()
     await test_invalid_route_result_falls_back_to_direct()
     await test_direct_response_repeat_artifact_is_sanitized()
     await test_screen_context_then_actionable_agent()
-    await test_visual_fast_path_finishes_with_router_response()
+    await test_visual_question_uses_router_then_jarvis()
     await test_execution_request_reroutes_jarvis_to_cli()
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
     await test_window_management_request_reroutes_jarvis_to_cua_vision()

@@ -8,6 +8,36 @@ import os
 import re
 
 DEFAULT_STICKY_SITE_MARKERS = ("scopegrade",)
+FAST_PATH_BLOCKING_MARKERS = (
+    "ask",
+    "ask it",
+    "prompt",
+    "message",
+    "send",
+    "submit",
+    "fill",
+    "form",
+    "login",
+    "log in",
+    "sign in",
+    "upload",
+    "download",
+    "click",
+    "type",
+    "select",
+    "choose",
+    "checkout",
+    "add to cart",
+)
+PAGE_SUMMARY_MARKERS = (
+    "summary",
+    "summarize",
+    "summarise",
+    "tl;dr",
+    "tldr",
+    "overview",
+    "key points",
+)
 
 
 def should_close_after_task(task: str) -> bool:
@@ -47,6 +77,74 @@ def should_fallback_to_playwright(exc: Exception) -> bool:
         "unsupported operand type(s) for |",
     ]
     return any(marker in lowered for marker in markers)
+
+
+def has_browser_interaction_intent(task: str) -> bool:
+    lowered = (task or "").lower()
+    for marker in FAST_PATH_BLOCKING_MARKERS:
+        if " " in marker:
+            if marker in lowered:
+                return True
+        elif re.search(rf"\b{re.escape(marker)}\b", lowered):
+            return True
+    return False
+
+
+def should_summarize_page_content(task: str) -> bool:
+    lowered = (task or "").lower()
+    for marker in PAGE_SUMMARY_MARKERS:
+        if " " in marker:
+            if marker in lowered:
+                return True
+        elif re.search(rf"\b{re.escape(marker)}\b", lowered):
+            return True
+    return False
+
+
+def should_extract_page_content(task: str) -> bool:
+    lowered = " ".join((task or "").lower().split())
+    if not lowered:
+        return False
+    if should_summarize_page_content(lowered):
+        return True
+
+    content_patterns = (
+        r"\b(?:read|extract|scrape)\b.*\b(?:page|article|website|site|contents?|text)\b",
+        r"\b(?:fetch|get|show|give)\b.*\b(?:page\s+contents?|contents?|page\s+text|article\s+text|text)\b",
+        r"\bwhat\s+(?:does|is\s+on)\b.*\b(?:page|article|website|site)\b",
+        r"\b(?:page|article|website|site)\b.*\b(?:says|contains)\b",
+    )
+    return any(re.search(pattern, lowered) for pattern in content_patterns)
+
+
+def should_search_before_direct_navigation(task: str) -> bool:
+    lowered = (task or "").lower()
+    if "search" not in lowered:
+        return False
+    result_markers = (
+        "open the starting point",
+        "open starting point",
+        "open the first",
+        "open first",
+        "open the top",
+        "open top",
+        "open best",
+    )
+    return any(marker in lowered for marker in result_markers)
+
+
+def should_use_playwright_fast_path(task: str) -> bool:
+    if has_browser_interaction_intent(task):
+        return False
+    if should_extract_page_content(task):
+        return False
+    if is_current_tab_context_task(task):
+        return False
+    if should_search_before_direct_navigation(task):
+        return True
+    if "search" in (task or "").lower():
+        return False
+    return extract_direct_url(task) is not None
 
 
 def extract_direct_url(task: str) -> str | None:
@@ -160,11 +258,15 @@ def is_current_tab_context_task(task: str) -> bool:
     lowered = task.lower()
     markers = [
         "currently open",
+        "current page",
         "current tab",
         "already open",
+        "this page",
         "on the page",
         "on this page",
+        "open page",
         "that is open",
+        "page that is open",
     ]
     return any(marker in lowered for marker in markers)
 
@@ -239,6 +341,34 @@ def task_to_search_query(task: str) -> str:
     cleaned = " ".join(task.split())
     if not cleaned:
         return "official website"
+    content_match = re.search(
+        r"\b(?:fetch|get|give|show|tell)\s+(?:me\s+)?(?:the\s+)?"
+        r"(?:summary|overview|contents?|text)\s+(?:of|from|for)\s+(.+)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if content_match:
+        query = content_match.group(1).strip(" .,:;")
+        if query:
+            return query
+    summarize_match = re.search(
+        r"\b(?:summarize|summarise|read|extract|scrape)\s+(?:the\s+)?(.+)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if summarize_match:
+        query = summarize_match.group(1).strip(" .,:;")
+        if query and query.lower() not in {"page", "this page", "current page"}:
+            return query
+    search_match = re.search(
+        r"\bsearch\s+(?:for\s+)?(.+?)(?:\s+and\s+open\b|\s+then\s+open\b|$)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if search_match:
+        query = search_match.group(1).strip(" .,:;")
+        if query:
+            return query
     if re.search(r"\b(go to|open|visit)\b", cleaned, flags=re.IGNORECASE):
         return cleaned
     return f"{cleaned} official website"

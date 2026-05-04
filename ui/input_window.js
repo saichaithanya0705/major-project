@@ -4,6 +4,16 @@ import {
   getShortcutLabels,
   inferLifecycleSnapshot,
 } from './status_lifecycle.js';
+import {
+  createAgentWorkTraceState,
+  isAgentTraceSource,
+  normalizeAgentTraceSnapshot,
+} from './agent_work_trace.mjs';
+import {
+  buildGeneratingIndicatorView,
+  isGeneratingPlaceholderText,
+} from './generating_indicator.mjs';
+import { getAssistantLifecycleOutcome } from './chat_outcome.mjs';
 
 const commandInput = document.getElementById('command-input');
 const commandSend = document.getElementById('command-send');
@@ -66,6 +76,9 @@ let reconnectTimer = null;
 let lastSubmittedText = '';
 let lastSubmittedAt = 0;
 let pendingAssistantEl = null;
+let pendingAssistantStartedAt = 0;
+let pendingAssistantStatusText = '';
+let pendingAssistantTicker = null;
 let lastAssistantText = '';
 let saveTimer = null;
 let isHydratingSession = false;
@@ -96,9 +109,17 @@ let isVoiceRecording = false;
 let isVoiceTranscribing = false;
 let voiceDiscardOnStop = false;
 let pendingVoiceRequestId = '';
+let agentWorkTraceEl = null;
+let agentWorkTraceToggleEl = null;
+let agentWorkTraceBodyEl = null;
+let agentWorkTraceSummaryEl = null;
+let agentWorkTraceStatusEl = null;
+let agentWorkTraceListEl = null;
+let agentWorkTraceId = 0;
 
 const assistantMessageCache = [];
 const chatHistory = [];
+const agentWorkTrace = createAgentWorkTraceState();
 
 function normalizeAgentSource(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -259,7 +280,13 @@ function sortSessionSummaries(items, useArchivedDate = false) {
 }
 
 function cloneChatHistory() {
-  return chatHistory.map((message) => ({ ...message }));
+  return chatHistory.map((message) => {
+    const cloned = { ...message };
+    if (message.agentTrace) {
+      cloned.agentTrace = normalizeAgentTraceSnapshot(message.agentTrace);
+    }
+    return cloned;
+  });
 }
 
 function buildSessionSummary(session) {
@@ -288,20 +315,29 @@ function normalizeSessionSummary(summary) {
   };
 }
 
-function normalizePersistedMessage(role, text, ts = Date.now()) {
+function normalizePersistedMessage(role, text, ts = Date.now(), extras = {}) {
   const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
   const normalizedText = typeof text === 'string' ? text.trim() : '';
   const normalizedTs = Number.isFinite(ts) ? Number(ts) : Date.now();
   if (!normalizedRole || !normalizedText) return null;
   if (!['user', 'assistant', 'system', 'terminal'].includes(normalizedRole)) return null;
-  return { role: normalizedRole, text: normalizedText, ts: normalizedTs };
+  const message = { role: normalizedRole, text: normalizedText, ts: normalizedTs };
+  const agentTrace = normalizedRole === 'assistant'
+    ? normalizeAgentTraceSnapshot(extras.agentTrace)
+    : null;
+  if (agentTrace) {
+    message.agentTrace = agentTrace;
+  }
+  return message;
 }
 
 function normalizeSession(session) {
   if (!session || typeof session !== 'object') return null;
   const messages = Array.isArray(session.messages)
     ? session.messages
-      .map((item) => normalizePersistedMessage(item.role, item.text, item.ts))
+      .map((item) => normalizePersistedMessage(item.role, item.text, item.ts, {
+        agentTrace: item.agentTrace,
+      }))
       .filter(Boolean)
     : [];
 
@@ -801,6 +837,65 @@ function getMessageRoleLabel(role) {
   return 'Message';
 }
 
+function stopPendingAssistantTicker() {
+  if (pendingAssistantTicker) {
+    clearInterval(pendingAssistantTicker);
+    pendingAssistantTicker = null;
+  }
+  pendingAssistantStartedAt = 0;
+  pendingAssistantStatusText = '';
+}
+
+function renderGeneratingIndicatorContent(content, statusText) {
+  if (!content) return;
+  if (!pendingAssistantStartedAt) {
+    pendingAssistantStartedAt = Date.now();
+  }
+  pendingAssistantStatusText = typeof statusText === 'string' ? statusText.trim() : '';
+
+  const view = buildGeneratingIndicatorView({
+    elapsedMs: Date.now() - pendingAssistantStartedAt,
+    statusText: pendingAssistantStatusText,
+  });
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'chat-generating-indicator';
+  wrapper.setAttribute('aria-label', view.ariaLabel);
+
+  const label = document.createElement('span');
+  label.className = 'chat-generating-label';
+  label.textContent = view.label;
+  wrapper.appendChild(label);
+
+  const dots = document.createElement('span');
+  dots.className = 'chat-generating-dots';
+  dots.setAttribute('aria-hidden', 'true');
+  for (let index = 0; index < view.dotCount; index += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'chat-generating-dot';
+    dot.style.animationDelay = `${index * 140}ms`;
+    dots.appendChild(dot);
+  }
+  wrapper.appendChild(dots);
+
+  content.replaceChildren(wrapper);
+  content.classList.add('chat-msg-content--generating');
+}
+
+function ensurePendingAssistantTicker() {
+  if (pendingAssistantTicker) return;
+  pendingAssistantTicker = setInterval(() => {
+    if (!pendingAssistantEl || !pendingAssistantEl.isConnected) {
+      stopPendingAssistantTicker();
+      return;
+    }
+    setMessageElementText(pendingAssistantEl, pendingAssistantStatusText || ASSISTANT_THINKING_TEXT, {
+      role: 'assistant',
+      pending: true,
+    });
+  }, 1500);
+}
+
 function setMessageElementText(el, text, options = {}) {
   if (!el) return;
   const role = options.role || el.dataset.role || 'assistant';
@@ -811,7 +906,11 @@ function setMessageElementText(el, text, options = {}) {
   const pending = Boolean(options.pending);
   const timestamp = Number.isFinite(options.ts) ? Number(options.ts) : Number(el.dataset.ts || Date.now());
 
-  if (content) {
+  if (content && role === 'assistant' && pending) {
+    renderGeneratingIndicatorContent(content, value);
+    ensurePendingAssistantTicker();
+  } else if (content) {
+    content.classList.remove('chat-msg-content--generating');
     content.textContent = value;
   }
   if (roleEl) {
@@ -825,6 +924,10 @@ function setMessageElementText(el, text, options = {}) {
   el.dataset.role = role;
   el.dataset.ts = String(timestamp);
   el.classList.toggle('pending', pending);
+  el.classList.toggle('chat-msg-generating', role === 'assistant' && pending);
+  if (!(role === 'assistant' && pending) && (el === pendingAssistantEl || el.classList.contains('chat-msg-generating'))) {
+    stopPendingAssistantTicker();
+  }
 }
 
 function createMessageElement(role, text, options = {}) {
@@ -834,6 +937,9 @@ function createMessageElement(role, text, options = {}) {
 
   const pending = Boolean(options.pending);
   const ts = Number.isFinite(options.ts) ? Number(options.ts) : Date.now();
+  const agentTrace = role === 'assistant'
+    ? normalizeAgentTraceSnapshot(options.agentTrace)
+    : null;
 
   const el = document.createElement('article');
   el.className = `chat-msg ${role}${pending ? ' pending' : ''}`;
@@ -857,6 +963,9 @@ function createMessageElement(role, text, options = {}) {
   el.appendChild(content);
   chatMessages.appendChild(el);
   setMessageElementText(el, value, { role, pending, ts });
+  if (agentTrace) {
+    appendStoredAgentWorkTrace(el, agentTrace);
+  }
   scrollMessagesToBottom();
   return el;
 }
@@ -904,8 +1013,8 @@ function syncCurrentSessionMetadataFromHistory(lastTs = Date.now()) {
   renderConversationDecorators();
 }
 
-function rememberMessage(role, text, ts = Date.now()) {
-  const entry = normalizePersistedMessage(role, text, ts);
+function rememberMessage(role, text, ts = Date.now(), extras = {}) {
+  const entry = normalizePersistedMessage(role, text, ts, extras);
   if (!entry) return null;
   chatHistory.push(entry);
   if (chatHistory.length > MAX_PERSISTED_MESSAGES) {
@@ -956,12 +1065,12 @@ async function flushPendingSessionSave() {
 }
 
 function appendMessage(role, text, options = {}) {
-  const { pending = false, persist = true, ts = Date.now() } = options;
-  const el = createMessageElement(role, text, { pending, ts });
+  const { pending = false, persist = true, ts = Date.now(), agentTrace = null } = options;
+  const el = createMessageElement(role, text, { pending, ts, agentTrace });
   if (!el) return null;
 
   if (persist && !pending) {
-    const message = rememberMessage(role, text, ts);
+    const message = rememberMessage(role, text, ts, { agentTrace });
     if (message) {
       syncCurrentSessionMetadataFromHistory(message.ts);
       queuePersistChatHistory();
@@ -986,12 +1095,260 @@ function appendSystemNotice(text, options = {}) {
   return appendMessage('system', value, { pending: false, persist: true, ts: options.ts || now });
 }
 
+function getAgentWorkTraceStatusLabel(status) {
+  if (status === 'failed') return 'Needs attention';
+  if (status === 'completed') return 'Done';
+  if (status === 'running') return 'Running';
+  return 'Idle';
+}
+
+function setAgentWorkTraceSectionOpen(section, toggle, body, isOpen) {
+  if (!section || !body || !toggle) return;
+  section.dataset.open = isOpen ? 'true' : 'false';
+  toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  body.hidden = !isOpen;
+}
+
+function createAgentWorkTraceRows(state) {
+  return state.entries.map((entry) => {
+    const row = document.createElement('div');
+    row.className = 'agent-work-trace-entry';
+    row.dataset.status = entry.status || 'running';
+    row.setAttribute('role', 'listitem');
+
+    const label = document.createElement('span');
+    label.className = 'agent-work-trace-entry-label';
+    label.textContent = entry.label || 'Agent';
+
+    const text = document.createElement('span');
+    text.className = 'agent-work-trace-entry-text';
+    text.textContent = entry.text || '';
+
+    row.appendChild(label);
+    row.appendChild(text);
+    return row;
+  });
+}
+
+function appendStoredAgentWorkTrace(parentEl, trace) {
+  const state = normalizeAgentTraceSnapshot(trace);
+  if (!parentEl || !state) return;
+
+  agentWorkTraceId += 1;
+  const bodyId = `agent-work-trace-body-${agentWorkTraceId}`;
+
+  const section = document.createElement('section');
+  section.className = 'agent-work-trace';
+  section.dataset.status = state.status || 'completed';
+
+  const toggle = document.createElement('button');
+  toggle.className = 'agent-work-trace-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-controls', bodyId);
+  toggle.title = 'Toggle agent work details';
+
+  const caret = document.createElement('span');
+  caret.className = 'agent-work-trace-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '›';
+
+  const main = document.createElement('span');
+  main.className = 'agent-work-trace-main';
+
+  const label = document.createElement('span');
+  label.className = 'agent-work-trace-label';
+  label.textContent = 'Agent work';
+
+  const summary = document.createElement('span');
+  summary.className = 'agent-work-trace-summary';
+  summary.textContent = state.summary || '';
+
+  main.appendChild(label);
+  main.appendChild(summary);
+
+  const status = document.createElement('span');
+  status.className = 'agent-work-trace-status';
+  status.textContent = getAgentWorkTraceStatusLabel(state.status);
+
+  toggle.appendChild(caret);
+  toggle.appendChild(main);
+  toggle.appendChild(status);
+
+  const body = document.createElement('div');
+  body.className = 'agent-work-trace-body';
+  body.id = bodyId;
+
+  const list = document.createElement('div');
+  list.className = 'agent-work-trace-list';
+  list.setAttribute('role', 'list');
+  list.replaceChildren(...createAgentWorkTraceRows(state));
+  body.appendChild(list);
+
+  toggle.addEventListener('click', () => {
+    setAgentWorkTraceSectionOpen(section, toggle, body, section.dataset.open !== 'true');
+  });
+
+  section.appendChild(toggle);
+  section.appendChild(body);
+  parentEl.after(section);
+  setAgentWorkTraceSectionOpen(section, toggle, body, Boolean(state.isOpen));
+}
+
+function clearAgentWorkTraceElement() {
+  if (agentWorkTraceEl && agentWorkTraceEl.isConnected) {
+    agentWorkTraceEl.remove();
+  }
+  releaseAgentWorkTraceElement();
+}
+
+function releaseAgentWorkTraceElement() {
+  agentWorkTraceEl = null;
+  agentWorkTraceToggleEl = null;
+  agentWorkTraceBodyEl = null;
+  agentWorkTraceSummaryEl = null;
+  agentWorkTraceStatusEl = null;
+  agentWorkTraceListEl = null;
+}
+
+function resetAgentWorkTraceForNewTurn() {
+  agentWorkTrace.reset();
+  releaseAgentWorkTraceElement();
+}
+
+function setAgentWorkTraceOpen(isOpen) {
+  if (!agentWorkTraceEl || !agentWorkTraceBodyEl || !agentWorkTraceToggleEl) return;
+  setAgentWorkTraceSectionOpen(agentWorkTraceEl, agentWorkTraceToggleEl, agentWorkTraceBodyEl, isOpen);
+}
+
+function ensureAgentWorkTraceElement() {
+  if (!pendingAssistantEl || !pendingAssistantEl.isConnected) {
+    return null;
+  }
+
+  if (agentWorkTraceEl && agentWorkTraceEl.isConnected) {
+    return agentWorkTraceEl;
+  }
+
+  agentWorkTraceId += 1;
+  const bodyId = `agent-work-trace-body-${agentWorkTraceId}`;
+
+  const section = document.createElement('section');
+  section.className = 'agent-work-trace';
+  section.dataset.status = 'running';
+  section.dataset.open = 'true';
+
+  const toggle = document.createElement('button');
+  toggle.className = 'agent-work-trace-toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.setAttribute('aria-controls', bodyId);
+  toggle.title = 'Toggle agent work details';
+
+  const caret = document.createElement('span');
+  caret.className = 'agent-work-trace-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '›';
+
+  const main = document.createElement('span');
+  main.className = 'agent-work-trace-main';
+
+  const label = document.createElement('span');
+  label.className = 'agent-work-trace-label';
+  label.textContent = 'Agent work';
+
+  const summary = document.createElement('span');
+  summary.className = 'agent-work-trace-summary';
+
+  main.appendChild(label);
+  main.appendChild(summary);
+
+  const status = document.createElement('span');
+  status.className = 'agent-work-trace-status';
+  status.textContent = 'Running';
+
+  toggle.appendChild(caret);
+  toggle.appendChild(main);
+  toggle.appendChild(status);
+
+  const body = document.createElement('div');
+  body.className = 'agent-work-trace-body';
+  body.id = bodyId;
+
+  const list = document.createElement('div');
+  list.className = 'agent-work-trace-list';
+  list.setAttribute('role', 'list');
+  body.appendChild(list);
+
+  toggle.addEventListener('click', () => {
+    const isOpen = section.dataset.open !== 'true';
+    setAgentWorkTraceOpen(isOpen);
+  });
+
+  section.appendChild(toggle);
+  section.appendChild(body);
+  pendingAssistantEl.after(section);
+
+  agentWorkTraceEl = section;
+  agentWorkTraceToggleEl = toggle;
+  agentWorkTraceBodyEl = body;
+  agentWorkTraceSummaryEl = summary;
+  agentWorkTraceStatusEl = status;
+  agentWorkTraceListEl = list;
+
+  return section;
+}
+
+function renderAgentWorkTrace(state) {
+  if (!state || !Array.isArray(state.entries) || state.entries.length === 0) {
+    return;
+  }
+
+  const section = ensureAgentWorkTraceElement();
+  if (!section || !agentWorkTraceListEl) {
+    return;
+  }
+
+  section.dataset.status = state.status || 'running';
+  if (agentWorkTraceSummaryEl) {
+    agentWorkTraceSummaryEl.textContent = state.summary || '';
+  }
+  if (agentWorkTraceStatusEl) {
+    agentWorkTraceStatusEl.textContent = getAgentWorkTraceStatusLabel(state.status);
+  }
+
+  agentWorkTraceListEl.replaceChildren(...createAgentWorkTraceRows(state));
+  setAgentWorkTraceOpen(Boolean(state.isOpen));
+  scrollMessagesToBottom();
+}
+
+function applyAgentWorkTraceEvent(payload) {
+  if (!isAgentTraceSource(payload?.source)) {
+    return false;
+  }
+  const state = agentWorkTrace.applyEvent(payload);
+  renderAgentWorkTrace(state);
+  return true;
+}
+
+function getPersistableAgentWorkTrace() {
+  return normalizeAgentTraceSnapshot(agentWorkTrace.snapshot());
+}
+
+function applyFinalAssistantLifecycle(text, agentTrace) {
+  const outcome = getAssistantLifecycleOutcome({ text, agentTrace });
+  setLifecyclePhase(outcome.phase, {
+    text: outcome.text,
+    detail: outcome.detail,
+  });
+}
+
 function finalizePendingAssistant(text) {
   const value = typeof text === 'string' ? text.trim() : '';
-  if (!value || value === ASSISTANT_THINKING_TEXT) return;
+  if (!value || value === ASSISTANT_THINKING_TEXT || (pendingAssistantEl && isGeneratingPlaceholderText(value))) return;
   if (value === lastAssistantText) return;
 
   const ts = Date.now();
+  const agentTrace = getPersistableAgentWorkTrace();
 
   if (pendingAssistantEl && pendingAssistantEl.isConnected) {
     setMessageElementText(pendingAssistantEl, value, {
@@ -999,13 +1356,13 @@ function finalizePendingAssistant(text) {
       pending: false,
       ts,
     });
-    const message = rememberMessage('assistant', value, ts);
+    const message = rememberMessage('assistant', value, ts, { agentTrace });
     if (message) {
       syncCurrentSessionMetadataFromHistory(message.ts);
       queuePersistChatHistory();
     }
   } else {
-    appendMessage('assistant', value, { pending: false, persist: true, ts });
+    appendMessage('assistant', value, { pending: false, persist: true, ts, agentTrace });
   }
 
   pendingAssistantEl = null;
@@ -1022,10 +1379,17 @@ function finalizePendingAssistant(text) {
 }
 
 function clearPendingAssistant() {
+  let removedPendingAssistant = false;
   if (pendingAssistantEl && pendingAssistantEl.isConnected) {
     pendingAssistantEl.remove();
+    removedPendingAssistant = true;
   }
   pendingAssistantEl = null;
+  stopPendingAssistantTicker();
+  if (removedPendingAssistant) {
+    agentWorkTrace.reset();
+    clearAgentWorkTraceElement();
+  }
   if (terminalChatReady) {
     finalizeTerminalChatSummary();
   }
@@ -1035,7 +1399,8 @@ function clearPendingAssistant() {
 
 function clearRenderedMessages() {
   if (!chatMessages) return;
-  chatMessages.querySelectorAll('.chat-msg').forEach((node) => node.remove());
+  stopPendingAssistantTicker();
+  chatMessages.querySelectorAll('.chat-msg, .agent-work-trace').forEach((node) => node.remove());
   renderConversationDecorators();
 }
 
@@ -1045,10 +1410,16 @@ function restoreMessages(messages) {
   let restoredLastAssistant = '';
 
   for (const item of messages) {
-    const restored = normalizePersistedMessage(item?.role, item?.text, item?.ts);
+    const restored = normalizePersistedMessage(item?.role, item?.text, item?.ts, {
+      agentTrace: item?.agentTrace,
+    });
     if (!restored) continue;
     chatHistory.push(restored);
-    createMessageElement(restored.role, restored.text, { pending: false, ts: restored.ts });
+    createMessageElement(restored.role, restored.text, {
+      pending: false,
+      ts: restored.ts,
+      agentTrace: restored.agentTrace,
+    });
     if (restored.role === 'assistant') {
       restoredLastAssistant = restored.text;
     }
@@ -1827,15 +2198,15 @@ async function connectSocket() {
         clearPendingAssistant();
         return;
       }
-      finalizePendingAssistant(payload.text || '');
-      setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
-        text: 'Completed',
-        detail: 'Latest response is ready.',
-      });
+      const responseText = payload.text || '';
+      const agentTrace = getPersistableAgentWorkTrace();
+      finalizePendingAssistant(responseText);
+      applyFinalAssistantLifecycle(responseText, agentTrace);
       return;
     }
 
     if (payload.command === 'show_status_bubble' || payload.command === 'update_status_bubble') {
+      applyAgentWorkTraceEvent(payload);
       const snapshot = setLifecycleFromRawText(payload.text || '', {
         source: payload.source,
         theme: payload.theme,
@@ -1849,12 +2220,11 @@ async function connectSocket() {
 
     if (payload.command === 'complete_status_bubble') {
       const responseText = payload.responseText || payload.text || '';
+      applyAgentWorkTraceEvent(payload);
       if (shouldDisplayReplyInChat(payload)) {
+        const agentTrace = getPersistableAgentWorkTrace();
         finalizePendingAssistant(responseText);
-        setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
-          text: 'Completed',
-          detail: responseText ? 'Latest response is ready.' : 'The latest action finished successfully.',
-        });
+        applyFinalAssistantLifecycle(responseText, agentTrace);
       } else {
         setLifecyclePhase(EXECUTION_PHASES.RUNNING, {
           text: 'Checking result…',
@@ -1918,6 +2288,7 @@ function submitCommand() {
   lastSubmittedAt = now;
 
   clearPendingAssistant();
+  resetAgentWorkTraceForNewTurn();
   lastAssistantText = '';
   appendMessage('user', text, { pending: false, persist: true, ts: now });
   pendingAssistantEl = appendMessage('assistant', 'Capturing screen…', {

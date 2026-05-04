@@ -30,6 +30,7 @@ from agents.cua_cli.background_manager import (
     unregister_foreground_process,
     wait_for_any_port,
 )
+from agents.cua_cli.direct_command_policy import DirectCommand, extract_safe_direct_command
 from agents.cua_cli.server_launch_policy import (
     extract_explicit_shell_command,
     extract_port_candidates,
@@ -713,6 +714,17 @@ class CLIAgent:
                     task=task,
                 )
 
+            direct_command = extract_safe_direct_command(
+                task,
+                explicit_command=explicit_command,
+            )
+            if direct_command is not None:
+                return await self._run_direct_command(
+                    direct_command,
+                    timeout=min(timeout, direct_command.timeout_seconds),
+                    status_callback=status_callback,
+                )
+
             run_timeout = timeout
             short_timeout_applied = False
             if self._is_quick_server_launch_task(task):
@@ -981,6 +993,103 @@ class CLIAgent:
             response.success = False
             response.error = _clean_join_text(response.error, timeout_msg)
         return response
+
+    async def _run_direct_command(
+        self,
+        command: DirectCommand,
+        timeout: int,
+        status_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> dict:
+        session_id = uuid.uuid4().hex[:8]
+        await self._emit_terminal_event(
+            session_id,
+            kind="session_started",
+            text="Direct CLI session started.",
+            status="running",
+        )
+        await self._emit_terminal_event(
+            session_id,
+            kind="command_started",
+            shell_command=command.display,
+            text=command.display,
+            status="running",
+        )
+        await self._emit_status(
+            status_callback,
+            f"Running shell command: {command.display}",
+        )
+
+        process = await asyncio.create_subprocess_exec(
+            *command.argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(Path.cwd().resolve()),
+        )
+        self._register_foreground_process(session_id, process, command.display)
+
+        timed_out = False
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.CancelledError:
+            self._terminate_process_tree_sync({"pid": process.pid})
+            try:
+                await process.wait()
+            except Exception:
+                pass
+            await self._emit_terminal_event(
+                session_id,
+                kind="session_stopped",
+                text="Direct CLI session stopped.",
+                status="stopped",
+            )
+            raise
+        except asyncio.TimeoutError:
+            timed_out = True
+            self._terminate_process_tree_sync({"pid": process.pid})
+            try:
+                await process.wait()
+            except Exception:
+                pass
+            stdout = b""
+            stderr = f"Command timed out after {timeout} seconds".encode("utf-8")
+        finally:
+            self._unregister_foreground_process(session_id)
+
+        stdout_text = stdout.decode("utf-8", errors="replace").strip()
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        success = (process.returncode == 0) and not timed_out
+        result_text = stdout_text or stderr_text
+        status = "success" if success else "error"
+
+        await self._emit_terminal_event(
+            session_id,
+            kind="command_output",
+            shell_command=command.display,
+            text=result_text or "(command completed with no output)",
+            status=status,
+        )
+        await self._emit_terminal_event(
+            session_id,
+            kind="session_finished" if success else "session_error",
+            text="Direct CLI session finished." if success else (stderr_text or "Direct CLI session failed."),
+            status=status,
+        )
+
+        return {
+            "success": success,
+            "result": result_text,
+            "error": None if success else (stderr_text or f"Command exited with code {process.returncode}"),
+            "tool_calls": [
+                {
+                    "tool_name": "run_shell_command",
+                    "tool_id": f"direct-{session_id}",
+                    "parameters": {"command": command.display},
+                    "result": result_text,
+                    "status": status,
+                    "error": None if success else (stderr_text or f"exit_code={process.returncode}"),
+                }
+            ],
+        }
 
     def _parse_stream_json(self, stdout: str, stderr: str, returncode: int) -> CLIResponse:
         parsed = parse_stream_json_response(

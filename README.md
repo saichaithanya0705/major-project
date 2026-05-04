@@ -1,6 +1,6 @@
 # JARVIS
 ## Computer Linked Overlay Vision Interface System
-> This is a public checkpoint. This is a limited version of the full code. Please do not expect production ready performance. Best experience with a paid Gemini API key.
+> This is a public checkpoint. This is a limited version of the full code. Please do not expect production ready performance. Best experience with a NVIDIA API key for CUA vision and OpenRouter as fallback.
 
 ## Installation
 
@@ -49,6 +49,12 @@ cd ../agents/cua_cli/gemini-cli && npm install && npm run build
 3. Create your .env file for your keys
 ```
 GEMINI_API_KEY = "YOUR_API_KEY"
+
+# CUA vision uses NVIDIA first, then OpenRouter. Gemini is not used for CUA vision.
+NVIDIA_API_KEY = "YOUR_NVIDIA_API_KEY"
+# Optional NVIDIA vision overrides:
+# NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+# NVIDIA_VISION_MODEL = "mistralai/mistral-small-4-119b-2603"
 
 # Router prefers OpenRouter when configured, and falls back to Ollama if needed.
 ROUTER_PROVIDER = "openrouter"

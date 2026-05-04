@@ -5,9 +5,12 @@ Provides text-to-speech capabilities for verbal feedback to users.
 """
 import os
 import requests
+import shutil
+import subprocess
+import sys
 import threading
-import time
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -29,19 +32,9 @@ ELEVENLABS_OUTPUT_FORMAT = str(os.getenv("ELEVENLABS_OUTPUT_FORMAT") or "mp3_441
 # Audio output file
 AUDIO_FILE = "jarvis_audio.mp3"
 
-# Audio player instance (global for stop functionality)
-_audio_player = None
-
-# Check if VLC python bindings and native runtime are available.
-# On Windows, python-vlc may import successfully but still fail when libvlc.dll
-# is missing. We treat any import/runtime exception as "VLC unavailable".
-try:
-    import vlc
-    VLC_AVAILABLE = True
-except Exception as exc:
-    vlc = None
-    VLC_AVAILABLE = False
-    print(f"[TTS] VLC unavailable ({type(exc).__name__}: {exc}) - TTS will print to console only")
+# Audio playback subprocess (global for stop functionality)
+_audio_process = None
+_audio_process_lock = threading.Lock()
 
 
 def _get_headers():
@@ -69,16 +62,90 @@ def _get_tts_url() -> str:
     return f"{ELEVENLABS_API_BASE}/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
 
-def _play_audio():
-    """Internal function to play the audio file."""
-    global _audio_player
-    if not VLC_AVAILABLE:
+def _build_playback_command(audio_path: Path) -> list[str] | None:
+    """Return an available command that can play the generated audio."""
+    if os.name == "nt":
+        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        if not powershell:
+            return None
+
+        script = r"""
+param([string]$AudioPath)
+Add-Type -AssemblyName PresentationCore
+$resolved = (Resolve-Path -LiteralPath $AudioPath).Path
+$player = New-Object System.Windows.Media.MediaPlayer
+$player.Open([System.Uri]::new($resolved))
+for ($i = 0; $i -lt 100 -and -not $player.NaturalDuration.HasTimeSpan; $i++) {
+    Start-Sleep -Milliseconds 50
+}
+$player.Play()
+if ($player.NaturalDuration.HasTimeSpan) {
+    Start-Sleep -Milliseconds ([Math]::Ceiling($player.NaturalDuration.TimeSpan.TotalMilliseconds) + 250)
+} else {
+    Start-Sleep -Seconds 5
+}
+$player.Stop()
+$player.Close()
+"""
+        return [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+            str(audio_path),
+        ]
+
+    if sys.platform == "darwin":
+        afplay = shutil.which("afplay")
+        if afplay:
+            return [afplay, str(audio_path)]
+
+    for command_name, extra_args in (
+        ("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet"]),
+        ("mpg123", ["-q"]),
+        ("mpv", ["--really-quiet", "--no-terminal"]),
+    ):
+        command = shutil.which(command_name)
+        if command:
+            return [command, *extra_args, str(audio_path)]
+
+    return None
+
+
+def _play_audio(audio_path):
+    """Play a generated ElevenLabs audio file."""
+    global _audio_process
+    resolved_audio_path = Path(audio_path).resolve()
+    command = _build_playback_command(resolved_audio_path)
+    if not command:
+        print(f"[TTS] Audio saved to {resolved_audio_path}, but no supported playback command was found")
         return
 
-    _audio_player = vlc.MediaPlayer(AUDIO_FILE)
-    _audio_player.play()
-    # Wait for audio to finish
-    time.sleep(_audio_player.get_length() / 1000 + 1)
+    process = None
+    try:
+        popen_kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        process = subprocess.Popen(
+            command,
+            **popen_kwargs,
+        )
+        with _audio_process_lock:
+            _audio_process = process
+        process.wait()
+    except OSError as e:
+        print(f"[TTS] Audio playback failed: {e}")
+    finally:
+        if process is not None:
+            with _audio_process_lock:
+                if _audio_process is process:
+                    _audio_process = None
 
 
 def _preprocess_text(text: str) -> str:
@@ -142,17 +209,17 @@ def tts_speak(text: str):
         )
 
         if response.status_code == 200:
+            audio_path = Path(AUDIO_FILE)
+            if audio_path.parent != Path("."):
+                audio_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Save the audio file
-            with open(AUDIO_FILE, 'wb') as f:
+            with open(audio_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
                     if chunk:
                         f.write(chunk)
 
-            # Play the audio in a separate thread
-            if VLC_AVAILABLE:
-                audio_thread = threading.Thread(target=_play_audio)
-                audio_thread.start()
-                audio_thread.join()
+            _play_audio(audio_path)
         else:
             print(f'[TTS] API call failed with status {response.status_code}')
 
@@ -162,7 +229,15 @@ def tts_speak(text: str):
 
 def stop_speaking():
     """Stop the currently playing audio."""
-    global _audio_player
-    if _audio_player and VLC_AVAILABLE:
-        _audio_player.stop()
-        _audio_player = None
+    global _audio_process
+    with _audio_process_lock:
+        process = _audio_process
+        _audio_process = None
+
+    if process and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)

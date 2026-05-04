@@ -6,7 +6,8 @@ import subprocess
 from PIL import ImageGrab
 from core.settings import set_host_and_port, set_screen_size, get_model_configs, get_screen_size
 
-from models.models import call_gemini, store_screenshot
+from models.models import call_gemini, preflight_router_configuration, store_screenshot
+from agents.browser.agent import BrowserAgent
 from agents.jarvis.tools import stop_all_actions
 from agents.cua_cli.agent import CLIAgent
 from agents.cua_vision.tools import (
@@ -84,6 +85,12 @@ async def main():
     # Retrieve model configs from settings
     rapid_response_model, jarvis_model = get_model_configs(settings_path)
     print(f"Models loaded - Rapid: {rapid_response_model}, JARVIS: {jarvis_model}")
+    router_preflight_warning = await asyncio.to_thread(
+        preflight_router_configuration,
+        rapid_response_model,
+    )
+    if router_preflight_warning:
+        print(f"[Router][Preflight] {router_preflight_warning}")
 
     current_task = None
     task_lock = asyncio.Lock()
@@ -94,6 +101,7 @@ async def main():
         nonlocal current_task
         print("Stop requested: cancelling active tasks.")
         request_cua_vision_stop()
+        BrowserAgent.request_stop_all()
         async with task_lock:
             task = current_task
         if task and not task.done():
@@ -132,6 +140,7 @@ async def main():
                 print("Overlay input ignored (task already running).")
                 return
             print(f"Overlay input: {text}")
+            BrowserAgent.clear_stop_request()
             task = asyncio.create_task(_run_overlay_task(text))
             current_task = task
 
