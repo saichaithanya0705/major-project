@@ -16,6 +16,16 @@ from models.runtime_config import build_model_runtime_config
 
 _ENV_KEYS = [
     "JARVIS_THINKING_BUDGET",
+    "NVIDIA_API_KEY",
+    "NVCF_API_KEY",
+    "NGC_API_KEY",
+    "NVIDIA_MODEL",
+    "NVIDIA_FALLBACK_MODEL",
+    "NVIDIA_ROUTER_MODEL",
+    "NVIDIA_URL",
+    "NVIDIA_CHAT_URL",
+    "NVIDIA_TIMEOUT_SECONDS",
+    "NVIDIA_ROUTER_MAX_TOKENS",
     "OPENROUTER_API_KEY",
     "OPENROUTER_MODEL",
     "OPENROUTER_ROUTER_MODEL",
@@ -62,6 +72,7 @@ def _build(rapid_response_model: str):
         rapid_response_model,
         default_openrouter_router_model="router-default",
         default_openrouter_fallback_model="fallback-default",
+        default_nvidia_router_model="nvidia-router-default",
         looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
         extract_openrouter_model_name=_extract_openrouter_model_name,
     )
@@ -75,6 +86,14 @@ def run_checks() -> None:
         assert cfg.openrouter_model == "nvidia/custom-router:free"
         assert cfg.openrouter_router_model == "nvidia/custom-router:free"
         assert cfg.router_provider == "openrouter"
+        assert cfg.nvidia_router_model == "nvidia/custom-router"
+
+        _clear_env()
+        os.environ["NVIDIA_API_KEY"] = "nvidia-key"
+        os.environ["OPENROUTER_API_KEY"] = "openrouter-key"
+        cfg = _build("qwen3.5:4b-q4_K_M")
+        assert cfg.router_provider == "nvidia"
+        assert cfg.nvidia_router_model == "nvidia-router-default"
 
         _clear_env()
         os.environ["ROUTER_PROVIDER"] = "invalid-provider"
@@ -88,6 +107,13 @@ def run_checks() -> None:
         assert cfg.router_provider == "openrouter"
 
         _clear_env()
+        os.environ["ROUTER_PROVIDER"] = "invalid-provider"
+        os.environ["NVIDIA_API_KEY"] = "test-key"
+        os.environ["OPENROUTER_API_KEY"] = "test-key"
+        cfg = _build("qwen3.5:4b-q4_K_M")
+        assert cfg.router_provider == "nvidia"
+
+        _clear_env()
         os.environ["OLLAMA_ROUTER_MODEL"] = "gemini-3-flash-preview"
         cfg = _build("qwen3.5:4b-q4_K_M")
         assert cfg.ollama_router_model == "qwen3.5:4b-q4_K_M"
@@ -99,10 +125,12 @@ def run_checks() -> None:
 
         _clear_env()
         os.environ["OPENROUTER_TIMEOUT_SECONDS"] = "1"
+        os.environ["NVIDIA_TIMEOUT_SECONDS"] = "9999"
         os.environ["OLLAMA_ROUTER_TIMEOUT_SECONDS"] = "9999"
         os.environ["JARVIS_THINKING_BUDGET"] = "5000"
         cfg = _build("qwen3.5:4b-q4_K_M")
         assert cfg.openrouter_timeout_seconds == 10
+        assert cfg.nvidia_timeout_seconds == 180
         assert cfg.ollama_router_timeout_seconds == 180
         assert cfg.jarvis_thinking_budget == 2048
     finally:

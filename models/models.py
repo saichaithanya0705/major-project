@@ -24,6 +24,7 @@ from models.rapid_state import RAPID_SESSION_STATE
 from models.rapid_orchestrator import RapidOrchestratorDeps, run_rapid_request
 from models.router_backends import (
     call_ollama_router_sync,
+    call_nvidia_router_sync,
     call_openrouter_router_sync,
     call_openrouter_text_sync,
     call_openrouter_tool_sync,
@@ -79,6 +80,7 @@ _MAX_ROUTER_CHAIN_STEPS = 6
 _REPEATED_STEP_LIMIT = 3
 _DEFAULT_OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 _DEFAULT_OPENROUTER_FALLBACK_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
+_DEFAULT_NVIDIA_ROUTER_MODEL = "qwen/qwen3.5-397b-a17b"
 
 
 def _looks_like_openrouter_model_name(model_name: str) -> bool:
@@ -102,17 +104,19 @@ def preflight_router_configuration(rapid_response_model: str) -> Optional[str]:
         rapid_response_model,
         default_openrouter_router_model=_DEFAULT_OPENROUTER_ROUTER_MODEL,
         default_openrouter_fallback_model=_DEFAULT_OPENROUTER_FALLBACK_MODEL,
+        default_nvidia_router_model=_DEFAULT_NVIDIA_ROUTER_MODEL,
         looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
         extract_openrouter_model_name=_extract_openrouter_model_name,
     )
     provider_order = _router_provider_order(
         router_provider=runtime_config.router_provider,
+        nvidia_enabled=bool(runtime_config.nvidia_api_key and runtime_config.nvidia_router_model),
         openrouter_enabled=bool(runtime_config.openrouter_api_key and runtime_config.openrouter_router_model),
         ollama_enabled=bool(runtime_config.ollama_router_model and runtime_config.ollama_base_url),
     )
     if not provider_order:
         return (
-            "Router provider is not configured. Set OPENROUTER_API_KEY for OpenRouter "
+            "Router provider is not configured. Set NVIDIA_API_KEY for NVIDIA, OPENROUTER_API_KEY for OpenRouter, "
             "or configure an Ollama router model."
         )
     if provider_order[0] == "ollama":
@@ -128,6 +132,8 @@ def preflight_router_configuration(rapid_response_model: str) -> Optional[str]:
         )
     if provider_order[0] == "openrouter" and not runtime_config.openrouter_api_key:
         return "OpenRouter router provider is selected but OPENROUTER_API_KEY is not set."
+    if provider_order[0] == "nvidia" and not runtime_config.nvidia_api_key:
+        return "NVIDIA router provider is selected but NVIDIA_API_KEY is not set."
     return None
 
 
@@ -280,10 +286,15 @@ class GeminiModel:
             self.rapid_response_model,
             default_openrouter_router_model=_DEFAULT_OPENROUTER_ROUTER_MODEL,
             default_openrouter_fallback_model=_DEFAULT_OPENROUTER_FALLBACK_MODEL,
+            default_nvidia_router_model=_DEFAULT_NVIDIA_ROUTER_MODEL,
             looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
             extract_openrouter_model_name=_extract_openrouter_model_name,
         )
         self.jarvis_thinking_budget = runtime_config.jarvis_thinking_budget
+        self.nvidia_api_key = runtime_config.nvidia_api_key
+        self.nvidia_router_model = runtime_config.nvidia_router_model
+        self.nvidia_url = runtime_config.nvidia_url
+        self.nvidia_timeout_seconds = runtime_config.nvidia_timeout_seconds
         self.openrouter_api_key = runtime_config.openrouter_api_key
         self.openrouter_model = runtime_config.openrouter_model
         self.openrouter_vision_model = runtime_config.openrouter_vision_model
@@ -299,6 +310,7 @@ class GeminiModel:
         self.ollama_router_timeout_seconds = runtime_config.ollama_router_timeout_seconds
         self.ollama_router_num_ctx = runtime_config.ollama_router_num_ctx
         self.ollama_router_num_predict = runtime_config.ollama_router_num_predict
+        self.nvidia_router_max_tokens = runtime_config.nvidia_router_max_tokens
         self.openrouter_router_max_tokens = runtime_config.openrouter_router_max_tokens
         self.ollama_router_think = runtime_config.ollama_router_think
         self.gemini_backup_model = runtime_config.gemini_backup_model
@@ -361,6 +373,9 @@ class GeminiModel:
 
     def _openrouter_router_enabled(self) -> bool:
         return self._openrouter_model_enabled(self.openrouter_router_model)
+
+    def _nvidia_router_enabled(self) -> bool:
+        return bool(self.nvidia_api_key and self.nvidia_router_model and self.nvidia_url)
 
     def _call_openrouter_text_sync(
         self,
@@ -439,6 +454,23 @@ class GeminiModel:
             openrouter_timeout_seconds=self.openrouter_timeout_seconds,
             openrouter_router_model=self.openrouter_router_model,
             openrouter_router_max_tokens=self.openrouter_router_max_tokens,
+            router_system_prompt=OLLAMA_ROUTER_SYSTEM_PROMPT,
+            prompt=prompt,
+            clean_text=lambda value, fallback, max_len: _clean_text(
+                value,
+                fallback,
+                max_len=max_len,
+            ),
+            parse_json_object_from_text=_parse_json_object_from_text,
+        )
+
+    def _call_nvidia_router_sync(self, prompt: str) -> dict[str, Any]:
+        return call_nvidia_router_sync(
+            nvidia_api_key=self.nvidia_api_key,
+            nvidia_url=self.nvidia_url,
+            nvidia_timeout_seconds=self.nvidia_timeout_seconds,
+            nvidia_router_model=self.nvidia_router_model,
+            nvidia_router_max_tokens=self.nvidia_router_max_tokens,
             router_system_prompt=OLLAMA_ROUTER_SYSTEM_PROMPT,
             prompt=prompt,
             clean_text=lambda value, fallback, max_len: _clean_text(
@@ -574,6 +606,7 @@ class GeminiModel:
     def _router_provider_order(self) -> list[str]:
         return _router_provider_order(
             router_provider=self.router_provider,
+            nvidia_enabled=self._nvidia_router_enabled(),
             openrouter_enabled=self._openrouter_router_enabled(),
             ollama_enabled=bool(self.ollama_router_model and self.ollama_base_url),
         )
@@ -594,16 +627,31 @@ class GeminiModel:
 
         provider_order = _router_provider_order(
             router_provider=self.router_provider,
+            nvidia_enabled=self._nvidia_router_enabled(),
             openrouter_enabled=self._openrouter_router_enabled(),
             ollama_enabled=bool(self.ollama_router_model and self.ollama_base_url),
         )
         if not provider_order:
-            raise RuntimeError("Router provider is not configured. Set OPENROUTER_API_KEY for OpenRouter routing.")
+            raise RuntimeError(
+                "Router provider is not configured. Set NVIDIA_API_KEY for NVIDIA routing, "
+                "OPENROUTER_API_KEY for OpenRouter routing, or configure an Ollama router model."
+            )
 
         last_error = ""
         for provider in provider_order:
             try:
-                if provider == "openrouter":
+                if provider == "nvidia":
+                    try:
+                        await set_model_name(f"{self.nvidia_router_model} (NVIDIA)")
+                    except Exception as ui_exc:
+                        print(f"[Router] Model label update skipped: {ui_exc}")
+                    payload = await asyncio.to_thread(self._call_nvidia_router_sync, prompt)
+                    routed = _normalize_router_decision_payload(
+                        payload,
+                        prompt,
+                        provider_name="NVIDIA",
+                    )
+                elif provider == "openrouter":
                     try:
                         await set_model_name(f"{self.openrouter_router_model} (OpenRouter)")
                     except Exception as ui_exc:

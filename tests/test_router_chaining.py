@@ -641,17 +641,60 @@ def test_ollama_router_payload_disables_thinking() -> None:
     assert captured_payload["options"]["num_predict"] == 800, captured_payload
 
 
+def test_ollama_router_accepts_legacy_tool_call_text() -> None:
+    model = object.__new__(model_module.GeminiModel)
+    model.ollama_router_model = "router-model"
+    model.ollama_router_num_predict = 800
+    model.ollama_router_num_ctx = 4096
+    model.ollama_router_think = False
+    model.ollama_keep_alive = "10m"
+    model.ollama_base_url = "http://127.0.0.1:11434"
+    model.ollama_router_timeout_seconds = 90
+
+    original_post = router_backends_module.requests.post
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "message": {
+                    "content": 'invoke_cua_cli(task="ping google.com from terminal")',
+                },
+            }
+
+    def _fake_post(url, json, timeout):
+        del url, json, timeout
+        return _FakeResponse()
+
+    router_backends_module.requests.post = _fake_post
+    try:
+        route = model._call_ollama_router_sync("ping google.com from terminal")
+    finally:
+        router_backends_module.requests.post = original_post
+
+    assert route == {"agent": "cua_cli", "task": "ping google.com from terminal"}
+
+
 def test_router_provider_order_uses_fallback_provider() -> None:
     assert model_module._router_provider_order(
         router_provider="openrouter",
+        nvidia_enabled=True,
         openrouter_enabled=True,
         ollama_enabled=True,
-    ) == ["openrouter", "ollama"]
+    ) == ["openrouter", "nvidia", "ollama"]
+    assert model_module._router_provider_order(
+        router_provider="nvidia",
+        nvidia_enabled=True,
+        openrouter_enabled=True,
+        ollama_enabled=True,
+    ) == ["nvidia", "ollama"]
     assert model_module._router_provider_order(
         router_provider="ollama",
+        nvidia_enabled=True,
         openrouter_enabled=True,
         ollama_enabled=True,
-    ) == ["ollama", "openrouter"]
+    ) == ["ollama", "nvidia", "openrouter"]
 
 
 def test_openrouter_free_vision_defaults_prefer_gemma() -> None:
@@ -731,6 +774,48 @@ def test_openrouter_text_payload_supports_image_content() -> None:
     assert content[1]["image_url"]["url"] == "data:image/png;base64,abc"
 
 
+def test_nvidia_router_uses_direct_nvidia_endpoint() -> None:
+    captured: dict[str, Any] = {}
+    original_post = router_backends_module.requests.post
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"agent":"cua_cli","task":"ping google.com"}'}}]}
+
+    def _fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = dict(headers)
+        captured["json"] = dict(json)
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    router_backends_module.requests.post = _fake_post
+    try:
+        route = router_backends_module.call_nvidia_router_sync(
+            nvidia_api_key="nvidia-key",
+            nvidia_url="https://integrate.api.nvidia.com/v1/chat/completions",
+            nvidia_timeout_seconds=30,
+            nvidia_router_model="qwen/qwen3.5-397b-a17b",
+            nvidia_router_max_tokens=260,
+            router_system_prompt="system",
+            prompt="ping google.com",
+            clean_text=lambda value, fallback, max_len: str(value or fallback)[:max_len],
+            parse_json_object_from_text=model_module._parse_json_object_from_text,
+        )
+    finally:
+        router_backends_module.requests.post = original_post
+
+    assert route == {"agent": "cua_cli", "task": "ping google.com"}
+    assert captured["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer nvidia-key"
+    assert "HTTP-Referer" not in captured["headers"]
+    assert captured["json"]["model"] == "qwen/qwen3.5-397b-a17b"
+    assert captured["json"]["response_format"] == {"type": "json_object"}
+
+
 def test_openrouter_tool_payload_parses_tool_calls() -> None:
     original_post = router_backends_module.requests.post
 
@@ -801,6 +886,9 @@ def test_openrouter_tool_payload_parses_tool_calls() -> None:
 async def test_openrouter_router_failure_falls_back_to_ollama() -> None:
     model = object.__new__(model_module.GeminiModel)
     model.router_provider = "openrouter"
+    model.nvidia_api_key = ""
+    model.nvidia_router_model = ""
+    model.nvidia_url = ""
     model.openrouter_api_key = "bad-key"
     model.openrouter_router_model = "openrouter-router"
     model.openrouter_url = "https://openrouter.invalid"
@@ -850,9 +938,11 @@ async def run_checks() -> None:
     test_window_management_is_execution_not_visual_explanation()
     test_router_refusal_task_is_replaced_with_original_request()
     test_ollama_router_payload_disables_thinking()
+    test_ollama_router_accepts_legacy_tool_call_text()
     test_router_provider_order_uses_fallback_provider()
     test_openrouter_free_vision_defaults_prefer_gemma()
     test_openrouter_text_payload_supports_image_content()
+    test_nvidia_router_uses_direct_nvidia_endpoint()
     test_openrouter_tool_payload_parses_tool_calls()
     await test_openrouter_router_failure_falls_back_to_ollama()
     await test_chains_multiple_agents_then_finishes()

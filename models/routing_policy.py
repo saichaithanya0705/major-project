@@ -606,6 +606,7 @@ def _normalize_router_decision_payload(
 def _router_provider_order(
     *,
     router_provider: str,
+    nvidia_enabled: bool,
     openrouter_enabled: bool,
     ollama_enabled: bool,
 ) -> list[str]:
@@ -615,12 +616,16 @@ def _router_provider_order(
         if enabled and provider not in providers:
             providers.append(provider)
 
-    prefer_openrouter = router_provider == "openrouter"
-    if prefer_openrouter:
+    if router_provider == "nvidia":
+        add("nvidia", nvidia_enabled)
+        add("ollama", ollama_enabled)
+    elif router_provider == "openrouter":
         add("openrouter", openrouter_enabled)
+        add("nvidia", nvidia_enabled)
         add("ollama", ollama_enabled)
     else:
         add("ollama", ollama_enabled)
+        add("nvidia", nvidia_enabled)
         add("openrouter", openrouter_enabled)
     return providers
 

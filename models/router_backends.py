@@ -4,7 +4,9 @@ Provider-specific router backend clients (OpenRouter and Ollama).
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 from typing import Any, Callable, Optional
 
 import requests
@@ -12,6 +14,21 @@ import requests
 
 CleanText = Callable[[object, str, int], str]
 ParseJsonObject = Callable[[str], dict[str, Any]]
+
+_ROUTER_TEXT_TOOL_TO_AGENT = {
+    "direct_response": "direct",
+    "invoke_jarvis": "jarvis",
+    "invoke_browser": "browser",
+    "invoke_cua_cli": "cua_cli",
+    "invoke_cua_vision": "cua_vision",
+    "request_screen_context": "screen_context",
+}
+_ROUTER_TEXT_TOOL_RE = re.compile(
+    r"\b("
+    + "|".join(re.escape(name) for name in _ROUTER_TEXT_TOOL_TO_AGENT)
+    + r")\s*\(",
+    re.DOTALL,
+)
 
 
 def _extract_message_text(content: Any) -> str:
@@ -39,6 +56,105 @@ def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
             return {}
         if isinstance(parsed, dict):
             return parsed
+    return {}
+
+
+def _literal_value(node: ast.AST) -> Any:
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        return None
+
+
+def _extract_balanced_call(text: str, start: int) -> str:
+    depth = 0
+    quote = ""
+    escaped = False
+
+    for index in range(start, len(text)):
+        char = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+
+    return ""
+
+
+def _parse_router_text_tool_call(text: str) -> dict[str, Any]:
+    """Accept legacy router tool-call text emitted by smaller local models."""
+    if not text:
+        return {}
+
+    for match in _ROUTER_TEXT_TOOL_RE.finditer(text):
+        call_text = _extract_balanced_call(text, match.start())
+        if not call_text:
+            continue
+        try:
+            expression = ast.parse(call_text, mode="eval").body
+        except SyntaxError:
+            continue
+        if not isinstance(expression, ast.Call) or not isinstance(expression.func, ast.Name):
+            continue
+
+        tool_name = expression.func.id
+        agent = _ROUTER_TEXT_TOOL_TO_AGENT.get(tool_name)
+        if not agent:
+            continue
+
+        args: dict[str, Any] = {}
+        for keyword in expression.keywords:
+            if not keyword.arg:
+                continue
+            value = _literal_value(keyword.value)
+            if isinstance(value, dict) and keyword.arg in {"args", "arguments"}:
+                args.update(value)
+            elif value is not None:
+                args[keyword.arg] = value
+
+        default_key = "query" if agent == "jarvis" else "text" if agent == "direct" else "task"
+        for positional in expression.args:
+            value = _literal_value(positional)
+            if isinstance(value, dict):
+                args.update(value)
+            elif value is not None and default_key not in args:
+                args[default_key] = value
+
+        if agent == "direct":
+            response_text = str(args.get("response_text") or args.get("text") or "").strip()
+            if response_text:
+                return {"agent": agent, "response_text": response_text}
+        elif agent == "jarvis":
+            query = str(args.get("query") or args.get("task") or "").strip()
+            if query:
+                return {"agent": agent, "query": query}
+        elif agent == "screen_context":
+            task = str(args.get("task") or args.get("query") or "").strip()
+            if task:
+                payload = {"agent": agent, "task": task}
+                focus = str(args.get("focus") or "").strip()
+                if focus:
+                    payload["focus"] = focus
+                return payload
+        else:
+            task = str(args.get("task") or args.get("query") or "").strip()
+            if task:
+                return {"agent": agent, "task": task}
+
     return {}
 
 
@@ -347,7 +463,43 @@ def call_openrouter_router_sync(
     )
     parsed = parse_json_object_from_text(text)
     if not isinstance(parsed, dict) or not parsed:
+        parsed = _parse_router_text_tool_call(text)
+    if not isinstance(parsed, dict) or not parsed:
         raise RuntimeError(f"OpenRouter router returned non-JSON payload: {text}")
+    return parsed
+
+
+def call_nvidia_router_sync(
+    *,
+    nvidia_api_key: str,
+    nvidia_url: str,
+    nvidia_timeout_seconds: int,
+    nvidia_router_model: str,
+    nvidia_router_max_tokens: int,
+    router_system_prompt: str,
+    prompt: str,
+    clean_text: CleanText,
+    parse_json_object_from_text: ParseJsonObject,
+) -> dict[str, Any]:
+    text = call_openrouter_text_sync(
+        openrouter_api_key=nvidia_api_key,
+        openrouter_url=nvidia_url,
+        openrouter_site_url="",
+        openrouter_site_name="",
+        openrouter_timeout_seconds=nvidia_timeout_seconds,
+        model_name=nvidia_router_model,
+        system_prompt=router_system_prompt,
+        user_prompt=prompt,
+        temperature=0.0,
+        max_tokens=nvidia_router_max_tokens,
+        clean_text=clean_text,
+        response_format={"type": "json_object"},
+    )
+    parsed = parse_json_object_from_text(text)
+    if not isinstance(parsed, dict) or not parsed:
+        parsed = _parse_router_text_tool_call(text)
+    if not isinstance(parsed, dict) or not parsed:
+        raise RuntimeError(f"NVIDIA router returned non-JSON payload: {text}")
     return parsed
 
 
@@ -406,6 +558,8 @@ def call_ollama_router_sync(
         raise RuntimeError("Ollama response contained empty content.")
 
     parsed = parse_json_object_from_text(content)
+    if not isinstance(parsed, dict) or not parsed:
+        parsed = _parse_router_text_tool_call(content)
     if not isinstance(parsed, dict) or not parsed:
         raise RuntimeError(f"Ollama router returned non-JSON payload: {content}")
     return parsed

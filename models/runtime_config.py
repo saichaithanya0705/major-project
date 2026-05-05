@@ -14,6 +14,10 @@ from typing import Callable
 @dataclass(frozen=True)
 class ModelRuntimeConfig:
     jarvis_thinking_budget: int
+    nvidia_api_key: str
+    nvidia_router_model: str
+    nvidia_url: str
+    nvidia_timeout_seconds: int
     openrouter_api_key: str
     openrouter_model: str
     openrouter_vision_model: str
@@ -29,6 +33,7 @@ class ModelRuntimeConfig:
     ollama_router_timeout_seconds: int
     ollama_router_num_ctx: int
     ollama_router_num_predict: int
+    nvidia_router_max_tokens: int
     openrouter_router_max_tokens: int
     ollama_router_think: bool
     gemini_backup_model: str
@@ -47,11 +52,21 @@ def _truthy_env(env_name: str, fallback: str = "false") -> bool:
     return os.getenv(env_name, fallback).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _nvidia_model_from_openrouter(model_name: str) -> str:
+    cleaned = (model_name or "").strip()
+    if cleaned.endswith(":free"):
+        cleaned = cleaned[: -len(":free")]
+    if cleaned.startswith("nvidia/"):
+        return cleaned
+    return ""
+
+
 def build_model_runtime_config(
     rapid_response_model: str,
     *,
     default_openrouter_router_model: str,
     default_openrouter_fallback_model: str,
+    default_nvidia_router_model: str,
     looks_like_openrouter_model_name: Callable[[str], bool],
     extract_openrouter_model_name: Callable[[str], str],
 ) -> ModelRuntimeConfig:
@@ -87,13 +102,40 @@ def build_model_runtime_config(
         upper=180,
     )
 
+    nvidia_api_key = (
+        os.getenv("NVIDIA_API_KEY")
+        or os.getenv("NVCF_API_KEY")
+        or os.getenv("NGC_API_KEY")
+        or ""
+    ).strip()
+    nvidia_router_model = (
+        os.getenv("NVIDIA_ROUTER_MODEL")
+        or os.getenv("NVIDIA_MODEL")
+        or os.getenv("NVIDIA_FALLBACK_MODEL")
+        or _nvidia_model_from_openrouter(openrouter_router_model)
+        or _nvidia_model_from_openrouter(openrouter_model)
+        or default_nvidia_router_model
+    ).strip()
+    nvidia_url = (
+        os.getenv("NVIDIA_URL")
+        or os.getenv("NVIDIA_CHAT_URL")
+        or "https://integrate.api.nvidia.com/v1/chat/completions"
+    ).strip()
+    nvidia_timeout_seconds = _bounded_int(
+        "NVIDIA_TIMEOUT_SECONDS",
+        fallback=openrouter_timeout_seconds,
+        lower=10,
+        upper=180,
+    )
+
     configured_router_provider = (
         os.getenv("ROUTER_PROVIDER")
         or ("openrouter" if rapid_model_requests_openrouter else "")
+        or ("nvidia" if nvidia_api_key else "")
         or ("openrouter" if openrouter_api_key else "ollama")
     ).strip().lower()
-    if configured_router_provider not in {"openrouter", "ollama"}:
-        configured_router_provider = "openrouter" if openrouter_api_key else "ollama"
+    if configured_router_provider not in {"nvidia", "openrouter", "ollama"}:
+        configured_router_provider = "nvidia" if nvidia_api_key else "openrouter" if openrouter_api_key else "ollama"
 
     configured_router_model = (
         os.getenv("OLLAMA_ROUTER_MODEL")
@@ -135,6 +177,12 @@ def build_model_runtime_config(
         lower=80,
         upper=2048,
     )
+    nvidia_router_max_tokens = _bounded_int(
+        "NVIDIA_ROUTER_MAX_TOKENS",
+        fallback=openrouter_router_max_tokens,
+        lower=80,
+        upper=2048,
+    )
     ollama_router_think = _truthy_env("OLLAMA_ROUTER_THINK", fallback="false")
     gemini_backup_model = (
         os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash"
@@ -148,6 +196,10 @@ def build_model_runtime_config(
 
     return ModelRuntimeConfig(
         jarvis_thinking_budget=jarvis_thinking_budget,
+        nvidia_api_key=nvidia_api_key,
+        nvidia_router_model=nvidia_router_model,
+        nvidia_url=nvidia_url,
+        nvidia_timeout_seconds=nvidia_timeout_seconds,
         openrouter_api_key=openrouter_api_key,
         openrouter_model=openrouter_model,
         openrouter_vision_model=openrouter_vision_model,
@@ -163,6 +215,7 @@ def build_model_runtime_config(
         ollama_router_timeout_seconds=ollama_router_timeout_seconds,
         ollama_router_num_ctx=ollama_router_num_ctx,
         ollama_router_num_predict=ollama_router_num_predict,
+        nvidia_router_max_tokens=nvidia_router_max_tokens,
         openrouter_router_max_tokens=openrouter_router_max_tokens,
         ollama_router_think=ollama_router_think,
         gemini_backup_model=gemini_backup_model,

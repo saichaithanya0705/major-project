@@ -77,6 +77,9 @@ def test_plain_web_automation_still_routes_to_browser() -> None:
 async def test_route_request_calls_llm_even_for_deterministic_looking_prompt() -> None:
     model = model_module.GeminiModel.__new__(model_module.GeminiModel)
     model.router_provider = "openrouter"
+    model.nvidia_api_key = ""
+    model.nvidia_router_model = ""
+    model.nvidia_url = ""
     model.openrouter_api_key = "test-key"
     model.openrouter_url = "https://router.example.test"
     model.openrouter_router_model = "router-model"
