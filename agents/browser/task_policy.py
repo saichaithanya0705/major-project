@@ -38,6 +38,80 @@ PAGE_SUMMARY_MARKERS = (
     "overview",
     "key points",
 )
+PAGE_STRUCTURE_MARKERS = (
+    "heading",
+    "headings",
+    "section",
+    "sections",
+    "findings",
+    "key findings",
+    "takeaways",
+    "key takeaways",
+)
+PAGE_STRUCTURE_REQUEST_MARKERS = (
+    "read",
+    "list",
+    "show",
+    "give",
+    "get",
+    "extract",
+    "summarize",
+    "summarise",
+    "what are",
+    "what is",
+)
+MCP_SNAPSHOT_MARKERS = (
+    "based on the current page",
+    "page controls",
+    "use the page controls",
+    "click the",
+    "press the",
+    "choose",
+    "select",
+    "filter",
+)
+
+
+def _has_policy_marker(lowered: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if " " in marker:
+            if marker in lowered:
+                return True
+        elif re.search(rf"\b{re.escape(marker)}\b", lowered):
+            return True
+    return False
+
+
+def _wants_page_structure(lowered: str) -> bool:
+    if not _has_policy_marker(lowered, PAGE_STRUCTURE_MARKERS):
+        return False
+    current_open_context = any(
+        marker in lowered
+        for marker in (
+            "currently open page",
+            "currently open tab",
+            "already open page",
+            "already open tab",
+        )
+    )
+    if re.search(r"\bopen\b", lowered) and not current_open_context:
+        return False
+    if has_browser_interaction_intent(lowered):
+        return False
+    return _has_policy_marker(lowered, PAGE_STRUCTURE_REQUEST_MARKERS)
+
+
+def _is_text_filter_request(lowered: str) -> bool:
+    if not re.search(r"\bfilter\b", lowered):
+        return False
+    text_targets = (
+        r"page\s+text",
+        r"current\s+page\s+text",
+        r"article\s+text",
+        r"contents?",
+        r"\btext\b",
+    )
+    return any(re.search(pattern, lowered) for pattern in text_targets)
 
 
 def should_close_after_task(task: str) -> bool:
@@ -107,6 +181,8 @@ def should_extract_page_content(task: str) -> bool:
         return False
     if should_summarize_page_content(lowered):
         return True
+    if _wants_page_structure(lowered):
+        return True
 
     content_patterns = (
         r"\b(?:read|extract|scrape)\b.*\b(?:page|article|website|site|contents?|text)\b",
@@ -115,6 +191,28 @@ def should_extract_page_content(task: str) -> bool:
         r"\b(?:page|article|website|site)\b.*\b(?:says|contains)\b",
     )
     return any(re.search(pattern, lowered) for pattern in content_patterns)
+
+
+def should_use_mcp_snapshot(task: str) -> bool:
+    lowered = " ".join((task or "").lower().split())
+    if not lowered:
+        return False
+    if _is_text_filter_request(lowered):
+        return False
+    if not _has_policy_marker(lowered, MCP_SNAPSHOT_MARKERS):
+        return False
+    if extract_direct_url(lowered):
+        return False
+
+    interaction_markers = tuple(
+        marker
+        for marker in MCP_SNAPSHOT_MARKERS
+        if marker not in {"based on the current page", "page controls"}
+    )
+    has_snapshot_interaction_intent = _has_policy_marker(lowered, interaction_markers)
+    if should_extract_page_content(lowered) and not has_snapshot_interaction_intent:
+        return False
+    return True
 
 
 def should_search_before_direct_navigation(task: str) -> bool:

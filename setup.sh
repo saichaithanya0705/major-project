@@ -12,7 +12,22 @@ require_cmd() {
   fi
 }
 
+run_in_dir() {
+  local dir="$1"
+  shift
+
+  pushd "$dir" >/dev/null
+  if "$@"; then
+    popd >/dev/null
+  else
+    local status=$?
+    popd >/dev/null
+    return "$status"
+  fi
+}
+
 require_cmd python3
+require_cmd node
 require_cmd npm
 
 # Verify Python >= 3.11 (required by browser-use)
@@ -25,6 +40,14 @@ if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }
   exit 1
 fi
 echo "[setup] Using Python $PY_VERSION"
+
+NODE_VERSION=$(node -p 'process.versions.node')
+NODE_MAJOR="${NODE_VERSION%%.*}"
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "[setup] ERROR: Node.js >= 18 required for Playwright MCP (found $NODE_VERSION)." >&2
+  exit 1
+fi
+echo "[setup] Using Node.js $NODE_VERSION"
 
 cd "$ROOT_DIR"
 
@@ -56,13 +79,14 @@ echo "[setup] Clearing Python bytecode cache..."
 find "$ROOT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 echo "[setup] Installing UI dependencies..."
-cd "$ROOT_DIR/ui"
-npm install
+run_in_dir "$ROOT_DIR/ui" npm install
+
+echo "[setup] Installing Playwright MCP dependencies..."
+run_in_dir "$ROOT_DIR/integrations/playwright_mcp" npm install
 
 echo "[setup] Installing Gemini CLI dependencies and building..."
-cd "$ROOT_DIR/agents/cua_cli/gemini-cli"
-npm install
-npm run build
+run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm install
+run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm run build
 
 echo "[setup] Done."
 echo "[setup] Activate with: source .venv/bin/activate"

@@ -24,6 +24,7 @@ from agents.browser.task_policy import (
     should_fallback_to_playwright,
     should_reuse_existing_page,
     should_summarize_page_content,
+    should_use_mcp_snapshot,
     should_use_playwright_fast_path,
     steer_task_for_existing_page,
     task_to_search_query,
@@ -74,7 +75,33 @@ def run_checks() -> None:
     assert should_extract_page_content("fetch me the summary of world war 1 wikipedia page")
     assert should_summarize_page_content("open https://example.com and summarize the page")
     assert should_extract_page_content("read the contents of the currently open page")
+    assert should_extract_page_content("read the heading on the current page")
+    assert should_extract_page_content("read the headings on the current page")
+    assert should_extract_page_content("show the section for this article")
+    assert should_extract_page_content("show me the key findings from this article")
+    assert should_extract_page_content("what are the sections on this website")
+    assert should_extract_page_content("give me the takeaways from this article")
+    assert should_extract_page_content("show the key takeaways from this report")
+    assert should_extract_page_content("show me the key findings from the currently open page")
+    assert should_extract_page_content("list the sections on the currently open page")
+    assert should_extract_page_content("give me the takeaways from the already open page")
     assert not should_extract_page_content("open youtube.com")
+    assert not should_extract_page_content("click the headings menu")
+    assert not should_extract_page_content("select the Findings tab")
+    assert not should_extract_page_content("open the pricing section")
+    assert not should_extract_page_content("open the Get Started section")
+    assert not should_extract_page_content("open the Read Later section")
+    assert not should_use_mcp_snapshot("")
+    assert should_use_mcp_snapshot("click the submit button based on the current page")
+    assert should_use_mcp_snapshot("press the save button based on the current page")
+    assert should_use_mcp_snapshot("choose the pending status filter")
+    assert should_use_mcp_snapshot("select the first result based on the current page")
+    assert should_use_mcp_snapshot("use the page controls to filter the results")
+    assert not should_use_mcp_snapshot("filter the current page text for error messages")
+    assert not should_use_mcp_snapshot("open https://example.com")
+    assert not should_use_mcp_snapshot("summarize https://example.com")
+    assert not should_use_mcp_snapshot("open https://example.com and click the sign in button")
+    assert not should_use_mcp_snapshot("open https://example.com and select the pricing tab")
     assert not should_use_playwright_fast_path("open https://example.com and summarize the page")
 
     summary = build_fallback_summary(

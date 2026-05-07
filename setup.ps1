@@ -15,7 +15,11 @@ function Invoke-Step {
     )
 
     Write-Host "[setup] $Message"
+    $global:LASTEXITCODE = 0
     & $Action
+    if ($null -ne $global:LASTEXITCODE -and $global:LASTEXITCODE -ne 0) {
+        throw "[setup] Command failed during '$Message' with exit code $global:LASTEXITCODE."
+    }
 }
 
 function Require-Command {
@@ -27,6 +31,7 @@ function Require-Command {
 }
 
 Require-Command $PythonCommand
+Require-Command "node"
 Require-Command "npm"
 
 $versionOutput = & $PythonCommand -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
@@ -38,6 +43,14 @@ if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 11)) {
 }
 
 Write-Host "[setup] Using Python $versionOutput"
+
+$nodeVersionOutput = & node -p "process.versions.node"
+$nodeVersionParts = $nodeVersionOutput.Trim().Split(".")
+$nodeMajor = [int]$nodeVersionParts[0]
+if ($nodeMajor -lt 18) {
+    throw "[setup] Node.js >= 18 required for Playwright MCP (found $nodeVersionOutput)."
+}
+Write-Host "[setup] Using Node.js $nodeVersionOutput"
 
 if (-not (Test-Path $venvDir)) {
     Invoke-Step "Creating project virtual environment at $venvDir" {
@@ -81,6 +94,16 @@ Invoke-Step "Clearing Python bytecode cache..." {
 Push-Location (Join-Path $root "ui")
 try {
     Invoke-Step "Installing UI dependencies..." {
+        npm install
+    }
+}
+finally {
+    Pop-Location
+}
+
+Push-Location (Join-Path $root "integrations\playwright_mcp")
+try {
+    Invoke-Step "Installing Playwright MCP dependencies..." {
         npm install
     }
 }

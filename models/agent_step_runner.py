@@ -28,11 +28,29 @@ def _extract_browser_message(history: Any) -> str | None:
     if history is None:
         return None
 
+    def _page_context_text(container: dict[str, Any]) -> str | None:
+        page_context = container.get("page_context")
+        if isinstance(page_context, dict):
+            for key in ("summary", "content"):
+                value = page_context.get(key)
+                if isinstance(value, str) and value.strip():
+                    text = value.strip()
+                    return text if len(text) <= 1400 else f"{text[:1397]}..."
+
+        result = container.get("result")
+        if isinstance(result, dict) and result is not container:
+            return _page_context_text(result)
+        return None
+
     if isinstance(history, str):
         cleaned = _clean_text(history, "")
         return cleaned if cleaned else None
 
     if isinstance(history, dict):
+        page_context_message = _page_context_text(history)
+        if page_context_message:
+            return page_context_message
+
         for key in ("final_result", "summary", "result", "message"):
             value = history.get(key)
             if isinstance(value, str) and value.strip():

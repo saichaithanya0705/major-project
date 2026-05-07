@@ -18,6 +18,9 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from typing import Any, Optional
 
+from agents.browser.controller import PlaywrightBrowserController
+from agents.browser.mcp_client import PlaywrightMcpClient
+from agents.browser.page_context import format_page_context_response
 from agents.browser.task_policy import (
     build_fallback_summary,
     extract_available_file_paths_from_task,
@@ -32,6 +35,7 @@ from agents.browser.task_policy import (
     should_search_before_direct_navigation,
     should_reuse_existing_page,
     should_summarize_page_content,
+    should_use_mcp_snapshot,
     should_use_playwright_fast_path,
     steer_task_for_existing_page,
     task_to_search_query,
@@ -63,6 +67,8 @@ class BrowserAgent:
     _shared_playwright_page: Any = None
     _shared_playwright_home: Optional[str] = None
     _shared_playwright_headless: bool = False
+    _shared_playwright_controller: Any = None
+    _shared_playwright_mcp_client: Any = None
     _cleanup_registered: bool = False
     _browser_use_resolution_checked: bool = False
     _active_browser_use_agents: set[Any] = set()
@@ -231,6 +237,26 @@ class BrowserAgent:
 
     @classmethod
     async def _close_shared_resources(cls) -> None:
+        controller = cls._shared_playwright_controller
+        cls._shared_playwright_controller = None
+        if controller is not None:
+            try:
+                close_result = controller.close()
+                if hasattr(close_result, "__await__"):
+                    await close_result
+            except Exception:
+                pass
+
+        mcp_client = cls._shared_playwright_mcp_client
+        cls._shared_playwright_mcp_client = None
+        if mcp_client is not None:
+            try:
+                close_result = mcp_client.close()
+                if hasattr(close_result, "__await__"):
+                    await close_result
+            except Exception:
+                pass
+
         if cls._shared_backend == "browser_use":
             session = cls._shared_browser_use_session
             if session is not None:
@@ -280,6 +306,41 @@ class BrowserAgent:
             cls._shared_playwright_headless = False
 
         cls._shared_backend = None
+
+    @classmethod
+    def _get_or_create_playwright_controller(cls) -> Any:
+        if cls._shared_playwright_controller is None:
+            cls._shared_playwright_controller = PlaywrightBrowserController()
+        return cls._shared_playwright_controller
+
+    @classmethod
+    def _get_or_create_playwright_mcp_client(cls) -> PlaywrightMcpClient:
+        client = cls._shared_playwright_mcp_client
+        if client is None:
+            client = PlaywrightMcpClient()
+            cls._shared_playwright_mcp_client = client
+        return client
+
+    @classmethod
+    def _should_use_controller_page_context(cls, task: str, direct_url: str | None) -> bool:
+        if not should_extract_page_content(task):
+            return False
+        if has_browser_interaction_intent(task):
+            return False
+        if direct_url:
+            return True
+        if cls._shared_backend is not None:
+            return False
+        controller = cls._shared_playwright_controller
+        if controller is None or not is_current_tab_context_task(task):
+            return False
+        has_open_page = getattr(controller, "has_open_page", None)
+        if not callable(has_open_page):
+            return False
+        try:
+            return bool(has_open_page())
+        except Exception:
+            return False
 
     async def _get_or_create_browser_use_session(self):
         type(self)._ensure_external_browser_use_resolution()
@@ -358,6 +419,27 @@ class BrowserAgent:
         # Keep browser sessions alive for the full process lifetime.
         close_when_done = False
 
+        if cls._should_use_controller_page_context(task, original_direct_url):
+            try:
+                return await self._execute_with_controller_page_context(
+                    task,
+                    pre_extracted_url=original_direct_url,
+                )
+            except Exception as exc:
+                print(f"[Browser Agent][controller] page context extraction failed: {exc}")
+
+        if (
+            cls._shared_backend is None
+            and cls._shared_playwright_controller is None
+            and self._should_use_mcp_snapshot(task)
+        ):
+            try:
+                mcp_result = await self._execute_with_playwright_mcp_snapshot(task)
+                if mcp_result.get("success"):
+                    return mcp_result
+            except Exception as exc:
+                print(f"[Browser Agent][mcp] snapshot extraction failed: {exc}")
+
         # Once a backend is chosen, keep using it so all browser actions stay in
         # the same persistent browser session.
         if cls._shared_backend == "browser_use":
@@ -405,6 +487,69 @@ class BrowserAgent:
                         f"bootstrap_error={exc}; fallback_error={fallback_exc}"
                     ),
                 }
+
+    async def _execute_with_controller_page_context(
+        self,
+        task: str,
+        *,
+        pre_extracted_url: str | None,
+    ) -> dict[str, Any]:
+        controller = type(self)._get_or_create_playwright_controller()
+        if pre_extracted_url:
+            context = await controller.navigate_and_extract(pre_extracted_url)
+        else:
+            page, _used_headless = await controller.get_or_create_page()
+            selected = await controller.select_relevant_existing_page(
+                task,
+                default_page=page,
+            )
+            context = await controller.extract_context(selected or page)
+
+        summary = format_page_context_response(task, context)
+        headings = list(getattr(context, "headings", []) or [])
+        return {
+            "success": True,
+            "result": {
+                "summary": summary,
+                "mode": "playwright_controller",
+                "task": task,
+                "url": getattr(context, "url", ""),
+                "title": getattr(context, "title", ""),
+                "headings": headings,
+                "complete": True,
+            },
+            "error": None,
+            "complete": True,
+        }
+
+    async def _execute_with_playwright_mcp_snapshot(self, task: str) -> dict[str, Any]:
+        client = type(self)._get_or_create_playwright_mcp_client()
+        if not await client.health_check():
+            return {
+                "success": False,
+                "result": None,
+                "error": "Playwright MCP is unavailable.",
+                "complete": False,
+            }
+
+        snapshot = await client.snapshot()
+        summary = (
+            "Playwright MCP captured the current page structure. "
+            "Another browser action is needed to complete the task.\n\n"
+            f"Snapshot:\n{snapshot}"
+        )
+        return {
+            "success": True,
+            "result": {
+                "summary": summary,
+                "mode": "playwright_mcp_snapshot",
+                "task": task,
+                "snapshot": snapshot,
+                "complete": False,
+            },
+            "error": None,
+            "complete": False,
+        }
 
     async def _execute_with_browser_use(self, task: str, close_when_done: bool) -> dict[str, Any]:
         type(self)._ensure_external_browser_use_resolution()
@@ -722,6 +867,10 @@ class BrowserAgent:
     @staticmethod
     def _should_use_playwright_fast_path(task: str) -> bool:
         return should_use_playwright_fast_path(task)
+
+    @staticmethod
+    def _should_use_mcp_snapshot(task: str) -> bool:
+        return should_use_mcp_snapshot(task)
 
     @staticmethod
     def _should_search_before_direct_navigation(task: str) -> bool:

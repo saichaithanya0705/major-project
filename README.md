@@ -34,7 +34,8 @@ Windows:
 .\.venv\Scripts\python -m pip install -r requirements.txt
 .\.venv\Scripts\python -m playwright install chromium
 cd ui; npm install
-cd ../agents/cua_cli/gemini-cli; npm install; npm run build
+cd ../integrations/playwright_mcp; npm install
+cd ../../agents/cua_cli/gemini-cli; npm install; npm run build
 ```
 
 macOS / Linux:
@@ -43,8 +44,11 @@ macOS / Linux:
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium
 cd ui && npm install
-cd ../agents/cua_cli/gemini-cli && npm install && npm run build
+cd ../integrations/playwright_mcp && npm install
+cd ../../agents/cua_cli/gemini-cli && npm install && npm run build
 ```
+
+The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.73). Runtime browser tasks should use that local install instead of downloading MCP dynamically with `npx` or `latest`.
 
 3. Create your .env file for your keys
 ```
