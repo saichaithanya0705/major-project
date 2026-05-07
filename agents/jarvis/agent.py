@@ -7,6 +7,7 @@ timed annotations (boxes, text, pointers) to explain what's on screen.
 from PIL import Image
 from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
 from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
+from agents.jarvis.policy import validate_jarvis_function_calls
 
 
 class JarvisAgent:
@@ -72,18 +73,19 @@ class JarvisAgent:
             function_calls = [part.function_call for part in parts if part.function_call]
 
             if function_calls:
-                for function_call in function_calls:
-                    print(f"\n[JARVIS] Function: {function_call.name}")
-                    print(f"[JARVIS] Arguments: {function_call.args}")
+                validated_calls = validate_jarvis_function_calls(function_calls, self.tool_map)
+                for tool_name, args in validated_calls:
+                    print(f"\n[JARVIS] Function: {tool_name}")
+                    print(f"[JARVIS] Arguments: {args}")
 
-                    tool = self.tool_map.get(function_call.name)
+                    tool = self.tool_map.get(tool_name)
                     if tool:
-                        tool(**function_call.args)
+                        tool(**args)
                     else:
                         return {
                             "success": False,
                             "result": None,
-                            "error": f"Unknown tool: {function_call.name}"
+                            "error": f"Unknown tool: {tool_name}"
                         }
 
             return {

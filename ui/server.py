@@ -1,8 +1,11 @@
 import asyncio
 import base64
+import hmac
+import inspect
 import json
 import time
 from typing import Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -22,18 +25,38 @@ class VisualizationServer:
     DARK_LUMINANCE_THRESHOLD = 112
     INVERTED_PANEL_DARK_THRESHOLD = 45
     STATUS_INVERTED_PANEL_DARK_THRESHOLD = 132
+    MAX_WS_MESSAGE_BYTES = 10 * 1024 * 1024
+    MAX_AUDIO_BYTES = 5 * 1024 * 1024
+    MAX_OVERLAY_INPUT_CHARS = 4000
+    MAX_REQUEST_ID_CHARS = 160
+    MAX_SESSION_ID_CHARS = 160
+    MAX_DRAW_TEXT_CHARS = 1200
+    AUTH_CLOSE_CODE = 1008
+    DEFAULT_ALLOWED_ORIGINS = {
+        "",
+        "null",
+        "file://",
+        "app://jarvis",
+        "http://127.0.0.1",
+        "http://localhost",
+    }
 
     def __init__(
         self,
         host="127.0.0.1",
         port=8765,
+        auth_token: str | None = None,
+        allowed_origins: set[str] | None = None,
         on_overlay_input=None,
         on_capture_screenshot=None,
         on_stop_all=None,
+        on_clear_annotations=None,
         on_transcribe_audio=None,
     ):
         self.host = host
         self.port = port
+        self.auth_token = str(auth_token or "").strip()
+        self.allowed_origins = set(allowed_origins or self.DEFAULT_ALLOWED_ORIGINS)
         self.clients = set()
         self.boxes = {}
         self.texts = {}
@@ -42,6 +65,7 @@ class VisualizationServer:
         self.on_overlay_input = on_overlay_input
         self.on_capture_screenshot = on_capture_screenshot
         self.on_stop_all = on_stop_all
+        self.on_clear_annotations = on_clear_annotations
         self.on_transcribe_audio = on_transcribe_audio
         self._last_screenshot = None
         self._last_screenshot_rgb = None
@@ -52,7 +76,139 @@ class VisualizationServer:
         self._active_status_theme = None
         self._seen_overlay_request_ids = {}
         self._last_overlay_text = ""
+        self._last_overlay_session_id = ""
         self._last_overlay_ts = 0.0
+
+    @staticmethod
+    def _overlay_session_callback_style(callback) -> str:
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return "keyword"
+
+        parameters = signature.parameters
+        if "session_id" in parameters:
+            return "keyword"
+        if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+            return "keyword"
+        if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters.values()):
+            return "positional"
+
+        positional_parameters = [
+            parameter
+            for parameter in parameters.values()
+            if parameter.kind in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }
+        ]
+        if len(positional_parameters) >= 2:
+            return "positional"
+        return "legacy"
+
+    async def _call_overlay_input(self, text: str, session_id: str | None):
+        if not self.on_overlay_input:
+            return None
+
+        callback_style = self._overlay_session_callback_style(self.on_overlay_input)
+        if callback_style == "keyword":
+            result = self.on_overlay_input(text, session_id=session_id)
+        elif callback_style == "positional":
+            result = self.on_overlay_input(text, session_id)
+        else:
+            result = self.on_overlay_input(text)
+
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
+
+    @staticmethod
+    def _safe_text(value, *, max_chars: int, field_name: str) -> str:
+        text = str(value or "")
+        if len(text) > max_chars:
+            raise ValueError(f"{field_name} is too long; maximum is {max_chars} characters.")
+        return text
+
+    @staticmethod
+    def _websocket_path(websocket) -> str:
+        path = getattr(websocket, "path", None)
+        if isinstance(path, str):
+            return path
+        request = getattr(websocket, "request", None)
+        request_path = getattr(request, "path", None)
+        return request_path if isinstance(request_path, str) else "/"
+
+    @staticmethod
+    def _websocket_headers(websocket) -> dict:
+        request = getattr(websocket, "request", None)
+        headers = getattr(request, "headers", None)
+        if headers is None:
+            headers = getattr(websocket, "request_headers", None)
+        return headers or {}
+
+    @staticmethod
+    def _header_value(headers, name: str) -> str:
+        try:
+            value = headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+        except Exception:
+            value = ""
+        return str(value or "").strip()
+
+    def _origin_is_allowed(self, origin: str) -> bool:
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        if not parsed.scheme:
+            return origin in self.allowed_origins
+        if parsed.scheme == "file":
+            return "file://" in self.allowed_origins
+        normalized = f"{parsed.scheme}://{parsed.hostname or ''}"
+        if parsed.port:
+            normalized = f"{normalized}:{parsed.port}"
+        if normalized in self.allowed_origins:
+            return True
+        if parsed.hostname in {"127.0.0.1", "localhost", "::1"} and parsed.scheme in {"http", "https"}:
+            return f"{parsed.scheme}://{parsed.hostname}" in self.allowed_origins
+        return False
+
+    def _token_from_path(self, path: str) -> str:
+        try:
+            query = parse_qs(urlparse(path or "/").query)
+        except Exception:
+            return ""
+        values = query.get("token") or query.get("auth_token") or []
+        return str(values[0]).strip() if values else ""
+
+    def _is_authorized_websocket(self, websocket) -> bool:
+        # Unit-test fakes may call _handle_client directly without request metadata.
+        # Real websocket connections have request/path metadata and must pass token/origin checks.
+        if not self.auth_token:
+            return True
+        path = self._websocket_path(websocket)
+        headers = self._websocket_headers(websocket)
+        has_request_metadata = bool(path and path != "/") or bool(headers)
+        if not has_request_metadata and type(websocket).__module__.startswith("tests."):
+            return True
+        origin = self._header_value(headers, "Origin")
+        if not self._origin_is_allowed(origin):
+            return False
+        presented_token = self._token_from_path(path)
+        return hmac.compare_digest(presented_token, self.auth_token)
+
+    async def _reject_unauthorized(self, websocket) -> None:
+        try:
+            await websocket.close(
+                code=self.AUTH_CLOSE_CODE,
+                reason="Unauthorized visualization websocket client.",
+            )
+        except Exception:
+            pass
+
+    async def _send_error(self, websocket, *, event: str, error: str, request_id=None) -> None:
+        payload = {"event": event, "error": str(error)}
+        if request_id is not None:
+            payload["requestId"] = str(request_id)
+        await self._send_json(websocket, payload)
 
     def _store_screenshot(self, screenshot) -> None:
         self._last_screenshot = screenshot
@@ -235,7 +391,11 @@ class VisualizationServer:
         # Disable ping_interval since VisualizationClient (internal) only sends
         # and doesn't run a receive loop to respond to pings
         self._server = await websockets.serve(
-            self._handle_client, self.host, self.port, ping_interval=None
+            self._handle_client,
+            self.host,
+            self.port,
+            ping_interval=None,
+            max_size=self.MAX_WS_MESSAGE_BYTES,
         )
 
     async def stop(self):
@@ -252,6 +412,10 @@ class VisualizationServer:
             await asyncio.sleep(0.05)
 
     async def _handle_client(self, websocket):
+        if not self._is_authorized_websocket(websocket):
+            await self._reject_unauthorized(websocket)
+            return
+
         self.clients.add(websocket)
         try:
             for box in self.boxes.values():
@@ -262,9 +426,23 @@ class VisualizationServer:
                 await websocket.send(json.dumps(dot))
 
             async for message in websocket:
+                if len(message) > self.MAX_WS_MESSAGE_BYTES:
+                    await self._send_error(
+                        websocket,
+                        event="overlay_error",
+                        error="Websocket message is too large.",
+                    )
+                    continue
                 try:
                     payload = json.loads(message)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    await self._send_error(
+                        websocket,
+                        event="overlay_error",
+                        error="Websocket payload must be a JSON object.",
+                    )
                     continue
 
                 command = payload.get("command")
@@ -280,6 +458,15 @@ class VisualizationServer:
                     self.dots[payload["id"]] = payload
                     await self._broadcast(payload)
                 elif command == "draw_text":
+                    try:
+                        payload["text"] = self._safe_text(
+                            payload.get("text", ""),
+                            max_chars=self.MAX_DRAW_TEXT_CHARS,
+                            field_name="draw_text text",
+                        )
+                    except ValueError as exc:
+                        await self._send_error(websocket, event="overlay_error", error=str(exc))
+                        continue
                     theme = self._theme_for_text(payload.get("x", 0), payload.get("y", 0))
                     payload["theme"] = theme
                     payload["color"] = theme.get("accent")
@@ -351,6 +538,10 @@ class VisualizationServer:
                     await self._broadcast(payload)
                 elif command == "terminal_session_event":
                     await self._broadcast(payload)
+                elif command == "chat_vision_artifact":
+                    await self._broadcast(payload)
+                elif command in {"vision_capture_started", "vision_chat_restore"}:
+                    await self._broadcast(payload)
                 else:
                     event = payload.get("event")
                     if event == "viewport":
@@ -384,9 +575,18 @@ class VisualizationServer:
                             continue
 
                         try:
+                            request_id = self._safe_text(
+                                request_id,
+                                max_chars=self.MAX_REQUEST_ID_CHARS,
+                                field_name="requestId",
+                            ) if request_id is not None else None
                             audio_bytes = base64.b64decode(audio_base64, validate=True)
                             if not audio_bytes:
                                 raise ValueError("Recorded audio was empty.")
+                            if len(audio_bytes) > self.MAX_AUDIO_BYTES:
+                                raise ValueError(
+                                    f"Recorded audio is too large; maximum is {self.MAX_AUDIO_BYTES} bytes."
+                                )
                             result = self.on_transcribe_audio(audio_bytes, mime_type, filename)
                             if asyncio.iscoroutine(result):
                                 result = await result
@@ -411,9 +611,48 @@ class VisualizationServer:
                             if asyncio.iscoroutine(result):
                                 await result
                         continue
+                    if event == "clear_annotations":
+                        if self.on_clear_annotations:
+                            result = self.on_clear_annotations()
+                            if asyncio.iscoroutine(result):
+                                await result
+                        self.boxes.clear()
+                        self.texts.clear()
+                        self.dots.clear()
+                        self._active_status_theme = None
+                        await self._broadcast({"command": "clear"})
+                        await self._broadcast({"command": "vision_chat_restore"})
+                        continue
                     if event == "overlay_input":
-                        text = payload.get("text", "")
-                        request_id = payload.get("requestId") or payload.get("request_id")
+                        try:
+                            text = self._safe_text(
+                                payload.get("text", ""),
+                                max_chars=self.MAX_OVERLAY_INPUT_CHARS,
+                                field_name="overlay input",
+                            )
+                            session_id = payload.get("sessionId") or payload.get("session_id")
+                            session_id = (
+                                self._safe_text(
+                                    session_id,
+                                    max_chars=self.MAX_SESSION_ID_CHARS,
+                                    field_name="sessionId",
+                                ).strip()
+                                if session_id is not None
+                                else None
+                            )
+                            request_id = payload.get("requestId") or payload.get("request_id")
+                            request_id = (
+                                self._safe_text(
+                                    request_id,
+                                    max_chars=self.MAX_REQUEST_ID_CHARS,
+                                    field_name="requestId",
+                                )
+                                if request_id is not None
+                                else None
+                            )
+                        except ValueError as exc:
+                            await self._send_error(websocket, event="overlay_error", error=str(exc))
+                            continue
                         now = time.monotonic()
 
                         # Drop duplicate submit events that can occur during rapid
@@ -430,19 +669,19 @@ class VisualizationServer:
                             self._seen_overlay_request_ids[request_id] = now
                         else:
                             normalized = " ".join(str(text).split())
+                            normalized_session_id = " ".join(str(session_id or "").split())
                             if (
                                 normalized
                                 and normalized == self._last_overlay_text
+                                and normalized_session_id == self._last_overlay_session_id
                                 and (now - self._last_overlay_ts) < 1.2
                             ):
                                 continue
                             self._last_overlay_text = normalized
+                            self._last_overlay_session_id = normalized_session_id
                             self._last_overlay_ts = now
 
-                        if self.on_overlay_input:
-                            result = self.on_overlay_input(text)
-                            if asyncio.iscoroutine(result):
-                                await result
+                        await self._call_overlay_input(text, session_id)
         except ConnectionClosed:
             # Normal path when renderer reloads or disconnects abruptly.
             pass

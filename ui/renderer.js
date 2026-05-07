@@ -36,7 +36,7 @@ const THINKING_STATUS_TEXT = buildLifecycleSnapshot(EXECUTION_PHASES.ROUTING, {
 const STOPPED_STATUS_TEXT = buildLifecycleSnapshot(EXECUTION_PHASES.STOPPED).text;
 const NEUTRAL_RING_COLOR = '#AEB4BF';
 const NEUTRAL_ACCENT_COLOR = '#BCC3CF';
-const OVERLAY_VISIBLE_SOURCES = new Set(['jarvis']);
+const OVERLAY_VISIBLE_SOURCES = new Set();
 const platform = window.api.getPlatform();
 let canvasBackgroundColor = null;
 let lastHoverState = false;
@@ -45,6 +45,7 @@ let isOverlayTextSelectionDragging = false;
 let overlayModelName = 'Agent';
 let lastDirectResponseTheme = null;
 let lastMouseSyncTs = 0;
+let annotationDismissButton = null;
 
 function shouldRenderOnOverlay(source) {
   const value = typeof source === 'string' ? source.trim().toLowerCase() : '';
@@ -173,6 +174,60 @@ function drawAll() {
     ctx.fill();
   }
 
+}
+
+function hasVisibleAnnotations() {
+  if (dots.size > 0 || boxes.size > 0) return true;
+  for (const id of texts.keys()) {
+    if (id !== DIRECT_RESPONSE_ID) return true;
+  }
+  return false;
+}
+
+function ensureAnnotationDismissButton() {
+  if (annotationDismissButton) return annotationDismissButton;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'annotation-dismiss';
+  button.textContent = 'X';
+  button.setAttribute('aria-label', 'Clear annotations');
+  button.title = 'Clear annotations';
+  button.hidden = true;
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearAnnotationsNow();
+  });
+  document.body.appendChild(button);
+  annotationDismissButton = button;
+  return button;
+}
+
+function updateAnnotationDismissButton() {
+  const hasAnnotations = hasVisibleAnnotations();
+  if (!annotationDismissButton && !hasAnnotations) return;
+  const button = ensureAnnotationDismissButton();
+  button.hidden = !hasAnnotations;
+  button.setAttribute('aria-hidden', hasAnnotations ? 'false' : 'true');
+}
+
+function isInsideAnnotationDismiss(x, y) {
+  if (!annotationDismissButton || annotationDismissButton.hidden) return false;
+  const rect = annotationDismissButton.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function clearAnnotationsNow() {
+  clearAll();
+  sendMessage({ event: 'clear_annotations' });
+  lastHoverState = false;
+  lastHitTestState = false;
+  if (window.api?.setWindowInteractive) {
+    window.api.setWindowInteractive(false);
+  }
+  if (window.api?.reportHitTest) {
+    window.api.reportHitTest(false);
+  }
 }
 
 function getTranslateAxis(value, axis) {
@@ -417,6 +472,10 @@ function isOverOverlayElement(x, y) {
   const activeEl = document.activeElement;
   const inputFocused = activeEl instanceof Element && !!activeEl.closest('#command-overlay');
 
+  if (isInsideAnnotationDismiss(x, y)) {
+    return true;
+  }
+
   // While command overlay is open, only the command input strip should
   // capture interaction. Everything else stays click-through.
   if (overlayInputActive) {
@@ -448,8 +507,6 @@ function isOverOverlayElement(x, y) {
   if (isOverlayTextSelectionDragging) {
     return true;
   }
-
-  if (checkHit(x, y)) return true;
 
   if (inputWrap) {
     const rect = inputWrap.getBoundingClientRect();
@@ -499,11 +556,13 @@ function syncWindowInteractivity(isOver) {
 
 function upsertDot(dot) {
   dots.set(dot.id, dot);
+  updateAnnotationDismissButton();
   drawAll();
 }
 
 function removeDot(id) {
   dots.delete(id);
+  updateAnnotationDismissButton();
   drawAll();
 }
 
@@ -516,6 +575,7 @@ function upsertBox(box) {
   }
   entry.data = box;
   updateOverlayBoxElement(entry.el, box);
+  updateAnnotationDismissButton();
 }
 
 function removeBox(id) {
@@ -524,6 +584,7 @@ function removeBox(id) {
     entry.el.remove();
   }
   boxes.delete(id);
+  updateAnnotationDismissButton();
 }
 
 function upsertText(text) {
@@ -569,6 +630,9 @@ function upsertText(text) {
       startFlush(entry, text.text);
     }
   }
+  if (text.id !== DIRECT_RESPONSE_ID) {
+    updateAnnotationDismissButton();
+  }
 }
 
 function removeText(id) {
@@ -580,6 +644,7 @@ function removeText(id) {
   if (id === DIRECT_RESPONSE_ID) {
     lastDirectResponseTheme = null;
   }
+  updateAnnotationDismissButton();
 }
 
 function clearAll() {
@@ -592,6 +657,7 @@ function clearAll() {
   lastDirectResponseTheme = null;
   boxLayer?.replaceChildren();
   textLayer.replaceChildren();
+  updateAnnotationDismissButton();
   drawAll();
 }
 
@@ -681,7 +747,7 @@ let reconnectTimer = null;
 let lastSocketLogTime = 0;
 
 async function getSocketTarget() {
-  const fallback = { host: '127.0.0.1', port: 8765 };
+  const fallback = { host: '127.0.0.1', port: 8765, authToken: '' };
   try {
     if (!window.api?.getServerConfig) {
       return fallback;
@@ -690,7 +756,8 @@ async function getSocketTarget() {
     const host = typeof config?.host === 'string' && config.host.trim() ? config.host.trim() : fallback.host;
     const portValue = Number(config?.port);
     const port = Number.isInteger(portValue) && portValue > 0 ? portValue : fallback.port;
-    return { host, port };
+    const authToken = typeof config?.authToken === 'string' ? config.authToken.trim() : '';
+    return { host, port, authToken };
   } catch (error) {
     return fallback;
   }
@@ -729,7 +796,8 @@ function scheduleReconnect() {
 
 async function connectSocket() {
   const target = await getSocketTarget();
-  const wsUrl = `ws://${target.host}:${target.port}`;
+  const authQuery = target.authToken ? `?${new URLSearchParams({ token: target.authToken }).toString()}` : '';
+  const wsUrl = `ws://${target.host}:${target.port}${authQuery}`;
   socket = new WebSocket(wsUrl);
   socket.addEventListener('open', () => {
     logSocketEvent(`[renderer] websocket open (${wsUrl})`);

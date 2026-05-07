@@ -58,6 +58,11 @@ from models.routing_policy import (
 # Import JARVIS agent components
 from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
 from agents.jarvis.tool_declarations import JARVIS_FUNCTION_DECLARATIONS
+from agents.jarvis.policy import validate_jarvis_function_calls
+from ui.visualization_api.chat_visibility import (
+    send_vision_capture_started,
+    send_vision_chat_restore,
+)
 
 # Attempt to import Gemini libraries
 try:
@@ -163,17 +168,42 @@ def get_stored_screenshot():
     return RAPID_SESSION_STATE.consume_or_capture_screenshot()
 
 
-def _append_rapid_history(role: str, text: str, source: str) -> None:
+async def prepare_vision_screenshot(*, keep_chat_hidden: bool = False):
+    """Hide the chat window before taking a fresh screenshot for vision agents."""
+    try:
+        await send_vision_capture_started()
+    except Exception as exc:
+        print(f"[VisionCapture] Chat hide request skipped: {exc}")
+
+    await asyncio.sleep(0.25)
+    screenshot = RAPID_SESSION_STATE.capture_fresh_screenshot()
+
+    if not keep_chat_hidden:
+        try:
+            await send_vision_chat_restore()
+        except Exception as exc:
+            print(f"[VisionCapture] Chat restore request skipped: {exc}")
+
+    return screenshot
+
+
+def _append_rapid_history(
+    role: str,
+    text: str,
+    source: str,
+    session_id: str | None = None,
+) -> None:
     RAPID_SESSION_STATE.append_history(
         role=role,
         text=text,
         source=source,
         cleaner=lambda value: _clean_text(value, "", max_len=600),
+        session_id=session_id,
     )
 
 
-def _format_rapid_history_for_prompt() -> str:
-    return RAPID_SESSION_STATE.format_history_for_prompt()
+def _format_rapid_history_for_prompt(session_id: str | None = None) -> str:
+    return RAPID_SESSION_STATE.format_history_for_prompt(session_id=session_id)
 
 
 async def _run_routed_agent_step(
@@ -181,6 +211,7 @@ async def _run_routed_agent_step(
     routing_result: dict[str, Any],
     jarvis_model: str,
     request_id: str,
+    prepare_vision_screenshot=None,
 ) -> dict[str, Any]:
     return await run_routed_agent_step(
         model=model,
@@ -188,6 +219,7 @@ async def _run_routed_agent_step(
         jarvis_model=jarvis_model,
         request_id=request_id,
         get_stored_screenshot=get_stored_screenshot,
+        prepare_vision_screenshot=prepare_vision_screenshot or globals()["prepare_vision_screenshot"],
     )
 
 
@@ -195,13 +227,19 @@ async def _run_routed_agent_step(
 # MAIN ENTRY POINT
 # ================================================================================
 
-async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model: str):
+async def call_gemini(
+    user_prompt: str,
+    rapid_response_model: str,
+    jarvis_model: str,
+    session_id: str | None = None,
+):
     """
     Main entry point - uses two-tier model system:
     1. Rapid response model (router) decides how to handle the request
     2. Routes to appropriate agent: JARVIS, Browser, or Desktop
     """
     request_id = new_assistant_request_id()
+    rapid_session_id = RAPID_SESSION_STATE.normalize_session_id(session_id)
     log_assistant_event(
         "request_started",
         request_id=request_id,
@@ -209,16 +247,24 @@ async def call_gemini(user_prompt: str, rapid_response_model: str, jarvis_model:
         metadata={
             "rapid_response_model": rapid_response_model,
             "jarvis_model": jarvis_model,
+            "session_id": rapid_session_id,
         },
     )
 
     try:
+        def append_session_history(role: str, text: str, source: str) -> None:
+            _append_rapid_history(role, text, source, session_id=rapid_session_id)
+
+        def format_session_history_for_prompt() -> str:
+            return _format_rapid_history_for_prompt(session_id=rapid_session_id)
+
         deps = RapidOrchestratorDeps(
             model_factory=GeminiModel,
-            append_rapid_history=_append_rapid_history,
-            format_rapid_history_for_prompt=_format_rapid_history_for_prompt,
+            append_rapid_history=append_session_history,
+            format_rapid_history_for_prompt=format_session_history_for_prompt,
             run_routed_agent_step=_run_routed_agent_step,
             get_stored_screenshot=get_stored_screenshot,
+            prepare_vision_screenshot=prepare_vision_screenshot,
             clean_text=lambda value, fallback, max_len: _clean_text(
                 value,
                 fallback,
@@ -881,20 +927,22 @@ class GeminiModel:
         parts = response.candidates[0].content.parts
         function_calls = [part.function_call for part in parts if part.function_call]
         summary_text = None
+        validated_calls = []
 
         if function_calls:
-            for function_call in function_calls:
-                print(f"\n[JARVIS] Function: {function_call.name}")
-                print(f"[JARVIS] Arguments: {function_call.args}")
+            validated_calls = validate_jarvis_function_calls(function_calls, JARVIS_TOOL_MAP)
+            for tool_name, args in validated_calls:
+                print(f"\n[JARVIS] Function: {tool_name}")
+                print(f"[JARVIS] Arguments: {args}")
 
-                if function_call.name == "direct_response":
-                    summary_text = function_call.args.get("text") or summary_text
+                if tool_name == "direct_response":
+                    summary_text = args.get("text") or summary_text
 
-                tool = JARVIS_TOOL_MAP.get(function_call.name)
+                tool = JARVIS_TOOL_MAP.get(tool_name)
                 if tool:
-                    tool(**function_call.args)
+                    tool(**args)
                 else:
-                    raise Exception(f"[JARVIS] Invalid tool: {function_call.name}")
+                    raise Exception(f"[JARVIS] Invalid tool: {tool_name}")
         else:
             print("[JARVIS] No function call in response")
             if response.text:
@@ -904,4 +952,5 @@ class GeminiModel:
         return {
             "response": response,
             "summary": _clean_text(summary_text, "", max_len=420),
+            "function_calls": validated_calls,
         }

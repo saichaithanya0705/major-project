@@ -55,6 +55,9 @@ def test_tts_speak_plays_elevenlabs_audio_without_vlc_gate() -> None:
 
     def _fake_play_audio(audio_path):
         played.append(os.fspath(audio_path))
+        with open(audio_path, "rb") as audio_file:
+            captured["audio_bytes"] = audio_file.read()
+        return True
 
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "jarvis_audio.mp3")
@@ -85,10 +88,9 @@ def test_tts_speak_plays_elevenlabs_audio_without_vlc_gate() -> None:
             else:
                 tts_module.VLC_AVAILABLE = original_vlc_available
 
-        with open(audio_path, "rb") as audio_file:
-            assert audio_file.read() == b"audio-bytes"
-
     assert played == [audio_path], played
+    assert captured["audio_bytes"] == b"audio-bytes"
+    assert not os.path.exists(audio_path)
     assert captured["url"] == "https://api.elevenlabs.io/v1/text-to-speech/voice-123", captured
     assert captured["headers"]["xi-api-key"] == "test-key", captured
     assert captured["params"] == {"output_format": "mp3_44100_128"}, captured

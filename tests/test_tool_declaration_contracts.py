@@ -59,6 +59,31 @@ def _normalize_declarations(declarations):
     return [_normalize_declaration(declaration) for declaration in declarations]
 
 
+def _assert_jarvis_coordinate_descriptions_match_runtime() -> None:
+    import agents.jarvis.prompts as prompts
+
+    prompt_text = prompts.JARVIS_SYSTEM_PROMPT
+    assert "0-1000" in prompt_text
+    assert "Gemini-style" in prompt_text
+
+    coordinate_fields = {
+        "draw_bounding_box": ("x_min", "y_min", "x_max", "y_max"),
+        "draw_pointer_to_object": ("x_pos", "y_pos", "text_x", "text_y"),
+        "create_text": ("x", "y"),
+    }
+    declarations = {declaration["name"]: declaration for declaration in JARVIS_FUNCTION_DECLARATIONS}
+    for tool_name, field_names in coordinate_fields.items():
+        properties = declarations[tool_name]["parameters"]["properties"]
+        for field_name in field_names:
+            description = properties[field_name].get("description", "")
+            assert "0-1000" in description, f"{tool_name}.{field_name} must describe Gemini coordinates"
+
+    box_properties = declarations["create_text_for_box"]["parameters"]["properties"]["box"]["properties"]
+    for field_name in ("x", "y", "width", "height"):
+        description = box_properties[field_name].get("description", "")
+        assert "0-1000" in description, f"create_text_for_box.box.{field_name} must describe Gemini coordinates"
+
+
 def run_checks() -> None:
     _assert_names_match(VISION_FUNCTION_DECLARATIONS, VISION_DECLARED_TOOL_NAMES, "Vision")
     _assert_names_match(JARVIS_FUNCTION_DECLARATIONS, JARVIS_DECLARED_TOOL_NAMES, "JARVIS")
@@ -74,6 +99,7 @@ def run_checks() -> None:
     assert _normalize_declarations(
         JARVIS_TOOLS[0].function_declarations
     ) == _normalize_declarations(JARVIS_FUNCTION_DECLARATIONS)
+    _assert_jarvis_coordinate_descriptions_match_runtime()
 
 
 if __name__ == "__main__":

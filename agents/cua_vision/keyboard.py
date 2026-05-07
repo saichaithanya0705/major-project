@@ -5,6 +5,14 @@ Provides functions for emulating keyboard and mouse input.
 """
 import time
 
+from agents.cua_vision.action_policy import (
+    validate_held_key,
+    validate_hotkey,
+    validate_key_hold_args,
+    validate_text,
+    MAX_TYPED_TEXT_CHARS,
+)
+
 try:
     import pyautogui as _pyautogui
 except ImportError:
@@ -36,6 +44,11 @@ def type_string(string: str, submit: bool = False):
         string: The argument should be passed as a multiline string
         submit: Whether to press Enter once after typing
     """
+    string = validate_text(
+        string,
+        max_chars=MAX_TYPED_TEXT_CHARS,
+        field_name="Typed text",
+    )
     # Manual backslash error reassignment
     string = string.replace("\\'", "\'")
     string = string.replace('\\\\', '\\')
@@ -59,6 +72,15 @@ def move_cursor(x: float, y: float, duration: float = 0.2):
     pyautogui.moveTo(x=x, y=y, duration=duration)
 
 
+def _move_to_click_coordinate(x: float, y: float) -> None:
+    try:
+        screen_x = float(x)
+        screen_y = float(y)
+    except (TypeError, ValueError):
+        raise ValueError("Mouse x/y coordinates must be numbers.") from None
+    pyautogui.moveTo(x=screen_x, y=screen_y, duration=0.0)
+
+
 # ================================================================================
 # MOUSE CLICK FUNCTIONS
 # ================================================================================
@@ -75,6 +97,7 @@ def hold_down_left_click(x: float, y: float):
         x: x coordinate on screen of where you want to click
         y: y coordinate on screen of where you want to click
     """
+    _move_to_click_coordinate(x, y)
     pyautogui.mouseDown('left')
 
 
@@ -85,6 +108,7 @@ def hold_down_right_click(x: float, y: float):
         x: x coordinate on screen of where you want to click
         y: y coordinate on screen of where you want to click
     """
+    _move_to_click_coordinate(x, y)
     pyautogui.mouseDown('right')
 
 
@@ -95,6 +119,7 @@ def release_left_click(x: float, y: float):
         x: x coordinate on screen of where you want to click
         y: y coordinate on screen of where you want to click
     """
+    _move_to_click_coordinate(x, y)
     pyautogui.mouseUp('left')
 
 
@@ -105,6 +130,7 @@ def release_right_click(x: float, y: float):
         x: x coordinate on screen of where you want to click
         y: y coordinate on screen of where you want to click
     """
+    _move_to_click_coordinate(x, y)
     pyautogui.mouseUp('right')
 
 
@@ -129,9 +155,12 @@ def press_key_for_duration(key: str, seconds: float) -> None:
         key: The key to be pressed down. Can be any alphanumeric key on the keyboard
         seconds: The amount of time to be pressed down in seconds
     """
+    key, seconds = validate_key_hold_args(key, seconds)
     pyautogui.keyDown(key)
-    time.sleep(seconds)
-    pyautogui.keyUp(key)
+    try:
+        time.sleep(seconds)
+    finally:
+        pyautogui.keyUp(key)
     print(f'Key chosen: {key}')
     print(f'Key held down for {seconds}s')
 
@@ -142,6 +171,7 @@ def hold_down_key(key: str) -> None:
     Args:
         key: The key to be pressed down. The key must be one of the following 'w', 'a', 's', 'd'
     """
+    key = validate_held_key(key)
     pyautogui.keyDown(key)
 
 
@@ -151,6 +181,7 @@ def release_held_key(key: str) -> None:
     Args:
         key: The key to be pressed down. The key must be one of the following 'w', 'a', 's', 'd'
     """
+    key = validate_held_key(key)
     pyautogui.keyUp(key)
 
 
@@ -160,6 +191,7 @@ def press_ctrl_hotkey(key: str):
     Args:
         key: The key to be pressed along with control
     """
+    key = validate_hotkey("press_ctrl_hotkey", key)
     pyautogui.hotkey('ctrl', key)
 
 
@@ -169,4 +201,5 @@ def press_alt_hotkey(key: str):
     Args:
         key: The key to be pressed along with alt
     """
+    key = validate_hotkey("press_alt_hotkey", key)
     pyautogui.hotkey('alt', key)

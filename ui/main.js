@@ -1,8 +1,9 @@
-const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, globalShortcut, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createChatSessionManager } = require('./chat_sessions');
 const { getServerConfig: resolveServerConfig } = require('./server_config');
+const { cleanupVisionArtifactImages, getVisionArtifactImageDir } = require('./artifact_lifecycle');
 
 let overlayWin;
 let inputWin;
@@ -10,8 +11,42 @@ let tray;
 let cursorPoller;
 let inputWindowLastBounds = null;
 const chatSessions = createChatSessionManager({ app });
+const MAX_VISION_ARTIFACT_IMAGE_BYTES = 10 * 1024 * 1024;
 
 console.log('[main] boot', { cwd: process.cwd(), dir: __dirname });
+
+function decodeVisionArtifactImage(imageDataUrl) {
+  const prefix = 'data:image/png;base64,';
+  if (typeof imageDataUrl !== 'string' || !imageDataUrl.startsWith(prefix)) {
+    throw new Error('Vision artifact must be a PNG data URL.');
+  }
+
+  const base64 = imageDataUrl.slice(prefix.length);
+  const buffer = Buffer.from(base64, 'base64');
+  if (buffer.length === 0 || buffer.length > MAX_VISION_ARTIFACT_IMAGE_BYTES) {
+    throw new Error('Vision artifact image is empty or too large.');
+  }
+  if (!buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    throw new Error('Vision artifact image did not decode as PNG.');
+  }
+  return buffer;
+}
+
+async function openVisionArtifactImage(imageDataUrl) {
+  const buffer = decodeVisionArtifactImage(imageDataUrl);
+  const directory = getVisionArtifactImageDir(app);
+  fs.mkdirSync(directory, { recursive: true });
+  cleanupVisionArtifactImages(directory);
+
+  const filePath = path.join(directory, `vision-artifact-${Date.now()}.png`);
+  fs.writeFileSync(filePath, buffer);
+
+  const errorMessage = await shell.openPath(filePath);
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+  return { opened: true, path: filePath };
+}
 
 function registerShortcut(accelerator, label, callback) {
   try {
@@ -46,6 +81,18 @@ function saveChatSessionMessages(sessionId, messages) {
 
 function archiveChatSession(sessionId) {
   return chatSessions.archiveChatSession(sessionId);
+}
+
+function unarchiveChatSession(sessionId) {
+  return chatSessions.unarchiveChatSession(sessionId);
+}
+
+function deleteChatSession(sessionId) {
+  return chatSessions.deleteChatSession(sessionId);
+}
+
+function deleteArchivedChatSessions() {
+  return chatSessions.deleteArchivedChatSessions();
 }
 
 function createChatSession(setAsCurrent = true) {
@@ -293,6 +340,7 @@ app.whenReady().then(() => {
     app.dock.hide();
   }
 
+  cleanupVisionArtifactImages(getVisionArtifactImageDir(app));
   createOverlayWindow();
   createInputWindow();
   createTray();
@@ -320,6 +368,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  cleanupVisionArtifactImages(getVisionArtifactImageDir(app));
   globalShortcut.unregisterAll();
   if (cursorPoller) {
     clearInterval(cursorPoller);
@@ -331,10 +380,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Keep compatibility with legacy renderer channels. Overlay window is now
-// permanently click-through; these no longer change mode.
-ipcMain.on('toggle-mouse', () => {});
-ipcMain.on('cursor-hit-test', () => {});
+function setOverlayWindowInteractive(interactive) {
+  if (!overlayWin || overlayWin.isDestroyed()) return;
+  overlayWin.setIgnoreMouseEvents(!interactive, interactive ? undefined : { forward: true });
+}
+
+ipcMain.on('toggle-mouse', (event, interactive) => {
+  setOverlayWindowInteractive(Boolean(interactive));
+});
+ipcMain.on('cursor-hit-test', (event, isOver) => {
+  setOverlayWindowInteractive(Boolean(isOver));
+});
 ipcMain.on('toggle-input-mode', (event, enabled) => {
   if (enabled) {
     showInputWindow();
@@ -343,6 +399,10 @@ ipcMain.on('toggle-input-mode', (event, enabled) => {
 
 ipcMain.on('input-window-hide-request', () => {
   hideInputWindow();
+});
+
+ipcMain.on('input-window-show-request', () => {
+  showInputWindow();
 });
 
 ipcMain.on('request-stop-all', () => {
@@ -370,6 +430,10 @@ ipcMain.handle('get-chat-session-state', async (event, payload) => {
   return getChatSessionState(payload?.sessionId || null);
 });
 
+ipcMain.handle('open-vision-artifact-image', async (event, payload) => {
+  return openVisionArtifactImage(payload?.imageDataUrl || '');
+});
+
 ipcMain.handle('create-chat-session', async () => {
   createChatSession(true);
   return getChatSessionState();
@@ -377,6 +441,18 @@ ipcMain.handle('create-chat-session', async () => {
 
 ipcMain.handle('archive-chat-session', async (event, payload) => {
   return archiveChatSession(payload?.sessionId || '');
+});
+
+ipcMain.handle('unarchive-chat-session', async (event, payload) => {
+  return unarchiveChatSession(payload?.sessionId || '');
+});
+
+ipcMain.handle('delete-chat-session', async (event, payload) => {
+  return deleteChatSession(payload?.sessionId || '');
+});
+
+ipcMain.handle('delete-archived-chat-sessions', async () => {
+  return deleteArchivedChatSessions();
 });
 
 ipcMain.handle('load-chat-session', async (event, payload) => {

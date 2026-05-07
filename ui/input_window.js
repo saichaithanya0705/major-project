@@ -23,16 +23,17 @@ const chatStatus = document.getElementById('chat-status');
 const chatStatusPhase = document.getElementById('chat-status-phase');
 const chatStatusText = document.getElementById('chat-status-text');
 const chatStatusDetail = document.getElementById('chat-status-detail');
-const chatShortcutsMenu = document.getElementById('chat-shortcuts-menu');
-const chatShortcutsToggle = document.getElementById('chat-shortcuts-toggle');
-const chatShortcutsPopover = document.getElementById('chat-shortcuts-popover');
-const chatHide = document.getElementById('chat-hide');
-const chatStop = document.getElementById('chat-stop');
-const chatHistoryToggle = document.getElementById('chat-history-toggle');
+const chatSettingsMenu = document.getElementById('chat-settings-menu');
+const chatSettingsToggle = document.getElementById('chat-settings-toggle');
+const chatSettingsPopover = document.getElementById('chat-settings-popover');
+const chatSettingsHelp = document.getElementById('chat-settings-help');
+const chatSettingsHistory = document.getElementById('chat-settings-history');
+const chatHelpPanel = document.getElementById('chat-help-panel');
 const chatNew = document.getElementById('chat-new');
 const chatBody = document.getElementById('chat-body');
 const chatMain = document.getElementById('chat-main');
 const historyPanel = document.getElementById('history-panel');
+const historyPanelHeader = document.getElementById('history-panel-header');
 const historyPanelClose = document.getElementById('history-panel-close');
 const historyRetentionNote = document.getElementById('history-retention-note');
 const historyList = document.getElementById('history-list');
@@ -46,7 +47,6 @@ const chatEmptyTitle = document.getElementById('chat-empty-title');
 const chatEmptyBody = document.getElementById('chat-empty-body');
 const chatGuidanceOpenShortcut = document.getElementById('chat-guidance-open-shortcut');
 const chatGuidanceStopShortcut = document.getElementById('chat-guidance-stop-shortcut');
-const chatGuidanceHideShortcut = document.getElementById('chat-guidance-hide-shortcut');
 const terminalPanel = document.getElementById('terminal-panel');
 const terminalPanelMeta = document.getElementById('terminal-panel-meta');
 const terminalPanelOutput = document.getElementById('terminal-panel-output');
@@ -61,6 +61,8 @@ const DUPLICATE_WINDOW_MS = 1200;
 const MAX_PERSISTED_MESSAGES = 300;
 const SESSION_SAVE_DEBOUNCE_MS = 250;
 const MAX_ASSISTANT_CACHE = 120;
+const MAX_MESSAGE_ARTIFACTS = 4;
+const MAX_IMAGE_DATA_URL_CHARS = 8_000_000;
 const ASSISTANT_THINKING_TEXT = 'Waiting for model response…';
 const CHAT_REPLY_SOURCES = new Set(['rapid_response']);
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 16000;
@@ -69,6 +71,8 @@ const MAX_TERMINAL_SUMMARY_CHARS = 360;
 const DEFAULT_INPUT_PLACEHOLDER = 'Describe the next task for JARVIS…';
 const ARCHIVED_INPUT_PLACEHOLDER = 'Archived chats are read-only. Start a new chat to continue.';
 const VOICE_MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+const RESTORE_CHAT_SYMBOL = '↩';
+const DELETE_CHAT_SYMBOL = '🗑';
 
 let socket;
 let reconnectDelay = 500;
@@ -109,6 +113,8 @@ let isVoiceRecording = false;
 let isVoiceTranscribing = false;
 let voiceDiscardOnStop = false;
 let pendingVoiceRequestId = '';
+let visionChatHiddenForCapture = false;
+let visionArtifactViewerEl = null;
 let agentWorkTraceEl = null;
 let agentWorkTraceToggleEl = null;
 let agentWorkTraceBodyEl = null;
@@ -116,6 +122,15 @@ let agentWorkTraceSummaryEl = null;
 let agentWorkTraceStatusEl = null;
 let agentWorkTraceListEl = null;
 let agentWorkTraceId = 0;
+let pendingDeleteSession = null;
+let deleteConfirmOverlay = null;
+let deleteConfirmDialog = null;
+let deleteConfirmTitle = null;
+let deleteConfirmBody = null;
+let deleteConfirmCancelButton = null;
+let deleteConfirmDeleteButton = null;
+let deleteConfirmReturnFocus = null;
+let historyDeleteAllArchived = null;
 
 const assistantMessageCache = [];
 const chatHistory = [];
@@ -285,6 +300,12 @@ function cloneChatHistory() {
     if (message.agentTrace) {
       cloned.agentTrace = normalizeAgentTraceSnapshot(message.agentTrace);
     }
+    if (Array.isArray(message.artifacts)) {
+      cloned.artifacts = message.artifacts
+        .map(normalizeVisionArtifact)
+        .filter(Boolean)
+        .slice(0, MAX_MESSAGE_ARTIFACTS);
+    }
     return cloned;
   });
 }
@@ -315,6 +336,35 @@ function normalizeSessionSummary(summary) {
   };
 }
 
+function normalizeVisionArtifact(artifact) {
+  if (!artifact || typeof artifact !== 'object') return null;
+  const kind = typeof artifact.kind === 'string' ? artifact.kind.trim() : '';
+  const imageDataUrl = typeof artifact.imageDataUrl === 'string' ? artifact.imageDataUrl.trim() : '';
+  if (kind !== 'vision_screenshot') return null;
+  if (!imageDataUrl.startsWith('data:image/png;base64,')) return null;
+  if (imageDataUrl.length > MAX_IMAGE_DATA_URL_CHARS) return null;
+
+  const width = Number(artifact.width);
+  const height = Number(artifact.height);
+  const outlineCount = Number(artifact.outlineCount);
+  return {
+    kind,
+    title: truncateText(artifact.title || '', 80) || 'Analyzed screen',
+    imageDataUrl,
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : 0,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : 0,
+    outlineCount: Number.isFinite(outlineCount) && outlineCount > 0 ? Math.round(outlineCount) : 0,
+  };
+}
+
+function normalizeMessageArtifacts(artifacts) {
+  if (!Array.isArray(artifacts)) return [];
+  return artifacts
+    .map(normalizeVisionArtifact)
+    .filter(Boolean)
+    .slice(0, MAX_MESSAGE_ARTIFACTS);
+}
+
 function normalizePersistedMessage(role, text, ts = Date.now(), extras = {}) {
   const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
   const normalizedText = typeof text === 'string' ? text.trim() : '';
@@ -328,6 +378,12 @@ function normalizePersistedMessage(role, text, ts = Date.now(), extras = {}) {
   if (agentTrace) {
     message.agentTrace = agentTrace;
   }
+  const artifacts = normalizedRole === 'assistant'
+    ? normalizeMessageArtifacts(extras.artifacts)
+    : [];
+  if (artifacts.length > 0) {
+    message.artifacts = artifacts;
+  }
   return message;
 }
 
@@ -337,6 +393,7 @@ function normalizeSession(session) {
     ? session.messages
       .map((item) => normalizePersistedMessage(item.role, item.text, item.ts, {
         agentTrace: item.agentTrace,
+        artifacts: item.artifacts,
       }))
       .filter(Boolean)
     : [];
@@ -403,6 +460,7 @@ function updateActionAvailability() {
   if (terminalPanel) {
     terminalPanel.dataset.running = activeTerminalRunning ? 'true' : 'false';
   }
+  updateComposerActionState();
 }
 
 function getReadyDetail() {
@@ -474,72 +532,87 @@ function updateShortcutUi() {
   if (chatGuidanceStopShortcut) {
     chatGuidanceStopShortcut.textContent = shortcuts.stop;
   }
-  if (chatGuidanceHideShortcut) {
-    chatGuidanceHideShortcut.textContent = shortcuts.hide;
-  }
 
-  if (chatShortcutsToggle) {
-    chatShortcutsToggle.title = 'Show shortcuts';
-  }
-  if (chatHistoryToggle) {
-    chatHistoryToggle.title = 'Open chat history';
+  if (chatSettingsToggle) {
+    chatSettingsToggle.title = 'Open settings menu';
   }
   if (chatNew) {
     chatNew.title = 'Start a new chat';
   }
-  if (chatStop) {
-    chatStop.title = `Stop running actions (${shortcuts.stop})`;
-  }
-  if (chatHide) {
-    chatHide.title = `Hide window (${shortcuts.hide})`;
-  }
   if (commandVoice) {
     commandVoice.title = 'Record voice command';
   }
-  if (commandSend) {
-    commandSend.title = 'Send command (Enter)';
-  }
+  updateComposerActionState();
   if (terminalPanelStop) {
     terminalPanelStop.title = `Stop terminal session (${shortcuts.stop})`;
   }
 }
 
-function isShortcutsPopoverOpen() {
-  return Boolean(chatShortcutsPopover && !chatShortcutsPopover.hidden);
+function updateComposerActionState() {
+  if (!commandSend) return;
+  const hasWork = hasActiveWork();
+  commandSend.dataset.mode = hasWork ? 'stop' : 'send';
+  commandSend.title = hasWork ? `Stop running actions (${shortcuts.stop})` : 'Send command (Enter)';
+  commandSend.setAttribute('aria-label', hasWork ? 'Stop running actions' : 'Send command');
+  commandSend.disabled = isCurrentSessionArchived() && !hasWork;
 }
 
-function openShortcutsPopover() {
-  if (!chatShortcutsPopover) return;
-  chatShortcutsPopover.hidden = false;
-  if (chatShortcutsToggle) {
-    chatShortcutsToggle.setAttribute('aria-expanded', 'true');
+function isSettingsPopoverOpen() {
+  return Boolean(chatSettingsPopover && !chatSettingsPopover.hidden);
+}
+
+function resetSettingsHelpPanel() {
+  if (chatHelpPanel) {
+    chatHelpPanel.hidden = true;
+  }
+  if (chatSettingsHelp) {
+    chatSettingsHelp.setAttribute('aria-expanded', 'false');
   }
 }
 
-function closeShortcutsPopover(options = {}) {
-  if (!chatShortcutsPopover) return;
+function openSettingsPopover() {
+  if (!chatSettingsPopover) return;
+  chatSettingsPopover.hidden = false;
+  resetSettingsHelpPanel();
+  if (chatSettingsToggle) {
+    chatSettingsToggle.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function closeSettingsPopover(options = {}) {
+  if (!chatSettingsPopover) return;
   const { restoreFocus = false } = options;
-  chatShortcutsPopover.hidden = true;
-  if (chatShortcutsToggle) {
-    chatShortcutsToggle.setAttribute('aria-expanded', 'false');
+  chatSettingsPopover.hidden = true;
+  resetSettingsHelpPanel();
+  if (chatSettingsToggle) {
+    chatSettingsToggle.setAttribute('aria-expanded', 'false');
     if (restoreFocus) {
-      chatShortcutsToggle.focus();
+      chatSettingsToggle.focus();
     }
   }
 }
 
-function toggleShortcutsPopover() {
-  if (isShortcutsPopoverOpen()) {
-    closeShortcutsPopover();
+function toggleSettingsPopover() {
+  if (isSettingsPopoverOpen()) {
+    closeSettingsPopover();
     return;
   }
-  openShortcutsPopover();
+  openSettingsPopover();
+}
+
+function showSettingsHelp() {
+  if (!chatHelpPanel) return;
+  const isOpen = !chatHelpPanel.hidden;
+  chatHelpPanel.hidden = isOpen;
+  if (chatSettingsHelp) {
+    chatSettingsHelp.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+  }
 }
 
 function handleEscapeKey(options = {}) {
-  const { restoreShortcutFocus = false } = options;
-  if (isShortcutsPopoverOpen()) {
-    closeShortcutsPopover({ restoreFocus: restoreShortcutFocus });
+  const { restoreSettingsFocus = false, restoreShortcutFocus = false } = options;
+  if (isSettingsPopoverOpen()) {
+    closeSettingsPopover({ restoreFocus: restoreSettingsFocus || restoreShortcutFocus });
     return true;
   }
   if (isHistoryOpen) {
@@ -930,6 +1003,158 @@ function setMessageElementText(el, text, options = {}) {
   }
 }
 
+function ensureVisionArtifactViewer() {
+  if (visionArtifactViewerEl) return visionArtifactViewerEl;
+
+  const viewer = document.createElement('div');
+  viewer.className = 'chat-vision-viewer';
+  viewer.hidden = true;
+  viewer.setAttribute('role', 'dialog');
+  viewer.setAttribute('aria-modal', 'true');
+  viewer.setAttribute('aria-label', 'Analyzed screenshot');
+
+  const dialog = document.createElement('div');
+  dialog.className = 'chat-vision-viewer__dialog';
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'chat-vision-viewer__close';
+  closeButton.textContent = 'X';
+  closeButton.title = 'Close screenshot';
+  closeButton.setAttribute('aria-label', 'Close screenshot');
+  closeButton.addEventListener('click', () => closeVisionArtifactViewer());
+
+  const image = document.createElement('img');
+  image.className = 'chat-vision-viewer__image';
+  image.alt = 'Analyzed screen screenshot';
+
+  dialog.appendChild(closeButton);
+  dialog.appendChild(image);
+  viewer.appendChild(dialog);
+  viewer.addEventListener('click', (event) => {
+    if (event.target === viewer) {
+      closeVisionArtifactViewer();
+    }
+  });
+
+  document.body.appendChild(viewer);
+  visionArtifactViewerEl = viewer;
+  return viewer;
+}
+
+function isVisionArtifactViewerOpen() {
+  return Boolean(visionArtifactViewerEl && !visionArtifactViewerEl.hidden);
+}
+
+function closeVisionArtifactViewer() {
+  if (!visionArtifactViewerEl) return;
+  const image = visionArtifactViewerEl.querySelector('.chat-vision-viewer__image');
+  if (image) {
+    image.removeAttribute('src');
+  }
+  visionArtifactViewerEl.hidden = true;
+}
+
+function openVisionArtifactViewer(artifact) {
+  const normalized = normalizeVisionArtifact(artifact);
+  if (!normalized) return;
+
+  const viewer = ensureVisionArtifactViewer();
+  const image = viewer.querySelector('.chat-vision-viewer__image');
+  if (image) {
+    image.src = normalized.imageDataUrl;
+    image.alt = normalized.outlineCount > 0
+      ? `Analyzed screen screenshot with ${normalized.outlineCount} outlined components`
+      : 'Analyzed screen screenshot';
+    if (normalized.width > 0) {
+      image.width = normalized.width;
+    } else {
+      image.removeAttribute('width');
+    }
+    if (normalized.height > 0) {
+      image.height = normalized.height;
+    } else {
+      image.removeAttribute('height');
+    }
+  }
+  viewer.hidden = false;
+  viewer.querySelector('.chat-vision-viewer__close')?.focus();
+}
+
+async function openVisionArtifactImage(artifact) {
+  const normalized = normalizeVisionArtifact(artifact);
+  if (!normalized) return;
+
+  if (window.api?.openVisionArtifactImage) {
+    try {
+      const result = await window.api.openVisionArtifactImage(normalized.imageDataUrl);
+      if (result?.opened) {
+        return;
+      }
+    } catch {
+      // Fall back to the embedded viewer when the native bridge is unavailable.
+    }
+  }
+
+  openVisionArtifactViewer(normalized);
+}
+
+function createVisionArtifactElement(artifact) {
+  const normalized = normalizeVisionArtifact(artifact);
+  if (!normalized) return null;
+
+  const figure = document.createElement('figure');
+  figure.className = 'chat-vision-artifact';
+
+  const imageWrap = document.createElement('button');
+  imageWrap.type = 'button';
+  imageWrap.className = 'chat-vision-artifact__frame chat-vision-artifact__open';
+  imageWrap.title = 'Open screenshot';
+  imageWrap.setAttribute('aria-label', 'Open analyzed screenshot');
+  imageWrap.addEventListener('click', () => {
+    void openVisionArtifactImage(normalized);
+  });
+
+  const image = document.createElement('img');
+  image.className = 'chat-vision-artifact__image';
+  image.src = normalized.imageDataUrl;
+  image.alt = normalized.outlineCount > 0
+    ? `Analyzed screen screenshot with ${normalized.outlineCount} outlined components`
+    : 'Analyzed screen screenshot';
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  if (normalized.width > 0) {
+    image.width = normalized.width;
+  }
+  if (normalized.height > 0) {
+    image.height = normalized.height;
+  }
+
+  imageWrap.appendChild(image);
+  figure.appendChild(imageWrap);
+  return figure;
+}
+
+function setMessageElementArtifacts(el, artifacts) {
+  if (!el) return;
+  const normalizedArtifacts = normalizeMessageArtifacts(artifacts);
+  el.querySelectorAll('.chat-msg-artifacts').forEach((node) => node.remove());
+  el.classList.toggle('chat-msg--with-artifacts', normalizedArtifacts.length > 0);
+  if (normalizedArtifacts.length === 0) return;
+
+  const artifactList = document.createElement('div');
+  artifactList.className = 'chat-msg-artifacts';
+  for (const artifact of normalizedArtifacts) {
+    const artifactEl = createVisionArtifactElement(artifact);
+    if (artifactEl) {
+      artifactList.appendChild(artifactEl);
+    }
+  }
+  if (artifactList.childElementCount > 0) {
+    el.appendChild(artifactList);
+  }
+}
+
 function createMessageElement(role, text, options = {}) {
   if (!chatMessages) return null;
   const value = typeof text === 'string' ? text.trim() : '';
@@ -940,9 +1165,12 @@ function createMessageElement(role, text, options = {}) {
   const agentTrace = role === 'assistant'
     ? normalizeAgentTraceSnapshot(options.agentTrace)
     : null;
+  const artifacts = role === 'assistant'
+    ? normalizeMessageArtifacts(options.artifacts)
+    : [];
 
   const el = document.createElement('article');
-  el.className = `chat-msg ${role}${pending ? ' pending' : ''}`;
+  el.className = `chat-msg ${role}${pending ? ' pending' : ''}${artifacts.length ? ' chat-msg--with-artifacts' : ''}`;
 
   const meta = document.createElement('div');
   meta.className = 'chat-msg-meta';
@@ -963,6 +1191,7 @@ function createMessageElement(role, text, options = {}) {
   el.appendChild(content);
   chatMessages.appendChild(el);
   setMessageElementText(el, value, { role, pending, ts });
+  setMessageElementArtifacts(el, artifacts);
   if (agentTrace) {
     appendStoredAgentWorkTrace(el, agentTrace);
   }
@@ -1065,12 +1294,18 @@ async function flushPendingSessionSave() {
 }
 
 function appendMessage(role, text, options = {}) {
-  const { pending = false, persist = true, ts = Date.now(), agentTrace = null } = options;
-  const el = createMessageElement(role, text, { pending, ts, agentTrace });
+  const {
+    pending = false,
+    persist = true,
+    ts = Date.now(),
+    agentTrace = null,
+    artifacts = [],
+  } = options;
+  const el = createMessageElement(role, text, { pending, ts, agentTrace, artifacts });
   if (!el) return null;
 
   if (persist && !pending) {
-    const message = rememberMessage(role, text, ts, { agentTrace });
+    const message = rememberMessage(role, text, ts, { agentTrace, artifacts });
     if (message) {
       syncCurrentSessionMetadataFromHistory(message.ts);
       queuePersistChatHistory();
@@ -1378,6 +1613,44 @@ function finalizePendingAssistant(text) {
   renderConversationDecorators();
 }
 
+function appendVisionArtifactMessage(payload) {
+  const artifact = normalizeVisionArtifact(payload?.artifact);
+  if (!artifact) return;
+
+  const summary = truncateText(payload?.summary || '', 420) || 'Screen analysis snapshot';
+  const ts = Date.now();
+  const agentTrace = getPersistableAgentWorkTrace();
+  const artifacts = [artifact];
+
+  if (pendingAssistantEl && pendingAssistantEl.isConnected) {
+    setMessageElementText(pendingAssistantEl, summary, {
+      role: 'assistant',
+      pending: false,
+      ts,
+    });
+    setMessageElementArtifacts(pendingAssistantEl, artifacts);
+    const message = rememberMessage('assistant', summary, ts, { agentTrace, artifacts });
+    if (message) {
+      syncCurrentSessionMetadataFromHistory(message.ts);
+      queuePersistChatHistory();
+    }
+    pendingAssistantEl = null;
+  } else {
+    appendMessage('assistant', summary, {
+      pending: false,
+      persist: true,
+      ts,
+      agentTrace,
+      artifacts,
+    });
+  }
+
+  lastAssistantText = summary;
+  applyFinalAssistantLifecycle(summary, agentTrace);
+  updateActionAvailability();
+  renderConversationDecorators();
+}
+
 function clearPendingAssistant() {
   let removedPendingAssistant = false;
   if (pendingAssistantEl && pendingAssistantEl.isConnected) {
@@ -1412,6 +1685,7 @@ function restoreMessages(messages) {
   for (const item of messages) {
     const restored = normalizePersistedMessage(item?.role, item?.text, item?.ts, {
       agentTrace: item?.agentTrace,
+      artifacts: item?.artifacts,
     });
     if (!restored) continue;
     chatHistory.push(restored);
@@ -1419,6 +1693,7 @@ function restoreMessages(messages) {
       pending: false,
       ts: restored.ts,
       agentTrace: restored.agentTrace,
+      artifacts: restored.artifacts,
     });
     if (restored.role === 'assistant') {
       restoredLastAssistant = restored.text;
@@ -1468,11 +1743,8 @@ function updateComposerState() {
     commandInput.placeholder = archived ? ARCHIVED_INPUT_PLACEHOLDER : DEFAULT_INPUT_PLACEHOLDER;
   }
 
-  if (commandSend) {
-    commandSend.disabled = archived;
-  }
-
   updateVoiceButtonState();
+  updateComposerActionState();
 
   if (chatComposerHint) {
     if (archived) {
@@ -1547,18 +1819,48 @@ function renderHistoryList() {
     });
     item.appendChild(mainButton);
 
-    if (!summary.archivedAt) {
-      const archiveButton = document.createElement('button');
-      archiveButton.type = 'button';
-      archiveButton.className = 'history-item-action';
-      archiveButton.textContent = 'Archive';
-      archiveButton.disabled = blocked;
-      archiveButton.addEventListener('click', (event) => {
+    const actions = document.createElement('div');
+    actions.className = 'history-item-actions';
+
+    if (summary.archivedAt) {
+      const restoreButton = document.createElement('button');
+      restoreButton.type = 'button';
+      restoreButton.className = 'history-item-action history-item-action-icon';
+      restoreButton.textContent = RESTORE_CHAT_SYMBOL;
+      restoreButton.disabled = blocked;
+      restoreButton.title = 'Restore chat';
+      restoreButton.setAttribute('aria-label', 'Restore chat');
+      restoreButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void unarchiveSession(summary.sessionId);
+      });
+      actions.appendChild(restoreButton);
+
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'history-item-action history-item-action-icon danger';
+      deleteButton.textContent = DELETE_CHAT_SYMBOL;
+      deleteButton.disabled = blocked;
+      deleteButton.title = 'Delete chat';
+      deleteButton.setAttribute('aria-label', 'Delete chat');
+      deleteButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openDeleteConfirmation(summary);
+      });
+      actions.appendChild(deleteButton);
+    } else {
+      const actionButton = document.createElement('button');
+      actionButton.type = 'button';
+      actionButton.className = 'history-item-action';
+      actionButton.textContent = 'Archive';
+      actionButton.disabled = blocked;
+      actionButton.addEventListener('click', (event) => {
         event.stopPropagation();
         void archiveSession(summary.sessionId);
       });
-      item.appendChild(archiveButton);
+      actions.appendChild(actionButton);
     }
+    item.appendChild(actions);
 
     historyList.appendChild(item);
   }
@@ -1569,10 +1871,199 @@ function renderHistoryList() {
   if (historyFilterArchived) {
     historyFilterArchived.setAttribute('aria-selected', historyFilter === 'archived' ? 'true' : 'false');
   }
+  updateHistoryDeleteAllArchivedButton();
+}
+
+function ensureHistoryDeleteAllArchivedButton() {
+  if (historyDeleteAllArchived || !historyPanelHeader) return;
+
+  historyDeleteAllArchived = document.createElement('button');
+  historyDeleteAllArchived.id = 'history-delete-all-archived';
+  historyDeleteAllArchived.className = 'history-delete-all-archived';
+  historyDeleteAllArchived.type = 'button';
+  historyDeleteAllArchived.title = 'Delete all';
+  historyDeleteAllArchived.setAttribute('aria-label', 'Delete all archived chats');
+  historyDeleteAllArchived.textContent = DELETE_CHAT_SYMBOL;
+  historyDeleteAllArchived.addEventListener('click', () => {
+    openDeleteAllArchivedConfirmation();
+  });
+  historyPanelHeader.insertBefore(historyDeleteAllArchived, historyPanelClose || null);
+}
+
+function updateHistoryDeleteAllArchivedButton() {
+  ensureHistoryDeleteAllArchivedButton();
+  if (!historyDeleteAllArchived) return;
+
+  const shouldShow = historyFilter === 'archived' && archivedSessions.length > 0;
+  historyDeleteAllArchived.hidden = !shouldShow;
+  historyDeleteAllArchived.disabled = hasActiveWork();
+}
+
+function ensureDeleteConfirmDialog() {
+  if (deleteConfirmOverlay) return;
+
+  deleteConfirmOverlay = document.createElement('div');
+  deleteConfirmOverlay.className = 'delete-confirm-overlay';
+  deleteConfirmOverlay.hidden = true;
+
+  deleteConfirmDialog = document.createElement('section');
+  deleteConfirmDialog.className = 'delete-confirm-dialog';
+  deleteConfirmDialog.setAttribute('role', 'dialog');
+  deleteConfirmDialog.setAttribute('aria-modal', 'true');
+  deleteConfirmDialog.setAttribute('aria-labelledby', 'delete-confirm-title');
+  deleteConfirmDialog.setAttribute('aria-describedby', 'delete-confirm-body');
+
+  deleteConfirmTitle = document.createElement('h2');
+  deleteConfirmTitle.id = 'delete-confirm-title';
+  deleteConfirmTitle.textContent = 'Delete archived chat?';
+
+  deleteConfirmBody = document.createElement('p');
+  deleteConfirmBody.id = 'delete-confirm-body';
+
+  const actions = document.createElement('div');
+  actions.className = 'delete-confirm-actions';
+
+  deleteConfirmCancelButton = document.createElement('button');
+  deleteConfirmCancelButton.type = 'button';
+  deleteConfirmCancelButton.className = 'delete-confirm-button';
+  deleteConfirmCancelButton.textContent = 'Cancel';
+  deleteConfirmCancelButton.addEventListener('click', () => {
+    cancelDeleteConfirmation();
+  });
+
+  deleteConfirmDeleteButton = document.createElement('button');
+  deleteConfirmDeleteButton.type = 'button';
+  deleteConfirmDeleteButton.className = 'delete-confirm-button danger';
+  deleteConfirmDeleteButton.textContent = `${DELETE_CHAT_SYMBOL} Delete`;
+  deleteConfirmDeleteButton.addEventListener('click', () => {
+    void confirmDeleteSession();
+  });
+
+  actions.appendChild(deleteConfirmCancelButton);
+  actions.appendChild(deleteConfirmDeleteButton);
+  deleteConfirmDialog.appendChild(deleteConfirmTitle);
+  deleteConfirmDialog.appendChild(deleteConfirmBody);
+  deleteConfirmDialog.appendChild(actions);
+  deleteConfirmOverlay.appendChild(deleteConfirmDialog);
+  deleteConfirmOverlay.addEventListener('click', (event) => {
+    if (event.target === deleteConfirmOverlay) {
+      cancelDeleteConfirmation();
+    }
+  });
+  document.body.appendChild(deleteConfirmOverlay);
+}
+
+function isDeleteConfirmationOpen() {
+  return Boolean(deleteConfirmOverlay && !deleteConfirmOverlay.hidden);
+}
+
+function openDeleteConfirmation(summary) {
+  if (!summary?.sessionId) return;
+  ensureDeleteConfirmDialog();
+
+  pendingDeleteSession = {
+    sessionId: summary.sessionId,
+    title: summary.title || 'New chat',
+    mode: 'single',
+  };
+  deleteConfirmReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  if (deleteConfirmTitle) {
+    deleteConfirmTitle.textContent = 'Delete archived chat?';
+  }
+  if (deleteConfirmBody) {
+    deleteConfirmBody.textContent = `This will permanently delete "${pendingDeleteSession.title}" from archived chats.`;
+  }
+  if (deleteConfirmCancelButton) {
+    deleteConfirmCancelButton.disabled = false;
+  }
+  if (deleteConfirmDeleteButton) {
+    deleteConfirmDeleteButton.disabled = false;
+  }
+  deleteConfirmOverlay.hidden = false;
+  requestAnimationFrame(() => {
+    deleteConfirmCancelButton?.focus();
+  });
+}
+
+function openDeleteAllArchivedConfirmation() {
+  if (archivedSessions.length === 0) return;
+  ensureDeleteConfirmDialog();
+
+  pendingDeleteSession = {
+    mode: 'all-archived',
+    title: 'all archived chats',
+    count: archivedSessions.length,
+  };
+  deleteConfirmReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  if (deleteConfirmTitle) {
+    deleteConfirmTitle.textContent = 'Delete all archived chats?';
+  }
+  if (deleteConfirmBody) {
+    deleteConfirmBody.textContent = `This will permanently delete ${archivedSessions.length} archived chat${archivedSessions.length === 1 ? '' : 's'}.`;
+  }
+  if (deleteConfirmCancelButton) {
+    deleteConfirmCancelButton.disabled = false;
+  }
+  if (deleteConfirmDeleteButton) {
+    deleteConfirmDeleteButton.disabled = false;
+  }
+  deleteConfirmOverlay.hidden = false;
+  requestAnimationFrame(() => {
+    deleteConfirmCancelButton?.focus();
+  });
+}
+
+function cancelDeleteConfirmation(options = {}) {
+  const { restoreFocus = true } = options;
+  pendingDeleteSession = null;
+  if (deleteConfirmOverlay) {
+    deleteConfirmOverlay.hidden = true;
+  }
+  if (deleteConfirmTitle) {
+    deleteConfirmTitle.textContent = 'Delete archived chat?';
+  }
+  if (restoreFocus && deleteConfirmReturnFocus?.isConnected) {
+    requestAnimationFrame(() => {
+      deleteConfirmReturnFocus?.focus();
+    });
+  }
+  deleteConfirmReturnFocus = null;
+}
+
+async function confirmDeleteSession() {
+  if (!pendingDeleteSession) return;
+  const request = { ...pendingDeleteSession };
+  if (deleteConfirmCancelButton) {
+    deleteConfirmCancelButton.disabled = true;
+  }
+  if (deleteConfirmDeleteButton) {
+    deleteConfirmDeleteButton.disabled = true;
+  }
+
+  const deleted = request.mode === 'all-archived'
+    ? await deleteArchivedSessions()
+    : await deleteSession(request.sessionId);
+  if (deleted) {
+    cancelDeleteConfirmation({ restoreFocus: false });
+    return;
+  }
+
+  if (deleteConfirmCancelButton) {
+    deleteConfirmCancelButton.disabled = false;
+  }
+  if (deleteConfirmDeleteButton) {
+    deleteConfirmDeleteButton.disabled = false;
+  }
 }
 
 function openHistoryPanel() {
-  closeShortcutsPopover();
+  closeSettingsPopover();
   isHistoryOpen = true;
   if (chatBody) {
     chatBody.dataset.view = 'history';
@@ -1583,13 +2074,13 @@ function openHistoryPanel() {
   if (chatMain) {
     chatMain.hidden = true;
   }
-  if (chatHistoryToggle) {
-    chatHistoryToggle.setAttribute('aria-pressed', 'true');
-  }
   renderHistoryList();
 }
 
 function closeHistoryPanel() {
+  if (isDeleteConfirmationOpen()) {
+    cancelDeleteConfirmation({ restoreFocus: false });
+  }
   isHistoryOpen = false;
   if (chatBody) {
     chatBody.dataset.view = 'chat';
@@ -1599,9 +2090,6 @@ function closeHistoryPanel() {
   }
   if (chatMain) {
     chatMain.hidden = false;
-  }
-  if (chatHistoryToggle) {
-    chatHistoryToggle.setAttribute('aria-pressed', 'false');
   }
 }
 
@@ -1752,8 +2240,102 @@ async function archiveSession(sessionId) {
   }
 }
 
+async function unarchiveSession(sessionId) {
+  if (!window.api?.unarchiveChatSession || !sessionId) return;
+  if (hasActiveWork()) {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Restore blocked',
+      detail: 'Stop current work before restoring a chat.',
+    });
+    return;
+  }
+
+  setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
+    text: 'Restoring chat…',
+    detail: 'Moving the archived session back to active chats.',
+  });
+  try {
+    const state = await window.api.unarchiveChatSession(sessionId);
+    historyFilter = 'active';
+    applySessionState(state, { keepHistoryOpen: false, focusInput: true });
+    setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
+      text: 'Chat restored',
+      detail: 'You can continue from this session now.',
+    });
+  } catch {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Unable to restore chat',
+      detail: 'The session could not be restored right now.',
+    });
+  }
+}
+
+async function deleteSession(sessionId) {
+  if (!window.api?.deleteChatSession || !sessionId) return false;
+  if (hasActiveWork()) {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Delete blocked',
+      detail: 'Stop current work before deleting a chat.',
+    });
+    return false;
+  }
+
+  setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
+    text: 'Deleting chat…',
+    detail: 'Removing the archived session from history.',
+  });
+  try {
+    const state = await window.api.deleteChatSession(sessionId);
+    removeSessionSummary(sessionId);
+    applySessionState(state, { keepHistoryOpen: true, focusInput: false });
+    setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
+      text: 'Chat deleted',
+      detail: 'The archived session was removed.',
+    });
+    return true;
+  } catch {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Unable to delete chat',
+      detail: 'The session could not be deleted right now.',
+    });
+    return false;
+  }
+}
+
+async function deleteArchivedSessions() {
+  if (!window.api?.deleteArchivedChatSessions) return false;
+  if (hasActiveWork()) {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Delete blocked',
+      detail: 'Stop current work before deleting archived chats.',
+    });
+    return false;
+  }
+
+  setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
+    text: 'Deleting archived chats…',
+    detail: 'Removing archived sessions from history.',
+  });
+  try {
+    const state = await window.api.deleteArchivedChatSessions();
+    archivedSessions.length = 0;
+    applySessionState(state, { keepHistoryOpen: true, focusInput: false });
+    setLifecyclePhase(EXECUTION_PHASES.COMPLETED, {
+      text: 'Archived chats deleted',
+      detail: 'All archived sessions were removed.',
+    });
+    return true;
+  } catch {
+    setLifecyclePhase(EXECUTION_PHASES.STOPPED, {
+      text: 'Unable to delete archived chats',
+      detail: 'The archived sessions could not be deleted right now.',
+    });
+    return false;
+  }
+}
+
 async function getSocketTarget() {
-  const fallback = { host: '127.0.0.1', port: 8765 };
+  const fallback = { host: '127.0.0.1', port: 8765, authToken: '' };
   try {
     if (!window.api?.getServerConfig) {
       return fallback;
@@ -1762,7 +2344,8 @@ async function getSocketTarget() {
     const host = typeof config?.host === 'string' && config.host.trim() ? config.host.trim() : fallback.host;
     const portValue = Number(config?.port);
     const port = Number.isInteger(portValue) && portValue > 0 ? portValue : fallback.port;
-    return { host, port };
+    const authToken = typeof config?.authToken === 'string' ? config.authToken.trim() : '';
+    return { host, port, authToken };
   } catch {
     return fallback;
   }
@@ -2147,7 +2730,8 @@ function handleStopUi(detailText, options = {}) {
 
 async function connectSocket() {
   const target = await getSocketTarget();
-  const wsUrl = `ws://${target.host}:${target.port}`;
+  const authQuery = target.authToken ? `?${new URLSearchParams({ token: target.authToken }).toString()}` : '';
+  const wsUrl = `ws://${target.host}:${target.port}${authQuery}`;
   socket = new WebSocket(wsUrl);
 
   socket.addEventListener('open', () => {
@@ -2190,6 +2774,22 @@ async function connectSocket() {
 
     if (payload.event === 'voice_transcription_error') {
       handleVoiceTranscriptionError(payload);
+      return;
+    }
+
+    if (payload.command === 'vision_capture_started') {
+      visionChatHiddenForCapture = true;
+      hideInputWindow();
+      return;
+    }
+
+    if (payload.command === 'vision_chat_restore') {
+      restoreVisionChatWindow();
+      return;
+    }
+
+    if (payload.command === 'chat_vision_artifact') {
+      appendVisionArtifactMessage(payload);
       return;
     }
 
@@ -2251,6 +2851,22 @@ function hideInputWindow() {
   }
 }
 
+function showInputWindow() {
+  if (window.api?.showInputWindow) {
+    window.api.showInputWindow();
+    return;
+  }
+  if (window.api?.setInputMode) {
+    window.api.setInputMode(true);
+  }
+}
+
+function restoreVisionChatWindow() {
+  if (!visionChatHiddenForCapture) return;
+  visionChatHiddenForCapture = false;
+  showInputWindow();
+}
+
 function submitCommand() {
   if (isCurrentSessionArchived()) {
     setLifecyclePhase(EXECUTION_PHASES.IDLE, {
@@ -2302,10 +2918,12 @@ function submitCommand() {
   });
   updateActionAvailability();
 
-  const screenshotQueued = sendMessage({ event: 'capture_screenshot' });
+  const activeSessionId = currentSession?.sessionId || null;
+  const screenshotQueued = sendMessage({ event: 'capture_screenshot', sessionId: activeSessionId });
   const requestQueued = sendMessage({
     event: 'overlay_input',
     text,
+    sessionId: activeSessionId,
     requestId: `overlay_${now}_${Math.random().toString(16).slice(2, 8)}`,
   });
 
@@ -2341,13 +2959,38 @@ commandInput?.addEventListener('keydown', (event) => {
 commandVoice?.addEventListener('click', () => {
   void toggleVoiceRecording();
 });
-commandSend?.addEventListener('click', () => submitCommand());
-chatHide?.addEventListener('click', () => hideInputWindow());
-chatShortcutsToggle?.addEventListener('click', (event) => {
+function requestStopFromComposer() {
+  if (window.api?.requestStopAll) {
+    window.api.requestStopAll();
+  }
+  handleStopUi('Interrupting running actions now.', {
+    pending: true,
+    addSystemMessage: true,
+  });
+  focusCommandInput();
+}
+
+function handleComposerActionClick() {
+  if (hasActiveWork()) {
+    requestStopFromComposer();
+    return;
+  }
+  submitCommand();
+}
+
+commandSend?.addEventListener('click', () => handleComposerActionClick());
+chatSettingsToggle?.addEventListener('click', (event) => {
   event.stopPropagation();
-  toggleShortcutsPopover();
+  toggleSettingsPopover();
 });
-chatHistoryToggle?.addEventListener('click', () => toggleHistoryPanel());
+chatSettingsHelp?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  showSettingsHelp();
+});
+chatSettingsHistory?.addEventListener('click', () => {
+  closeSettingsPopover();
+  openHistoryPanel();
+});
 historyPanelClose?.addEventListener('click', () => closeHistoryPanel());
 historyFilterActive?.addEventListener('click', () => {
   historyFilter = 'active';
@@ -2358,19 +3001,8 @@ historyFilterArchived?.addEventListener('click', () => {
   renderHistoryList();
 });
 chatNew?.addEventListener('click', () => {
-  closeShortcutsPopover();
+  closeSettingsPopover();
   void createNewChat();
-});
-chatStop?.addEventListener('click', () => {
-  closeShortcutsPopover();
-  if (window.api?.requestStopAll) {
-    window.api.requestStopAll();
-  }
-  handleStopUi('Interrupting running actions now.', {
-    pending: true,
-    addSystemMessage: true,
-  });
-  focusCommandInput();
 });
 
 terminalPanelToggle?.addEventListener('click', () => {
@@ -2389,15 +3021,25 @@ terminalPanelStop?.addEventListener('click', () => {
 });
 
 document.addEventListener('pointerdown', (event) => {
-  if (!isShortcutsPopoverOpen() || !chatShortcutsMenu) return;
-  if (chatShortcutsMenu.contains(event.target)) return;
-  closeShortcutsPopover();
+  if (!isSettingsPopoverOpen() || !chatSettingsMenu) return;
+  if (chatSettingsMenu.contains(event.target)) return;
+  closeSettingsPopover();
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (isVisionArtifactViewerOpen()) {
+    event.preventDefault();
+    closeVisionArtifactViewer();
+    return;
+  }
+  if (isDeleteConfirmationOpen()) {
+    event.preventDefault();
+    cancelDeleteConfirmation();
+    return;
+  }
   event.preventDefault();
-  handleEscapeKey({ restoreShortcutFocus: true });
+  handleEscapeKey({ restoreSettingsFocus: true });
 });
 
 if (window.api?.onShowInputWindow) {
@@ -2416,7 +3058,7 @@ if (window.api?.onShowInputWindow) {
 if (window.api?.onHideInputWindow) {
   window.api.onHideInputWindow(() => {
     cancelVoiceCapture();
-    closeShortcutsPopover();
+    closeSettingsPopover();
     setReadyLifecycle();
   });
 }

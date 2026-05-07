@@ -1,9 +1,10 @@
 import asyncio
 import json
+from urllib.parse import urlencode
 
 import websockets
 
-from core.settings import get_host, get_port
+from core.settings import get_auth_token, get_host, get_port
 
 
 class VisualizationClient:
@@ -28,7 +29,9 @@ class VisualizationClient:
 
   async def _connect(self):
     host, port = get_host(), get_port()
-    uri = f"ws://{host}:{port}"
+    token = get_auth_token()
+    query = f"?{urlencode({'token': token})}" if token else ""
+    uri = f"ws://{host}:{port}{query}"
     # Disable ping_interval since this client only sends (never receives),
     # so ping responses would never be processed and would cause timeouts
     self._socket = await websockets.connect(uri, ping_interval=None)

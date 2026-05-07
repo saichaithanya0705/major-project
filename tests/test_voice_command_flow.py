@@ -102,6 +102,31 @@ async def test_server_voice_transcription_invalid_payload() -> None:
     assert "base64" in payload["error"].lower(), payload
 
 
+async def test_server_overlay_input_forwards_session_id() -> None:
+    observed = {}
+
+    async def _fake_overlay_input(text, session_id=None):
+        observed["text"] = text
+        observed["session_id"] = session_id
+
+    server = VisualizationServer(on_overlay_input=_fake_overlay_input)
+    websocket = _FakeWebSocket([
+        json.dumps({
+            "event": "overlay_input",
+            "requestId": "overlay_test_1",
+            "sessionId": "chat-session-123",
+            "text": "what do you remember here?",
+        })
+    ])
+
+    await server._handle_client(websocket)
+
+    assert observed == {
+        "text": "what do you remember here?",
+        "session_id": "chat-session-123",
+    }, observed
+
+
 def test_transcribe_audio_bytes_posts_expected_request() -> None:
     original_api_key = stt_module.ELEVENLABS_API_KEY
     original_api_base = stt_module.ELEVENLABS_API_BASE
@@ -184,6 +209,7 @@ def test_transcribe_audio_bytes_retries_connection_reset() -> None:
 async def run_checks() -> None:
     await test_server_voice_transcription_success()
     await test_server_voice_transcription_invalid_payload()
+    await test_server_overlay_input_forwards_session_id()
     test_transcribe_audio_bytes_posts_expected_request()
     test_transcribe_audio_bytes_retries_connection_reset()
 

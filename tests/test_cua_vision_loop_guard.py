@@ -15,6 +15,9 @@ from PIL import Image
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
+# Provider tests in this file use mocked 4x4 screenshots and fake provider calls.
+os.environ.setdefault("CUA_VISION_ALLOW_EXTERNAL_SCREENSHOTS", "1")
+
 import agents.cua_vision.single_call as single_call_module
 import agents.cua_vision.agent as vision_agent_module
 from agents.cua_vision.single_call import (

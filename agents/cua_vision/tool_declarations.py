@@ -88,6 +88,48 @@ click_right_click_declaration = {
     },
 }
 
+click_target_declaration = {
+    "name": "click_target",
+    "description": (
+        "Atomically move to the center of a visible target bounding box and click it. "
+        "Prefer this over separate go_to_element + click calls for normal UI clicks."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": _with_click_metadata({
+            "type_of_click": {
+                "type": "string",
+                "enum": ["left click", "double left click", "right click"],
+                "description": "Which mouse click to perform on the target.",
+            },
+            "ymin": {
+                "type": "number",
+                "description": "Top edge of target bounding box, normalized 0-1000 (or ratio 0-1).",
+            },
+            "xmin": {
+                "type": "number",
+                "description": "Left edge of target bounding box, normalized 0-1000 (or ratio 0-1).",
+            },
+            "ymax": {
+                "type": "number",
+                "description": "Bottom edge of target bounding box, normalized 0-1000 (or ratio 0-1).",
+            },
+            "xmax": {
+                "type": "number",
+                "description": "Right edge of target bounding box, normalized 0-1000 (or ratio 0-1).",
+            },
+        }),
+        "required": [
+            "target_description",
+            "type_of_click",
+            "ymin",
+            "xmin",
+            "ymax",
+            "xmax",
+        ],
+    },
+}
+
 go_to_element_declaration = {
     "name": "go_to_element",
     "description": (
@@ -289,6 +331,7 @@ VISION_FUNCTION_DECLARATIONS = [
     type_string_declaration,
     press_ctrl_hotkey_declaration,
     press_alt_hotkey_declaration,
+    click_target_declaration,
     go_to_element_declaration,
     click_left_click_declaration,
     click_double_left_click_declaration,

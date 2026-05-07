@@ -9,8 +9,10 @@ import asyncio
 import json
 import os
 import time
+from types import SimpleNamespace
 
 from integrations.audio import tts_speak
+from agents.cua_vision.action_policy import normalize_click_type
 from agents.cua_vision.action_guard import (
     ClickLoopState,
     action_signature as compute_action_signature,
@@ -32,6 +34,14 @@ from agents.cua_vision.prompts import (
 from agents.cua_vision.image import image_change, reset_image_state
 from agents.cua_vision.runtime_state import (
     get_last_capture_context as _get_last_capture_context,
+    get_last_capture_image as _get_last_capture_image,
+    set_last_capture_context as _set_last_capture_context,
+    set_last_capture_image as _set_last_capture_image,
+)
+from agents.cua_vision.screen_context import (
+    ScreenFrame,
+    capture_active_window_frame,
+    register_provided_screenshot_frame,
 )
 from agents.cua_vision.status_presenter import StatusPresenter
 from agents.cua_vision.visual_feedback import (
@@ -78,6 +88,8 @@ CLICK_TYPE_TO_TOOL = {
     "right click": "click_right_click",
 }
 POSITIONING_TOOLS = {"go_to_element", "crop_and_search"}
+CLICK_TARGET_TOOL = "click_target"
+SCREEN_FRAME_TOOLS = {CLICK_TARGET_TOOL, "go_to_element", "crop_and_search"}
 AUTO_CLICK_AFTER_REPEAT_POSITIONING_THRESHOLD = 2
 POSITION_BUCKET_SIZE = 40
 CLICK_CYCLE_LOOP_STOP_THRESHOLD = 4
@@ -90,7 +102,11 @@ REPEATED_VISUAL_NOOP_FALLBACK_THRESHOLD = 2
 MAX_RUNTIME_OBSERVATIONS = 4
 TARGET_REGION_PADDING_PX = 24
 TARGET_REGION_MIN_SIDE_PX = 48
+DEFAULT_MAX_STEPS = 12
+DEFAULT_MAX_DURATION_SECONDS = 90.0
+DEFAULT_MAX_PROVIDER_CALLS = 12
 VISUAL_EFFECT_VERIFICATION_TOOLS = {
+    "click_target",
     "click_left_click",
     "click_double_left_click",
     "click_right_click",
@@ -112,6 +128,22 @@ TOOL_METADATA_KEYS = {"status_text", "target_description"}
 
 def _is_truthy_env(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 1000) -> int:
+    try:
+        value = int(os.getenv(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return min(max(value, minimum), maximum)
+
+
+def _env_float(name: str, default: float, *, minimum: float = 1.0, maximum: float = 3600.0) -> float:
+    try:
+        value = float(os.getenv(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return min(max(value, minimum), maximum)
 
 
 class DebugStopAfterFirstGoTo(RuntimeError):
@@ -143,17 +175,51 @@ class SingleCallVisionEngine:
         self._last_visual_noop_signature = None
         self._repeated_visual_noop_count = 0
         self._last_position_bbox_args = None
+        self._current_screen_frame: ScreenFrame | None = None
+        self._max_steps = _env_int("CUA_VISION_MAX_STEPS", DEFAULT_MAX_STEPS, minimum=1, maximum=100)
+        self._max_duration_seconds = _env_float(
+            "CUA_VISION_MAX_DURATION_SECONDS",
+            DEFAULT_MAX_DURATION_SECONDS,
+            minimum=5.0,
+            maximum=1800.0,
+        )
+        self._max_provider_calls = _env_int(
+            "CUA_VISION_MAX_PROVIDER_CALLS",
+            DEFAULT_MAX_PROVIDER_CALLS,
+            minimum=1,
+            maximum=100,
+        )
+        self._provider_call_count = 0
         self.debug_stop_after_first_goto = _is_truthy_env(
             os.getenv("CUA_VISION_DEBUG_STOP_AFTER_FIRST_GOTO", "0")
         )
 
-    async def run(self, task: str):
+    async def run(self, task: str, initial_screenshot=None):
         """Execute the task until completion or unrecoverable failure."""
+        started_at = time.monotonic()
+        step_count = 0
+        next_step_screenshot = initial_screenshot
         try:
             self._raise_if_stopped()
             while True:
                 self._raise_if_stopped()
-                response = await self._generate_step_response(task)
+                if step_count >= self._max_steps:
+                    raise RuntimeError(
+                        f"CUA Vision step budget exceeded ({self._max_steps} steps)."
+                    )
+                if (time.monotonic() - started_at) > self._max_duration_seconds:
+                    raise RuntimeError(
+                        f"CUA Vision time budget exceeded ({self._max_duration_seconds:.1f}s)."
+                    )
+                step_count += 1
+                if next_step_screenshot is None:
+                    response = await self._generate_step_response(task)
+                else:
+                    response = await self._generate_step_response(
+                        task,
+                        screenshot=next_step_screenshot,
+                    )
+                    next_step_screenshot = None
                 self._raise_if_stopped()
                 function_calls = self._extract_function_calls(response)
 
@@ -176,19 +242,25 @@ class SingleCallVisionEngine:
         finally:
             await self._hide_statuses(delay_ms=400)
 
-    async def _generate_step_response(self, task: str):
+    async def _generate_step_response(self, task: str, screenshot=None):
         self._raise_if_stopped()
         active_window = get_active_window_title()
         memory_text, _ = get_memory()
 
         model_prompt = self._build_model_prompt(task, active_window, memory_text)
-        screenshot = capture_active_window()
+        if screenshot is None:
+            screen_frame = capture_active_window_frame()
+        elif isinstance(screenshot, ScreenFrame):
+            screen_frame = screenshot
+        else:
+            screen_frame = register_provided_screenshot_frame(screenshot)
+        self._current_screen_frame = screen_frame
 
         thinking_text = THINKING_MESSAGES[self._thinking_index % len(THINKING_MESSAGES)]
         self._thinking_index += 1
         await self._set_status(thinking_text)
 
-        response = await self._generate_provider_step_response(model_prompt, screenshot)
+        response = await self._generate_provider_step_response(model_prompt, screen_frame.image)
         self.agent.retries = 0
         return response
 
@@ -258,6 +330,11 @@ class SingleCallVisionEngine:
                 continue
             for model_name in provider["models"]:
                 self._raise_if_stopped()
+                if self._provider_call_count >= self._max_provider_calls:
+                    raise OpenRouterFallbackError(
+                        f"Vision provider call budget exceeded ({self._max_provider_calls})."
+                    )
+                self._provider_call_count += 1
                 attempt_label = f"{provider['label']}:{model_name}"
                 attempts.append(attempt_label)
                 try:
@@ -323,16 +400,16 @@ First, analyze the screenshot in detail privately.
 Then decide the best NEXT action for this exact screen.
 
 IMPORTANT:
-- You may call ONE function, or a TWO-function position+click sequence.
+- You may call ONE function, or a legacy TWO-function position+click sequence.
+- For normal visible UI clicks, prefer `click_target` with the target bounding box and click type.
 - If you call TWO functions, they must be:
   1) `go_to_element` or `crop_and_search`
   2) then one click tool (`click_left_click`/`click_double_left_click`/`click_right_click`)
 - Never emit more than TWO function calls in one response.
 - Prefer direct action tools (position/click/type/hotkeys) over descriptive selectors.
-- Click actions are two-step:
-  1) Position cursor with `go_to_element` (or `crop_and_search` when uncertain)
-  2) Then click, either immediately in the same response or in the next step
-- Do NOT pass x/y coordinates to click tools.
+- `click_target` is atomic: it maps the visible target bbox, moves the cursor, and clicks immediately.
+- Legacy click tools use only the current cursor location. Do NOT pass x/y coordinates to them.
+- Only use separate `go_to_element`/`crop_and_search` plus a legacy click when you need a positioning-only step.
 - Do not call `go_to_element`/`crop_and_search` repeatedly for the same target on unchanged screen.
 - After positioning for a target, your next step should usually be the click itself.
 - `crop_and_search` is OPTIONAL and should only be used when helpful.
@@ -358,6 +435,26 @@ IMPORTANT:
         except Exception:
             return []
         return [part.function_call for part in parts if part.function_call]
+
+    @staticmethod
+    def _position_click_call_to_click_target(position_call, click_call):
+        position_args = dict(position_call.args or {})
+        click_args = dict(click_call.args or {})
+        converted_args = {
+            key: position_args[key]
+            for key in ("ymin", "xmin", "ymax", "xmax")
+            if key in position_args
+        }
+        converted_args["type_of_click"] = CLICK_TOOL_TO_TYPE[click_call.name]
+        converted_args["target_description"] = (
+            click_args.get("target_description")
+            or position_args.get("target_description")
+            or "target"
+        )
+        status_text = click_args.get("status_text") or position_args.get("status_text")
+        if status_text:
+            converted_args["status_text"] = status_text
+        return SimpleNamespace(name=CLICK_TARGET_TOOL, args=converted_args)
 
     async def _handle_no_function_call(self, task: str) -> bool:
         self._raise_if_stopped()
@@ -392,17 +489,26 @@ IMPORTANT:
         if len(function_calls) >= 2:
             second = function_calls[1]
             if first.name in POSITIONING_TOOLS and second.name in CLICK_TOOL_TO_TYPE:
+                click_target_call = self._position_click_call_to_click_target(first, second)
                 if len(function_calls) >= 3 and function_calls[2].name == "task_is_complete":
                     if len(function_calls) > 3:
                         print(
                             "[VisionAgent] Received more than 3 function calls; "
                             "dropping extras after position+click+complete."
                         )
-                    return function_calls[:3]
+                    return [click_target_call, function_calls[2]]
                 if len(function_calls) > 2:
                     print(
                         "[VisionAgent] Received more than 2 function calls; "
                         "dropping extras after position+click."
+                    )
+                return [click_target_call]
+
+            if first.name == CLICK_TARGET_TOOL and second.name == "task_is_complete":
+                if len(function_calls) > 2:
+                    print(
+                        "[VisionAgent] Received more than 2 function calls; "
+                        "dropping extras after click_target+complete."
                     )
                 return function_calls[:2]
 
@@ -422,12 +528,17 @@ IMPORTANT:
 
     async def _handle_function_calls(self, task: str, function_calls: list) -> bool:
         """Execute one to three controlled tool calls from a single model response."""
-        has_explicit_click = any(call.name in CLICK_TOOL_TO_TYPE for call in function_calls)
+        screen_frame = self._current_screen_frame
+        has_explicit_click = any(
+            call.name in CLICK_TOOL_TO_TYPE or call.name == CLICK_TARGET_TOOL
+            for call in function_calls
+        )
         for function_call in function_calls:
             done = await self._handle_function_call(
                 task,
                 function_call,
                 allow_positioning_autoclick=not has_explicit_click,
+                screen_frame=screen_frame,
             )
             if done:
                 return True
@@ -439,8 +550,10 @@ IMPORTANT:
         task: str,
         function_call,
         allow_positioning_autoclick: bool = True,
+        screen_frame: ScreenFrame | None = None,
     ) -> bool:
         self._raise_if_stopped()
+        action_screen_frame = screen_frame or self._current_screen_frame
         name = function_call.name
         args = dict(function_call.args or {})
 
@@ -470,13 +583,22 @@ IMPORTANT:
             and self.repeated_action_count >= AUTO_CLICK_AFTER_REPEAT_POSITIONING_THRESHOLD
         ):
             auto_click_type = self._infer_click_type(task, args)
-            auto_click_tool = CLICK_TYPE_TO_TOOL[auto_click_type]
             target = resolve_target_description(
                 task=task,
                 args=args,
                 last_target_description=self.last_target_description,
             )
-            auto_click_args = {"target_description": target}
+            bbox_args = self._extract_position_bbox_args(args) or {}
+            if bbox_args:
+                auto_click_tool = CLICK_TARGET_TOOL
+                auto_click_args = {
+                    "target_description": target,
+                    "type_of_click": auto_click_type,
+                    **bbox_args,
+                }
+            else:
+                auto_click_tool = CLICK_TYPE_TO_TOOL[auto_click_type]
+                auto_click_args = {"target_description": target}
             auto_click_signature = self._action_signature(auto_click_tool, auto_click_args)
             pre_action_frame, pre_action_context = (
                 self._capture_verification_snapshot()
@@ -484,7 +606,15 @@ IMPORTANT:
                 else (None, None)
             )
             await self._set_status(f"Position repeated. Executing {auto_click_type} on {target}...")
-            execute_tool_call(auto_click_tool, auto_click_args)
+            auto_click_frame = self._screen_frame_for_tool(auto_click_tool, action_screen_frame)
+            if auto_click_frame is None:
+                execute_tool_call(auto_click_tool, auto_click_args)
+            else:
+                execute_tool_call(
+                    auto_click_tool,
+                    auto_click_args,
+                    screen_frame=auto_click_frame,
+                )
             self.last_target_description = target
             self.last_click_context = {
                 "type_of_click": auto_click_type,
@@ -522,11 +652,23 @@ IMPORTANT:
                 if self._should_verify_visual_effect(name)
                 else (None, None)
             )
+            tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
             if name in {"crop_and_search", "go_to_element"}:
                 # These tools can do blocking model work; run them off-loop.
-                await asyncio.to_thread(execute_tool_call, name, args)
+                if tool_screen_frame is None:
+                    await asyncio.to_thread(execute_tool_call, name, args)
+                else:
+                    await asyncio.to_thread(
+                        execute_tool_call,
+                        name,
+                        args,
+                        screen_frame=tool_screen_frame,
+                    )
             else:
-                execute_tool_call(name, args)
+                if tool_screen_frame is None:
+                    execute_tool_call(name, args)
+                else:
+                    execute_tool_call(name, args, screen_frame=tool_screen_frame)
             self.consecutive_failures = 0
 
             if name in POSITIONING_TOOLS:
@@ -536,9 +678,15 @@ IMPORTANT:
                     last_target_description=self.last_target_description,
                 )
                 self._last_position_bbox_args = self._extract_position_bbox_args(args)
+            elif name == CLICK_TARGET_TOOL:
+                self._last_position_bbox_args = self._extract_position_bbox_args(args)
 
             if name == "go_to_element":
-                await self._maybe_debug_stop_after_first_goto(task, args)
+                await self._maybe_debug_stop_after_first_goto(
+                    task,
+                    args,
+                    screen_frame=action_screen_frame,
+                )
 
             if click_type:
                 resolved_target = resolve_target_description(
@@ -608,7 +756,12 @@ IMPORTANT:
 
             raise
 
-    async def _maybe_debug_stop_after_first_goto(self, task: str, args: dict):
+    async def _maybe_debug_stop_after_first_goto(
+        self,
+        task: str,
+        args: dict,
+        screen_frame: ScreenFrame | None = None,
+    ):
         """Optional debugging: save bbox overlay and stop after first go_to_element."""
         if not self.debug_stop_after_first_goto or self._debug_snapshot_taken:
             return
@@ -629,6 +782,7 @@ IMPORTANT:
                 ymax=float(args["ymax"]),
                 xmax=float(args["xmax"]),
                 target_description=target,
+                screen_frame=screen_frame,
             )
         except Exception as e:
             snapshot_path = f"<failed to save snapshot: {e}>"
@@ -656,8 +810,18 @@ IMPORTANT:
         )
 
     def _resolve_click_type(self, tool_name: str, args: dict) -> str | None:
-        del args
+        if tool_name == CLICK_TARGET_TOOL:
+            return normalize_click_type(args.get("type_of_click", "left click"))
         return resolve_click_type(tool_name, CLICK_TOOL_TO_TYPE)
+
+    @staticmethod
+    def _screen_frame_for_tool(
+        tool_name: str,
+        screen_frame: ScreenFrame | None,
+    ) -> ScreenFrame | None:
+        if tool_name not in SCREEN_FRAME_TOOLS:
+            return None
+        return screen_frame
 
     @staticmethod
     def _extract_position_bbox_args(args: dict) -> dict | None:
@@ -752,12 +916,39 @@ IMPORTANT:
         return dict(context)
 
     def _capture_verification_snapshot(self):
+        saved_context = self._snapshot_current_capture_context()
+        saved_image = _get_last_capture_image()
         try:
-            frame = capture_active_window()
-            return frame, self._snapshot_current_capture_context()
+            verification_frame = capture_active_window_frame()
+            return verification_frame.image, verification_frame.context_dict()
         except Exception as e:
             print(f"[VisionAgent] Verification capture failed: {e}")
             return None, None
+        finally:
+            self._restore_capture_snapshot(saved_context, saved_image)
+
+    @staticmethod
+    def _restore_capture_snapshot(context: dict | None, image) -> None:
+        if isinstance(context, dict):
+            try:
+                _set_last_capture_context(
+                    width=int(context["width"]),
+                    height=int(context["height"]),
+                    logical_width=int(context.get("logical_width") or context["width"]),
+                    logical_height=int(context.get("logical_height") or context["height"]),
+                    offset_x=float(context.get("offset_x", 0.0)),
+                    offset_y=float(context.get("offset_y", 0.0)),
+                    scale_x=float(context.get("scale_x", 1.0)),
+                    scale_y=float(context.get("scale_y", 1.0)),
+                    mode=str(context.get("mode", "restored")),
+                )
+            except Exception as e:
+                print(f"[VisionAgent] Capture context restore failed: {e}")
+        if image is not None:
+            try:
+                _set_last_capture_image(image)
+            except Exception as e:
+                print(f"[VisionAgent] Capture image restore failed: {e}")
 
     @staticmethod
     def _image_similarity(before_frame, after_frame) -> float | None:

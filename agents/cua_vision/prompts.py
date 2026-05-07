@@ -32,7 +32,8 @@ livestream, you must only execute functions that are applicable to the specific 
 
 IMPORTANT RULES:
 - Execute functions on a page-by-page basis
-- You may call ONE function, or a TWO-function position+click sequence
+- You may call ONE function, or a legacy TWO-function position+click sequence
+- For normal visible UI clicks, prefer `click_target` with a target bounding box and click type
 - If you call TWO functions, they must be:
   1) `go_to_element` or `crop_and_search`
   2) then one click tool (`click_left_click` / `click_double_left_click` / `click_right_click`)
@@ -41,9 +42,9 @@ IMPORTANT RULES:
 - Do NOT attempt to do things you don't yet see on screen
 - For every non-terminal action, include a concise status_text argument for UI feedback
 - For click actions, include target_description so fallback localization can be used if needed
-- Clicks are a two-step flow: first position cursor with `go_to_element` (or `crop_and_search`), then call click function
-- Position and click can happen in one response (two calls) when confidence is high
-- `click_left_click` / `click_double_left_click` / `click_right_click` use current cursor location (no x/y params)
+- `click_target` maps the target bounding box and clicks in one atomic action
+- Legacy current-cursor click tools (`click_left_click` / `click_double_left_click` / `click_right_click`) use current cursor location and have no x/y params
+- Only use separate `go_to_element`/`crop_and_search` plus a legacy click when you specifically need to position first
 - Do not call `go_to_element` or `crop_and_search` repeatedly for the same target on unchanged screen
 - After positioning to a target, your next action should usually be the click itself
 - `crop_and_search` is OPTIONAL, not mandatory

@@ -8,8 +8,10 @@ import requests
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import logging
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,8 +31,10 @@ ELEVENLABS_VOICE_ID = str(os.getenv("ELEVENLABS_VOICE_ID") or "JBFqnCBsd6RMkjVDR
 ELEVENLABS_MODEL_ID = str(os.getenv("ELEVENLABS_MODEL_ID") or "eleven_multilingual_v2").strip()
 ELEVENLABS_OUTPUT_FORMAT = str(os.getenv("ELEVENLABS_OUTPUT_FORMAT") or "mp3_44100_128").strip()
 
-# Audio output file
-AUDIO_FILE = "jarvis_audio.mp3"
+# Audio output file. The default basename is resolved into the system temp
+# directory so routine speech does not leave project-root artifacts behind.
+DEFAULT_AUDIO_FILE = "jarvis_audio.mp3"
+AUDIO_FILE = str(os.getenv("JARVIS_TTS_AUDIO_FILE") or DEFAULT_AUDIO_FILE)
 
 # Audio playback subprocess (global for stop functionality)
 _audio_process = None
@@ -114,16 +118,27 @@ $player.Close()
     return None
 
 
-def _play_audio(audio_path):
+def _resolve_audio_output_path() -> Path:
+    configured = Path(AUDIO_FILE)
+    if str(AUDIO_FILE).strip() and configured != Path(DEFAULT_AUDIO_FILE):
+        return configured.expanduser()
+
+    output_dir = Path(tempfile.gettempdir()) / "jarvis" / "tts"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir / f"jarvis_audio_{os.getpid()}_{int(time.time() * 1000)}.mp3"
+
+
+def _play_audio(audio_path) -> bool:
     """Play a generated ElevenLabs audio file."""
     global _audio_process
     resolved_audio_path = Path(audio_path).resolve()
     command = _build_playback_command(resolved_audio_path)
     if not command:
         print(f"[TTS] Audio saved to {resolved_audio_path}, but no supported playback command was found")
-        return
+        return False
 
     process = None
+    played = False
     try:
         popen_kwargs = {
             "stdout": subprocess.DEVNULL,
@@ -139,6 +154,7 @@ def _play_audio(audio_path):
         with _audio_process_lock:
             _audio_process = process
         process.wait()
+        played = process.returncode == 0
     except OSError as e:
         print(f"[TTS] Audio playback failed: {e}")
     finally:
@@ -146,6 +162,7 @@ def _play_audio(audio_path):
             with _audio_process_lock:
                 if _audio_process is process:
                     _audio_process = None
+    return played
 
 
 def _preprocess_text(text: str) -> str:
@@ -209,9 +226,8 @@ def tts_speak(text: str):
         )
 
         if response.status_code == 200:
-            audio_path = Path(AUDIO_FILE)
-            if audio_path.parent != Path("."):
-                audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path = _resolve_audio_output_path()
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Save the audio file
             with open(audio_path, 'wb') as f:
@@ -219,7 +235,12 @@ def tts_speak(text: str):
                     if chunk:
                         f.write(chunk)
 
-            _play_audio(audio_path)
+            played = bool(_play_audio(audio_path))
+            if played:
+                try:
+                    audio_path.unlink()
+                except OSError:
+                    pass
         else:
             print(f'[TTS] API call failed with status {response.status_code}')
 

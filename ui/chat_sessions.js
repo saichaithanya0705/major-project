@@ -4,6 +4,8 @@ const path = require('path');
 const MAX_PERSISTED_CHAT_MESSAGES = 300;
 const MAX_PERSISTED_AGENT_TRACE_ENTRIES = 24;
 const MAX_PERSISTED_AGENT_TRACE_TEXT = 1400;
+const MAX_PERSISTED_MESSAGE_ARTIFACTS = 4;
+const MAX_PERSISTED_IMAGE_DATA_URL_CHARS = 8_000_000;
 const CHAT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 const CHAT_ARCHIVED_DELETE_AFTER_DAYS = 30;
 const CHAT_AUTO_ARCHIVE_MS = CHAT_AUTO_ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
@@ -123,6 +125,35 @@ function createChatSessionManager({
     };
   }
 
+  function sanitizeVisionArtifact(artifact) {
+    if (!artifact || typeof artifact !== 'object') return null;
+    const kind = typeof artifact.kind === 'string' ? artifact.kind.trim() : '';
+    const imageDataUrl = typeof artifact.imageDataUrl === 'string' ? artifact.imageDataUrl.trim() : '';
+    if (kind !== 'vision_screenshot') return null;
+    if (!imageDataUrl.startsWith('data:image/png;base64,')) return null;
+    if (imageDataUrl.length > MAX_PERSISTED_IMAGE_DATA_URL_CHARS) return null;
+
+    const width = Number(artifact.width);
+    const height = Number(artifact.height);
+    const outlineCount = Number(artifact.outlineCount);
+    return {
+      kind,
+      title: truncateText(artifact.title, 80) || 'Analyzed screen',
+      imageDataUrl,
+      width: Number.isFinite(width) && width > 0 ? Math.round(width) : 0,
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : 0,
+      outlineCount: Number.isFinite(outlineCount) && outlineCount > 0 ? Math.round(outlineCount) : 0,
+    };
+  }
+
+  function sanitizeMessageArtifacts(artifacts) {
+    if (!Array.isArray(artifacts)) return [];
+    return artifacts
+      .map(sanitizeVisionArtifact)
+      .filter(Boolean)
+      .slice(0, MAX_PERSISTED_MESSAGE_ARTIFACTS);
+  }
+
   function createChatSessionId() {
     const baseId = new Date().toISOString().replace(/[:.]/g, '-');
     let sessionId = baseId;
@@ -148,6 +179,10 @@ function createChatSessionManager({
       const agentTrace = role === 'assistant' ? sanitizeAgentTrace(item.agentTrace) : null;
       if (agentTrace) {
         message.agentTrace = agentTrace;
+      }
+      const artifacts = role === 'assistant' ? sanitizeMessageArtifacts(item.artifacts) : [];
+      if (artifacts.length > 0) {
+        message.artifacts = artifacts;
       }
       out.push(message);
     }
@@ -390,6 +425,62 @@ function createChatSessionManager({
     return getChatSessionState();
   }
 
+  function unarchiveChatSession(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      return getChatSessionState();
+    }
+
+    const sessions = reconcileChatSessionRetention();
+    const existingSession = sessions.find((session) => session.sessionId === sessionId.trim());
+    if (!existingSession) {
+      return getChatSessionState();
+    }
+
+    const restoredSession = writeChatSessionData({
+      ...existingSession,
+      archivedAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    currentChatSessionId = restoredSession.sessionId;
+    return getChatSessionState(restoredSession.sessionId);
+  }
+
+  function deleteChatSession(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      return getChatSessionState();
+    }
+
+    const normalizedSessionId = sessionId.trim();
+    ensureChatSessionDir();
+    const filePath = getChatSessionFilePath(normalizedSessionId);
+    if (fsApi.existsSync(filePath)) {
+      fsApi.unlinkSync(filePath);
+    }
+
+    if (currentChatSessionId === normalizedSessionId) {
+      currentChatSessionId = null;
+    }
+
+    return getChatSessionState();
+  }
+
+  function deleteArchivedChatSessions() {
+    const sessions = reconcileChatSessionRetention();
+    for (const session of sessions) {
+      if (!session.archivedAt) continue;
+      const filePath = getChatSessionFilePath(session.sessionId);
+      if (fsApi.existsSync(filePath)) {
+        fsApi.unlinkSync(filePath);
+      }
+      if (currentChatSessionId === session.sessionId) {
+        currentChatSessionId = null;
+      }
+    }
+
+    return getChatSessionState();
+  }
+
   function initialize() {
     currentChatSessionId = getChatSessionState().currentSessionId;
     return currentChatSessionId;
@@ -402,11 +493,14 @@ function createChatSessionManager({
   return {
     archiveChatSession,
     createChatSession,
+    deleteArchivedChatSessions,
+    deleteChatSession,
     getChatSessionState,
     getCurrentSessionId,
     initialize,
     loadChatSessionData,
     saveChatSessionMessages,
+    unarchiveChatSession,
   };
 }
 

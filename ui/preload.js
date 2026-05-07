@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   onStopAll: (callback) =>
     ipcRenderer.on('stop-all', () => callback()),
   hideInputWindow: () => ipcRenderer.send('input-window-hide-request'),
+  showInputWindow: () => ipcRenderer.send('input-window-show-request'),
   requestStopAll: () => ipcRenderer.send('request-stop-all'),
   setInputMode: (enabled) => ipcRenderer.send('toggle-input-mode', enabled),
   getPlatform: () => process.platform,
@@ -27,8 +28,12 @@ contextBridge.exposeInMainWorld('api', {
   getServerConfig: () => ipcRenderer.invoke('get-server-config'),
   getChatSessionInfo: () => ipcRenderer.invoke('get-chat-session-info'),
   getChatSessionState: (sessionId) => ipcRenderer.invoke('get-chat-session-state', { sessionId }),
+  openVisionArtifactImage: (imageDataUrl) => ipcRenderer.invoke('open-vision-artifact-image', { imageDataUrl }),
   createChatSession: () => ipcRenderer.invoke('create-chat-session'),
   archiveChatSession: (sessionId) => ipcRenderer.invoke('archive-chat-session', { sessionId }),
+  unarchiveChatSession: (sessionId) => ipcRenderer.invoke('unarchive-chat-session', { sessionId }),
+  deleteChatSession: (sessionId) => ipcRenderer.invoke('delete-chat-session', { sessionId }),
+  deleteArchivedChatSessions: () => ipcRenderer.invoke('delete-archived-chat-sessions'),
   loadChatSession: (sessionId) => ipcRenderer.invoke('load-chat-session', { sessionId }),
   saveChatSession: (sessionId, messages) => ipcRenderer.invoke('save-chat-session', { sessionId, messages })
 });

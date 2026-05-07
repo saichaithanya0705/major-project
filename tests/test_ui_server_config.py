@@ -57,7 +57,7 @@ def test_runtime_state_overrides_settings_values(tmp_path: Path) -> None:
         {"JARVIS_RUNTIME_STATE_PATH": str(runtime_path)},
     )
 
-    assert result == {"host": "127.0.0.1", "port": 9876}
+    assert result == {"host": "127.0.0.1", "port": 9876, "authToken": ""}
 
 
 def test_invalid_runtime_values_fall_back_to_settings(tmp_path: Path) -> None:
@@ -82,7 +82,7 @@ def test_invalid_runtime_values_fall_back_to_settings(tmp_path: Path) -> None:
         {"JARVIS_RUNTIME_STATE_PATH": str(runtime_path)},
     )
 
-    assert result == {"host": "192.168.1.25", "port": 8766}
+    assert result == {"host": "192.168.1.25", "port": 8766, "authToken": ""}
 
 
 def test_missing_files_use_defaults(tmp_path: Path) -> None:
@@ -97,7 +97,7 @@ def test_missing_files_use_defaults(tmp_path: Path) -> None:
         ),
     )
 
-    assert result == {"host": "127.0.0.1", "port": 8765}
+    assert result == {"host": "127.0.0.1", "port": 8765, "authToken": ""}
 
 
 def test_runtime_state_path_honors_explicit_env(tmp_path: Path) -> None:

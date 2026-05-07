@@ -6,6 +6,7 @@ typing, and using keyboard shortcuts. It uses a vision model to understand
 what's on screen and decide what actions to take.
 """
 import time
+import inspect
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -14,6 +15,7 @@ from agents.cua_vision.tools import (
     reset_state,
     clear_stop_request,
     capture_active_window,
+    capture_active_window_frame,
     get_active_window_title,
     execute_tool_call,
 )
@@ -93,7 +95,7 @@ class VisionAgent:
         self.chat_history = []
 
         try:
-            await self._interact_with_screen(task)
+            await self._call_interaction_loop(task, screenshot)
             return {
                 "success": True,
                 "result": "Task completed",
@@ -112,11 +114,46 @@ class VisionAgent:
                 "error": str(e)
             }
 
-    async def _interact_with_screen(self, task: str):
+    async def _call_interaction_loop(self, task: str, screenshot: Image.Image = None):
+        """
+        Invoke the interaction loop while preserving older test/plugin shims
+        that replaced _interact_with_screen with a one-argument coroutine.
+        """
+        interact = self._interact_with_screen
+        try:
+            signature = inspect.signature(interact)
+            parameters = list(signature.parameters.values())
+            supports_keyword = (
+                "screenshot" in signature.parameters
+                or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters)
+            )
+            supports_positional = (
+                any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in parameters)
+                or len([
+                    param
+                    for param in parameters
+                    if param.kind in {
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    }
+                ]) >= 2
+            )
+        except (TypeError, ValueError):
+            supports_keyword = True
+            supports_positional = False
+
+        if supports_keyword:
+            await interact(task, screenshot=screenshot)
+        elif supports_positional:
+            await interact(task, screenshot)
+        else:
+            await interact(task)
+
+    async def _interact_with_screen(self, task: str, screenshot: Image.Image = None):
         """Run the primary single-call execution loop for screen interaction."""
         print('[VisionAgent] Starting single-call screen interaction...')
         engine = SingleCallVisionEngine(self)
-        await engine.run(task)
+        await engine.run(task, initial_screenshot=screenshot)
 
     async def look_at_screen_and_respond(self, prompt: str) -> str:
         """
@@ -134,7 +171,8 @@ class VisionAgent:
         print('[VisionAgent] Looking at screen...')
 
         active_window = get_active_window_title()
-        screenshot = capture_active_window()
+        screen_frame = capture_active_window_frame()
+        screenshot = screen_frame.image
 
         system_instruction = LOOK_AT_SCREEN_PROMPT.format(active_window=active_window)
 
@@ -170,7 +208,11 @@ class VisionAgent:
         for function_call in function_calls:
             print(f'[VisionAgent] Function: {function_call.name}')
             try:
-                execute_tool_call(function_call.name, function_call.args)
+                execute_tool_call(
+                    function_call.name,
+                    function_call.args,
+                    screen_frame=screen_frame,
+                )
             except ValueError:
                 print(f'[VisionAgent] Unknown function: {function_call.name}')
 

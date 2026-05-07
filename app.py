@@ -3,12 +3,20 @@ import asyncio
 import time
 import shutil
 import subprocess
+from pathlib import Path
 from PIL import ImageGrab
-from core.settings import set_host_and_port, set_screen_size, get_model_configs, get_screen_size
+from core.artifact_lifecycle import cleanup_runtime_artifacts
+from core.settings import (
+    ensure_auth_token,
+    get_model_configs,
+    get_screen_size,
+    set_host_and_port,
+    set_screen_size,
+)
 
 from models.models import call_gemini, preflight_router_configuration, store_screenshot
 from agents.browser.agent import BrowserAgent
-from agents.jarvis.tools import stop_all_actions
+from agents.jarvis.tools import clear_annotation_actions, stop_all_actions
 from agents.cua_cli.agent import CLIAgent
 from agents.cua_vision.tools import (
     reset_state as reset_cua_vision_state,
@@ -16,6 +24,24 @@ from agents.cua_vision.tools import (
 )
 from integrations.audio import transcribe_audio_bytes
 from ui.server import VisualizationServer
+
+
+def run_runtime_cleanup(project_root: str | os.PathLike[str]) -> None:
+    try:
+        report = cleanup_runtime_artifacts(
+            project_root=Path(project_root),
+            active_background_logs=CLIAgent.active_background_log_paths(),
+        )
+    except Exception as exc:
+        print(f"[Cleanup] Skipped runtime cleanup: {type(exc).__name__}: {exc}")
+        return
+    if report.deleted or report.rotated:
+        print(
+            f"[Cleanup] Removed {len(report.deleted)} stale artifact(s); "
+            f"rotated {len(report.rotated)} log file(s)."
+        )
+    if report.errors:
+        print(f"[Cleanup] {len(report.errors)} cleanup error(s) skipped.")
 
 
 def maybe_launch_electron_ui(project_root: str):
@@ -60,9 +86,13 @@ def maybe_launch_electron_ui(project_root: str):
 
 
 async def main():
+    project_root = Path(__file__).resolve().parent
+    run_runtime_cleanup(project_root)
+
     # Figure out open port and set it in settings.json
-    settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
+    settings_path = str(project_root / "settings.json")
     host, port = set_host_and_port(settings_path)
+    auth_token = ensure_auth_token(settings_path)
 
     # Figure out dimensions of the user's screen and set it in settings.json.
     # Fallback to configured size if capture is unavailable at startup.
@@ -95,6 +125,7 @@ async def main():
     current_task = None
     task_lock = asyncio.Lock()
     last_overlay_text = ""
+    last_overlay_session_id = ""
     last_overlay_ts = 0.0
 
     async def stop_all():
@@ -110,10 +141,10 @@ async def main():
         stop_all_actions()
         reset_cua_vision_state()
 
-    async def _run_overlay_task(text: str):
+    async def _run_overlay_task(text: str, session_id: str | None = None):
         nonlocal current_task
         try:
-            await call_gemini(text, rapid_response_model, jarvis_model)
+            await call_gemini(text, rapid_response_model, jarvis_model, session_id=session_id)
         except asyncio.CancelledError:
             print("Active task cancelled.")
         except Exception as exc:
@@ -123,17 +154,23 @@ async def main():
                 if current_task is asyncio.current_task():
                     current_task = None
 
-    async def handle_overlay_input(text):
-        nonlocal current_task, last_overlay_text, last_overlay_ts
+    async def handle_overlay_input(text, session_id: str | None = None):
+        nonlocal current_task, last_overlay_text, last_overlay_session_id, last_overlay_ts
         text = text.strip()
         if not text:
             return
+        normalized_session_id = str(session_id or "").strip()
         now = time.monotonic()
-        if text == last_overlay_text and (now - last_overlay_ts) < 1.2:
+        if (
+            text == last_overlay_text
+            and normalized_session_id == last_overlay_session_id
+            and (now - last_overlay_ts) < 1.2
+        ):
             print(f"Overlay input ignored (duplicate within 1.2s): {text}")
             return
 
         last_overlay_text = text
+        last_overlay_session_id = normalized_session_id
         last_overlay_ts = now
         async with task_lock:
             if current_task and not current_task.done():
@@ -141,7 +178,7 @@ async def main():
                 return
             print(f"Overlay input: {text}")
             BrowserAgent.clear_stop_request()
-            task = asyncio.create_task(_run_overlay_task(text))
+            task = asyncio.create_task(_run_overlay_task(text, session_id=normalized_session_id or None))
             current_task = task
 
     async def handle_voice_transcription(audio_bytes: bytes, mime_type: str, filename: str) -> str:
@@ -155,14 +192,16 @@ async def main():
     server = VisualizationServer(
         host=host,
         port=port,
+        auth_token=auth_token,
         on_overlay_input=handle_overlay_input,
         on_capture_screenshot=store_screenshot,
         on_stop_all=stop_all,
+        on_clear_annotations=clear_annotation_actions,
         on_transcribe_audio=handle_voice_transcription,
     )
     await server.start()
     print(f"Visualization server listening at ws://{host}:{port}")
-    maybe_launch_electron_ui(os.path.dirname(__file__))
+    maybe_launch_electron_ui(str(project_root))
     print("Waiting for overlay client connection...")
     await server.wait_for_client()
     print("Overlay client connected.")
@@ -174,5 +213,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     finally:
-        # _clear_screen()
-        pass
+        run_runtime_cleanup(Path(__file__).resolve().parent)

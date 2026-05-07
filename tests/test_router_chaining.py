@@ -53,7 +53,7 @@ async def test_chains_multiple_agents_then_finishes() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -98,7 +98,7 @@ async def test_repeated_step_loop_recovers_and_finishes() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -150,7 +150,7 @@ async def test_single_full_agent_step_finishes_without_followup_router() -> None
             type(self).route_calls += 1
             return await super().route_request(prompt)
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -202,7 +202,7 @@ async def test_partial_browser_step_continues_with_visual_agent_before_finishing
     direct_messages: list[str] = []
     user_request = "goto chat.openai.com website and ask it for top 3 ml learning resources"
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         if agent == "browser":
@@ -283,7 +283,7 @@ async def test_direct_response_repeat_artifact_is_sanitized() -> None:
 
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         return {
             "agent": agent,
@@ -338,7 +338,7 @@ async def test_screen_context_then_actionable_agent() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -407,7 +407,7 @@ async def test_visual_question_uses_router_then_jarvis() -> None:
             type(self).route_calls += 1
             return await super().route_request(prompt)
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -455,7 +455,7 @@ async def test_execution_request_reroutes_jarvis_to_cli() -> None:
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -501,7 +501,7 @@ async def test_execution_request_reroutes_jarvis_to_browser_when_url_task() -> N
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -547,7 +547,7 @@ async def test_window_management_request_reroutes_jarvis_to_cua_vision() -> None
     executed_agents: list[str] = []
     direct_messages: list[str] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None):
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         agent = routing_result.get("agent", "unknown")
         executed_agents.append(agent)
         return {
@@ -583,6 +583,39 @@ async def test_window_management_request_reroutes_jarvis_to_cua_vision() -> None
         model_module._run_routed_agent_step = original_run_step
         if original_direct_response is not None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+async def test_call_gemini_uses_session_scoped_rapid_history() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    prompts: list[str] = []
+
+    class _CapturingRouterModel:
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            prompts.append(prompt)
+            return {"agent": "direct", "response_text": "done"}
+
+    model_module.RAPID_SESSION_STATE.clear_history("chat-alpha")
+    model_module.RAPID_SESSION_STATE.clear_history("chat-beta")
+    model_module.GeminiModel = _CapturingRouterModel
+    model_module.ROUTER_TOOL_MAP["direct_response"] = lambda **_kwargs: None
+    try:
+        await model_module.call_gemini("alpha-only memory", "rapid", "jarvis", session_id="chat-alpha")
+        await model_module.call_gemini("beta asks a question", "rapid", "jarvis", session_id="chat-beta")
+        await model_module.call_gemini("alpha follow-up", "rapid", "jarvis", session_id="chat-alpha")
+    finally:
+        model_module.GeminiModel = original_model_cls
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+    assert len(prompts) == 3, prompts
+    assert "alpha-only memory" not in prompts[1], prompts[1]
+    assert "beta asks a question" not in prompts[2], prompts[2]
+    assert "alpha-only memory" in prompts[2], prompts[2]
 
 
 def test_router_refusal_task_is_replaced_with_original_request() -> None:
@@ -956,6 +989,7 @@ async def run_checks() -> None:
     await test_execution_request_reroutes_jarvis_to_cli()
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
     await test_window_management_request_reroutes_jarvis_to_cua_vision()
+    await test_call_gemini_uses_session_scoped_rapid_history()
 
 
 if __name__ == "__main__":

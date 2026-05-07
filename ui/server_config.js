@@ -49,7 +49,10 @@ function getServerConfig({
   const port = Number.isInteger(runtimePort) && runtimePort > 0
     ? runtimePort
     : (Number.isInteger(settingsPort) && settingsPort > 0 ? settingsPort : defaultConfig.port);
-  return { host, port };
+  const authToken = typeof runtime.auth_token === 'string' && runtime.auth_token.trim()
+    ? runtime.auth_token.trim()
+    : (typeof runtime.authToken === 'string' && runtime.authToken.trim() ? runtime.authToken.trim() : '');
+  return { host, port, authToken };
 }
 
 module.exports = {

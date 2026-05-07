@@ -17,6 +17,7 @@ class RapidOrchestratorDeps:
     format_rapid_history_for_prompt: Callable[[], str]
     run_routed_agent_step: Callable[..., Awaitable[dict[str, Any]]]
     get_stored_screenshot: Callable[[], Any]
+    prepare_vision_screenshot: Callable[..., Awaitable[Any]]
     clean_text: Callable[[object, str, int], str]
     format_chain_state_for_prompt: Callable[..., str]
     apply_routing_guardrails: Callable[..., dict[str, Any]]
@@ -336,7 +337,7 @@ async def run_rapid_request(
                 f"[Router][Chain] Step {step_index + 1}/{deps.max_router_chain_steps}: "
                 f"agent=screen_context task={deps.clean_text(judge_task, '', 200)}"
             )
-            screenshot = deps.get_stored_screenshot()
+            screenshot = await deps.prepare_vision_screenshot(keep_chat_hidden=False)
             screen_context_started = time.monotonic()
             deps.log_assistant_event(
                 "agent_step_started",
@@ -425,6 +426,7 @@ async def run_rapid_request(
             routing_result=routing_result,
             jarvis_model=jarvis_model,
             request_id=request_id,
+            prepare_vision_screenshot=deps.prepare_vision_screenshot,
         )
         chain_steps.append(step_result)
         deps.append_rapid_history(

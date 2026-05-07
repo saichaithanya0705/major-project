@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import socket
 import tempfile
 from hashlib import sha1
@@ -8,6 +9,7 @@ from typing import Tuple, Union
 
 DEFAULT_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "..", "settings.json")
 _RUNTIME_STATE_ENV_VAR = "JARVIS_RUNTIME_STATE_PATH"
+_AUTH_TOKEN_BYTES = 32
 
 
 def _read_json_file(path: Path) -> dict:
@@ -68,6 +70,15 @@ def _as_int(value, fallback: int) -> int:
         return fallback
 
 
+def _ensure_auth_token(runtime_state: dict) -> str:
+    token = str(runtime_state.get("auth_token") or "").strip()
+    if token:
+        return token
+    token = secrets.token_urlsafe(_AUTH_TOKEN_BYTES)
+    runtime_state["auth_token"] = token
+    return token
+
+
 # ================================================================================================
 # HOST AND PORT
 # ================================================================================================
@@ -93,6 +104,7 @@ def set_host_and_port(settings_path: str = DEFAULT_SETTINGS_PATH) -> tuple[str, 
 
     runtime_state["host"] = host
     runtime_state["port"] = port
+    _ensure_auth_token(runtime_state)
     _write_runtime_state(runtime_state, settings_path)
 
     return host, port
@@ -111,6 +123,7 @@ def set_runtime_host_and_port(
     runtime_state = _read_runtime_state(settings_path)
     runtime_state["host"] = str(host or "127.0.0.1")
     runtime_state["port"] = _as_int(port, 8765)
+    _ensure_auth_token(runtime_state)
     _write_runtime_state(runtime_state, settings_path)
     return str(runtime_state["host"]), int(runtime_state["port"])
 
@@ -129,6 +142,21 @@ def get_port(settings_path: str = DEFAULT_SETTINGS_PATH) -> int:
         return _as_int(runtime_state.get("port"), 8765)
     settings = _read_settings_file(settings_path)
     return _as_int(settings.get("port"), 8765)
+
+
+def ensure_auth_token(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
+    runtime_state = _read_runtime_state(settings_path)
+    token = _ensure_auth_token(runtime_state)
+    _write_runtime_state(runtime_state, settings_path)
+    return token
+
+
+def get_auth_token(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
+    runtime_state = _read_runtime_state(settings_path)
+    token = str(runtime_state.get("auth_token") or "").strip()
+    if token:
+        return token
+    return ensure_auth_token(settings_path)
 
 
 # ================================================================================================

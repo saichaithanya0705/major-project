@@ -2,8 +2,13 @@
 Screen capture and coordinate mapping helpers for CUA Vision tools.
 """
 
+from __future__ import annotations
+
 import os
 import time
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Mapping
 
 from PIL import Image, ImageDraw, ImageGrab
 
@@ -30,8 +35,94 @@ AUTO_FORCE_ZOOM_MIN_SIDE_LOGICAL_PX = 96
 AUTO_FORCE_ZOOM_MAX_AREA_LOGICAL_PX2 = 14000
 
 
-def capture_active_window() -> Image.Image:
-    """Capture the currently active window and cache frame context."""
+def _normalize_capture_context(context: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(context, Mapping):
+        raise ValueError("ScreenFrame context must be a mapping.")
+
+    width = max(int(context["width"]), 1)
+    height = max(int(context["height"]), 1)
+    logical_width = max(int(context.get("logical_width") or width), 1)
+    logical_height = max(int(context.get("logical_height") or height), 1)
+    scale_x = float(context.get("scale_x", float(width) / float(logical_width)))
+    scale_y = float(context.get("scale_y", float(height) / float(logical_height)))
+    if scale_x <= 0:
+        scale_x = 1.0
+    if scale_y <= 0:
+        scale_y = 1.0
+
+    return {
+        "width": width,
+        "height": height,
+        "logical_width": logical_width,
+        "logical_height": logical_height,
+        "offset_x": float(context.get("offset_x", 0.0)),
+        "offset_y": float(context.get("offset_y", 0.0)),
+        "scale_x": scale_x,
+        "scale_y": scale_y,
+        "mode": str(context.get("mode", "unknown")),
+    }
+
+
+@dataclass(frozen=True)
+class ScreenFrame:
+    """
+    Immutable capture frame used to bind model reasoning to action mapping.
+
+    Legacy helpers still publish the most recent frame to runtime_state for
+    compatibility, but the primary action path should pass this object through
+    explicitly instead of reading ambient global capture metadata.
+    """
+
+    image: Image.Image
+    context: Mapping[str, Any]
+    active_window: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "context",
+            MappingProxyType(_normalize_capture_context(self.context)),
+        )
+
+    def context_dict(self) -> dict[str, Any]:
+        return dict(self.context)
+
+
+def _publish_screen_frame(frame: ScreenFrame) -> None:
+    context = frame.context
+    _set_last_capture_context(
+        width=int(context["width"]),
+        height=int(context["height"]),
+        logical_width=int(context["logical_width"]),
+        logical_height=int(context["logical_height"]),
+        offset_x=float(context["offset_x"]),
+        offset_y=float(context["offset_y"]),
+        scale_x=float(context["scale_x"]),
+        scale_y=float(context["scale_y"]),
+        mode=str(context["mode"]),
+    )
+    _set_last_capture_image(frame.image)
+
+
+def _make_screen_frame(
+    image: Image.Image,
+    context: Mapping[str, Any],
+    *,
+    active_window: str | None = None,
+    publish: bool = True,
+) -> ScreenFrame:
+    frame = ScreenFrame(
+        image=image,
+        context=context,
+        active_window=active_window,
+    )
+    if publish:
+        _publish_screen_frame(frame)
+    return frame
+
+
+def capture_active_window_frame() -> ScreenFrame:
+    """Capture the currently active window as an explicit immutable frame."""
     try:
         bbox = _get_active_window_bbox()
         if bbox:
@@ -40,19 +131,20 @@ def capture_active_window() -> Image.Image:
             logical_height = max(int(bbox[3] - bbox[1]), 1)
             scale_x = float(image.size[0]) / float(logical_width)
             scale_y = float(image.size[1]) / float(logical_height)
-            _set_last_capture_context(
-                width=image.size[0],
-                height=image.size[1],
-                logical_width=logical_width,
-                logical_height=logical_height,
-                offset_x=bbox[0],
-                offset_y=bbox[1],
-                scale_x=scale_x,
-                scale_y=scale_y,
-                mode="active_window",
+            return _make_screen_frame(
+                image,
+                {
+                    "width": image.size[0],
+                    "height": image.size[1],
+                    "logical_width": logical_width,
+                    "logical_height": logical_height,
+                    "offset_x": bbox[0],
+                    "offset_y": bbox[1],
+                    "scale_x": scale_x,
+                    "scale_y": scale_y,
+                    "mode": "active_window",
+                },
             )
-            _set_last_capture_image(image)
-            return image
     except Exception as e:
         print(f"Error capturing active window: {e}")
 
@@ -68,19 +160,74 @@ def capture_active_window() -> Image.Image:
     logical_height = max(int(logical_height), 1)
     scale_x = float(image.size[0]) / float(logical_width)
     scale_y = float(image.size[1]) / float(logical_height)
-    _set_last_capture_context(
-        width=image.size[0],
-        height=image.size[1],
-        logical_width=logical_width,
-        logical_height=logical_height,
-        offset_x=0.0,
-        offset_y=0.0,
-        scale_x=scale_x,
-        scale_y=scale_y,
-        mode="full_screen",
+    return _make_screen_frame(
+        image,
+        {
+            "width": image.size[0],
+            "height": image.size[1],
+            "logical_width": logical_width,
+            "logical_height": logical_height,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "scale_x": scale_x,
+            "scale_y": scale_y,
+            "mode": "full_screen",
+        },
     )
-    _set_last_capture_image(image)
-    return image
+
+
+def capture_active_window() -> Image.Image:
+    """Capture the active window and publish the frame for legacy callers."""
+    return capture_active_window_frame().image
+
+
+def register_provided_screenshot_frame(image: Image.Image) -> ScreenFrame:
+    """
+    Cache a caller-provided full-screen screenshot as an explicit model frame.
+
+    Routed CUA calls hide/restore the chat UI before capturing a screenshot.
+    When that frame is supplied by the router, the vision engine must reason
+    and map coordinates against that exact image rather than recapturing.
+    """
+    if image is None:
+        raise ValueError("Provided screenshot is required.")
+
+    try:
+        width, height = image.size
+    except Exception:
+        raise ValueError("Provided screenshot must be a PIL image-like object.") from None
+
+    try:
+        if pyautogui is not None:
+            logical_width, logical_height = pyautogui.size()
+        else:
+            logical_width, logical_height = image.size
+    except Exception:
+        logical_width, logical_height = image.size
+
+    logical_width = max(int(logical_width), 1)
+    logical_height = max(int(logical_height), 1)
+    scale_x = float(width) / float(logical_width)
+    scale_y = float(height) / float(logical_height)
+    return _make_screen_frame(
+        image,
+        {
+            "width": width,
+            "height": height,
+            "logical_width": logical_width,
+            "logical_height": logical_height,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "scale_x": scale_x,
+            "scale_y": scale_y,
+            "mode": "provided_full_screen",
+        },
+    )
+
+
+def register_provided_screenshot(image: Image.Image) -> Image.Image:
+    """Register a caller-provided screenshot and return the image for legacy callers."""
+    return register_provided_screenshot_frame(image).image
 
 
 def get_active_window_title() -> str:
@@ -154,14 +301,41 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def _bbox_center_to_screen_coords(ymin: float, xmin: float, ymax: float, xmax: float) -> tuple[float, float]:
+def _context_for_mapping(
+    screen_frame: ScreenFrame | None = None,
+    context: Mapping[str, Any] | None = None,
+    *,
+    error_message: str,
+) -> dict[str, Any]:
+    if screen_frame is not None:
+        return screen_frame.context_dict()
+    if context is not None:
+        return _normalize_capture_context(context)
+
+    runtime_context = _get_last_capture_context()
+    if not runtime_context:
+        capture_active_window_frame()
+        runtime_context = _get_last_capture_context()
+    if not runtime_context:
+        raise RuntimeError(error_message)
+    return _normalize_capture_context(runtime_context)
+
+
+def _bbox_center_to_screen_coords(
+    ymin: float,
+    xmin: float,
+    ymax: float,
+    xmax: float,
+    *,
+    screen_frame: ScreenFrame | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> tuple[float, float]:
     """Map a bbox center from the last model frame to absolute screen coordinates."""
-    context = _get_last_capture_context()
-    if not context:
-        capture_active_window()
-        context = _get_last_capture_context()
-    if not context:
-        raise RuntimeError("No capture context available for bbox coordinate mapping")
+    context = _context_for_mapping(
+        screen_frame,
+        context,
+        error_message="No capture context available for bbox coordinate mapping",
+    )
 
     width = int(context.get("logical_width") or context["width"])
     height = int(context.get("logical_height") or context["height"])
@@ -187,14 +361,21 @@ def _bbox_center_to_screen_coords(ymin: float, xmin: float, ymax: float, xmax: f
     return (center_x_window + offset_x, center_y_window + offset_y)
 
 
-def _bbox_logical_dimensions(ymin: float, xmin: float, ymax: float, xmax: float) -> tuple[float, float]:
+def _bbox_logical_dimensions(
+    ymin: float,
+    xmin: float,
+    ymax: float,
+    xmax: float,
+    *,
+    screen_frame: ScreenFrame | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> tuple[float, float]:
     """Return bbox width/height in logical screen pixels."""
-    context = _get_last_capture_context()
-    if not context:
-        capture_active_window()
-        context = _get_last_capture_context()
-    if not context:
-        raise RuntimeError("No capture context available for bbox sizing")
+    context = _context_for_mapping(
+        screen_frame,
+        context,
+        error_message="No capture context available for bbox sizing",
+    )
 
     width = int(context.get("logical_width") or context["width"])
     height = int(context.get("logical_height") or context["height"])
@@ -222,7 +403,8 @@ def _bbox_to_capture_pixel_box(
     xmin: float,
     ymax: float,
     xmax: float,
-    context: dict | None = None,
+    context: Mapping[str, Any] | None = None,
+    screen_frame: ScreenFrame | None = None,
 ) -> tuple[float, float, float, float]:
     """
     Map bbox args to pixel coordinates on the stored capture image.
@@ -230,12 +412,11 @@ def _bbox_to_capture_pixel_box(
     Args are interpreted in logical coordinates (0-1000/0-1/logical px),
     then scaled into capture-image pixels.
     """
-    context = context or _get_last_capture_context()
-    if not context:
-        capture_active_window()
-        context = _get_last_capture_context()
-    if not context:
-        raise RuntimeError("No capture context available for bbox pixel mapping")
+    context = _context_for_mapping(
+        screen_frame,
+        context,
+        error_message="No capture context available for bbox pixel mapping",
+    )
 
     logical_width = int(context.get("logical_width") or context["width"])
     logical_height = int(context.get("logical_height") or context["height"])
@@ -268,14 +449,28 @@ def save_go_to_element_debug_snapshot(
     ymax: float,
     xmax: float,
     target_description: str = "",
+    screen_frame: ScreenFrame | None = None,
 ) -> str:
     """Save annotated debug image showing the bbox and its computed center."""
-    image = _get_last_capture_image()
-    if image is None:
-        image = capture_active_window()
+    if screen_frame is not None:
+        try:
+            image = screen_frame.image.copy()
+        except Exception:
+            image = screen_frame.image
+        context = screen_frame.context_dict()
+    else:
+        image = _get_last_capture_image()
+        if image is None:
+            image = capture_active_window()
+        context = _get_last_capture_context() or {}
 
-    context = _get_last_capture_context() or {}
-    left_px, top_px, right_px, bottom_px = _bbox_to_capture_pixel_box(ymin, xmin, ymax, xmax)
+    left_px, top_px, right_px, bottom_px = _bbox_to_capture_pixel_box(
+        ymin,
+        xmin,
+        ymax,
+        xmax,
+        context=context,
+    )
     center_x = left_px + ((right_px - left_px) / 2.0)
     center_y = top_px + ((bottom_px - top_px) / 2.0)
 

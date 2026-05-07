@@ -11,56 +11,51 @@
         <span id="chat-logo" aria-hidden="true">
           <img src="assets/assistant_mark.svg" alt="">
         </span>
-        <span id="chat-title">JARVIS Assistant</span>
+        <span id="chat-title">JARVIS</span>
       </div>
       <div id="chat-actions">
-        <div id="chat-shortcuts-menu">
-          <button id="chat-shortcuts-toggle" type="button" aria-label="Show shortcuts" aria-haspopup="dialog" aria-expanded="false" title="Show shortcuts">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <rect x="2.5" y="4" width="15" height="12" rx="2"></rect>
-              <path d="M6 8.5h2"></path>
-              <path d="M10 8.5h4"></path>
-              <path d="M6 11.5h5"></path>
-              <path d="M13 11.5h1"></path>
-            </svg>
-          </button>
-          <div id="chat-shortcuts-popover" role="dialog" aria-label="Shortcut commands" hidden>
-            <div class="chat-shortcuts-popover-header">Shortcut commands</div>
-            <div class="chat-shortcuts-popover-list">
-              <div class="chat-shortcuts-popover-item">
-                <span class="chat-shortcuts-popover-label">Open input</span>
-                <kbd id="chat-guidance-open-shortcut">Ctrl + Shift + Space</kbd>
-              </div>
-              <div class="chat-shortcuts-popover-item">
-                <span class="chat-shortcuts-popover-label">Stop running actions</span>
-                <kbd id="chat-guidance-stop-shortcut">Ctrl + Shift + C</kbd>
-              </div>
-              <div class="chat-shortcuts-popover-item">
-                <span class="chat-shortcuts-popover-label">Hide window</span>
-                <kbd id="chat-guidance-hide-shortcut">Esc</kbd>
-              </div>
-            </div>
-          </div>
-        </div>
-        <button id="chat-history-toggle" type="button" aria-label="Open chat history" title="Open chat history">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M10 4.5a5.5 5.5 0 1 1-4.58 2.44"></path>
-            <path d="M5.5 3.5v3.25h3.25"></path>
-            <path d="M10 7.25v3l2 1.25"></path>
-          </svg>
-        </button>
         <button id="chat-new" type="button" aria-label="Start a new chat" title="Start a new chat">
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M10 4.5v11"></path>
             <path d="M4.5 10h11"></path>
           </svg>
         </button>
-        <button id="chat-stop" type="button" aria-label="Stop all agents" title="Stop all agents">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <circle cx="10" cy="10" r="5.5"></circle>
-          </svg>
-        </button>
-        <button id="chat-hide" type="button" aria-label="Hide chat" title="Hide chat">×</button>
+        <div id="chat-settings-menu">
+          <button id="chat-settings-toggle" type="button" aria-label="Open settings menu" aria-haspopup="dialog" aria-expanded="false" title="Open settings menu">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="2.3"></circle>
+              <path d="M10 2.8v2.1"></path>
+              <path d="M10 15.1v2.1"></path>
+              <path d="M17.2 10h-2.1"></path>
+              <path d="M4.9 10H2.8"></path>
+              <path d="M15.1 4.9l-1.5 1.5"></path>
+              <path d="M6.4 13.6l-1.5 1.5"></path>
+              <path d="M15.1 15.1l-1.5-1.5"></path>
+              <path d="M6.4 6.4 4.9 4.9"></path>
+            </svg>
+          </button>
+          <div id="chat-settings-popover" role="dialog" aria-label="JARVIS menu" hidden>
+            <button id="chat-settings-help" class="chat-settings-item" type="button" aria-expanded="false" aria-controls="chat-help-panel">
+              Help
+            </button>
+            <button id="chat-settings-history" class="chat-settings-item" type="button">
+              Chat History
+            </button>
+            <div id="chat-help-panel" hidden>
+              <div class="chat-help-panel-header">Shortcut commands</div>
+              <div class="chat-help-panel-list">
+                <div class="chat-help-panel-item">
+                  <span class="chat-help-panel-label">Open input</span>
+                  <kbd id="chat-guidance-open-shortcut">Ctrl + Shift + Space</kbd>
+                </div>
+                <div class="chat-help-panel-item">
+                  <span class="chat-help-panel-label">Stop running actions</span>
+                  <kbd id="chat-guidance-stop-shortcut">Ctrl + Shift + C</kbd>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="chat-status" role="status" aria-live="polite" data-phase="idle">
@@ -139,8 +134,11 @@
                   <span class="voice-recording-dot"></span>
                 </span>
               </button>
-              <button id="command-send" type="button" aria-label="Send message">
-                <span class="send-icon">&#8594;</span>
+              <button id="command-send" type="button" aria-label="Send command" title="Send command (Enter)" data-mode="send">
+                <span class="send-icon" aria-hidden="true">&#8594;</span>
+                <svg class="stop-icon" viewBox="0 0 20 20" aria-hidden="true">
+                  <rect x="5.5" y="5.5" width="9" height="9" rx="1.8"></rect>
+                </svg>
               </button>
             </div>
         </div>

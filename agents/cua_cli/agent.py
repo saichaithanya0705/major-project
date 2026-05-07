@@ -107,6 +107,10 @@ def _stringify_terminal_value(value: Any, max_len: int = 6000) -> str:
     return normalized
 
 
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class CLIAgent:
     """
     Desktop control agent using Gemini CLI.
@@ -127,7 +131,7 @@ class CLIAgent:
     def __init__(
         self,
         gemini_cli_path: Optional[str] = None,
-        approval_mode: str = "yolo",
+        approval_mode: Optional[str] = None,
         output_format: str = "stream-json",
         model: Optional[str] = None,
     ):
@@ -136,7 +140,8 @@ class CLIAgent:
 
         Args:
             gemini_cli_path: Path to gemini-cli directory. Defaults to ./gemini-cli
-            approval_mode: Tool approval mode (yolo, auto_edit, default, plan)
+            approval_mode: Tool approval mode (yolo, auto_edit, default, plan).
+                Defaults to conservative "default" unless JARVIS_CLI_FULL_TRUST is set.
             output_format: Output format (text, json, stream-json)
             model: Optional model override
         """
@@ -146,7 +151,11 @@ class CLIAgent:
 
         self.gemini_cli_path = gemini_cli_path
         self.cli_bin = os.path.join(gemini_cli_path, "bundle", "gemini.js")
-        self.approval_mode = approval_mode
+        self.approval_mode = self._resolve_approval_mode(approval_mode)
+        self._full_trust = (
+            _truthy_env("JARVIS_CLI_FULL_TRUST")
+            or self.approval_mode.strip().lower() == "yolo"
+        )
         self.output_format = output_format
         self.model = model
         self._base_workspace_dirs = self._compute_workspace_dirs()
@@ -156,6 +165,16 @@ class CLIAgent:
 
         # Check if CLI is built
         self._check_cli_built()
+
+    @staticmethod
+    def _resolve_approval_mode(approval_mode: Optional[str]) -> str:
+        if approval_mode is not None:
+            cleaned = str(approval_mode).strip()
+            return cleaned or "default"
+        if _truthy_env("JARVIS_CLI_FULL_TRUST"):
+            return "yolo"
+        configured = os.getenv("JARVIS_CLI_APPROVAL_MODE", "").strip()
+        return configured or "default"
 
     def _check_cli_built(self) -> None:
         """Check if the gemini-cli has been built."""
@@ -189,15 +208,20 @@ class CLIAgent:
                 "GEMINI_API_KEY not found in environment. "
                 "Please set it in your .env file."
             )
-        # Enable permissive policy for JARVIS CLI sessions:
-        # allow all tools by default while still blocking dangerous shell commands.
-        env["JARVIS_CLI_PERMISSIVE_POLICY"] = "1"
-        # Trust this workspace so Gemini CLI does not downgrade approval mode.
+        if self._full_trust:
+            # Explicit full-trust mode is reserved for local power-user sessions.
+            env["JARVIS_CLI_PERMISSIVE_POLICY"] = "1"
+            env["GEMINI_SANDBOX"] = "false"
+        else:
+            env.pop("JARVIS_CLI_PERMISSIVE_POLICY", None)
+            if env.get("GEMINI_SANDBOX", "").strip().lower() == "false":
+                env.pop("GEMINI_SANDBOX", None)
+
+        # Trust only the configured workspace scope by default so the CLI can run
+        # non-interactively without granting the user's whole home directory.
         env["GEMINI_CLI_TRUSTED_FOLDERS_PATH"] = self._trusted_folders_path
         # Use a writable Gemini CLI home directory for sessions/tmp storage.
         env["GEMINI_CLI_HOME"] = self._gemini_cli_home
-        # Disable sandbox for maximum tool/file access in JARVIS CLI sessions.
-        env["GEMINI_SANDBOX"] = "false"
         return env
 
     @staticmethod
@@ -267,16 +291,18 @@ class CLIAgent:
         """
         Create a local trustedFolders.json for non-interactive CLI runs.
 
-        Gemini CLI downgrades approval mode to default in untrusted folders.
-        This file marks our working directories as TRUST_FOLDER so YOLO can apply.
+        Full-trust mode additionally trusts the user's home directory. The
+        default mode keeps trust scoped to this project and bundled CLI files.
         """
-        trusted_file = Path(tempfile.gettempdir()) / "jarvis_gemini_trusted_folders.json"
+        trust_profile = "full_trust" if self._full_trust else "scoped"
+        trusted_file = Path(tempfile.gettempdir()) / f"jarvis_gemini_trusted_folders_{trust_profile}.json"
         entries = {
             str(Path(self.gemini_cli_path).resolve()): "TRUST_FOLDER",
             str(Path(self.gemini_cli_path).resolve().parent.parent.parent): "TRUST_FOLDER",
             str(Path.cwd().resolve()): "TRUST_FOLDER",
-            str(Path.home().resolve()): "TRUST_FOLDER",
         }
+        if self._full_trust:
+            entries[str(Path.home().resolve())] = "TRUST_FOLDER"
         trusted_file.write_text(json.dumps(entries, indent=2), encoding="utf-8")
         return str(trusted_file)
 
@@ -490,6 +516,14 @@ class CLIAgent:
     @classmethod
     def list_background_processes(cls) -> List[Dict[str, Any]]:
         return list_background_processes(managed_store=cls._managed_background_processes)
+
+    @classmethod
+    def active_background_log_paths(cls) -> List[str]:
+        return [
+            str(meta.get("log_path"))
+            for meta in cls._managed_background_processes.values()
+            if meta.get("log_path")
+        ]
 
     async def _maybe_handle_background_management_task(self, task: str) -> Optional[dict]:
         lower = task.strip().lower()

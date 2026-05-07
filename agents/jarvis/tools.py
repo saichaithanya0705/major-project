@@ -47,6 +47,7 @@ from core.settings import get_screen_size, get_viewport_size
 from ui.visualization_api.clear_screen import _clear_screen
 from ui.visualization_api.create_text import _create_text
 from ui.visualization_api.client import get_client
+from ui.visualization_api.chat_visibility import send_vision_chat_restore
 from ui.visualization_api.destroy_box import _destroy_box
 from ui.visualization_api.destroy_text import _destroy_text
 from ui.visualization_api.draw_bounding_box import _draw_bounding_box
@@ -71,6 +72,11 @@ _WAITED_AFTER_DIRECT_RESPONSE = True
 _ACTIVE_TEXT_RECTS = {}
 _MAX_INITIAL_ACTION_DELAY_SECONDS = 0.6
 _MAX_INTER_ACTION_DELAY_SECONDS = 2.0
+_ANNOTATION_GAP_SECONDS = 2.0
+_ANNOTATIONS_VISIBLE_AFTER_FINAL_SECONDS = 7.0
+_BOX_VISIBLE_UNTIL_BY_ID = {}
+_ANNOTATIONS_VISIBLE_UNTIL = 0.0
+_NEXT_ANNOTATION_TIME = None
 
 
 def _get_sizes():
@@ -135,7 +141,73 @@ async def set_model_name(name: str):
 
 def queue_action(time: float, func, args, kwargs=None):
     ACTION_QUEUE.append((time, func, args, kwargs or {}))
+    _sort_action_queue()
     _ensure_queue_processor()
+
+
+def _sort_action_queue():
+    ordered = sorted(
+        enumerate(ACTION_QUEUE),
+        key=lambda item: (float(item[1][0]), item[0]),
+    )
+    ACTION_QUEUE.clear()
+    ACTION_QUEUE.extend(item for _, item in ordered)
+
+
+def _is_annotation_cleanup_action(func) -> bool:
+    return getattr(func, "__name__", "") in {
+        "_destroy_box",
+        "_destroy_text_with_layout_reset",
+        "_clear_screen_with_layout_reset",
+    }
+
+
+def _reschedule_annotation_cleanup_actions():
+    if not _ANNOTATIONS_VISIBLE_UNTIL:
+        return
+
+    updated = []
+    has_delayed_clear = False
+    for action_time, func, args, kwargs in ACTION_QUEUE:
+        action_time = float(action_time)
+        kwargs = dict(kwargs or {})
+        if getattr(func, "__name__", "") == "_clear_screen_with_layout_reset":
+            if action_time > 0.05:
+                action_time = max(action_time, _ANNOTATIONS_VISIBLE_UNTIL)
+                kwargs["restore_chat"] = True
+                has_delayed_clear = True
+        elif _is_annotation_cleanup_action(func):
+            action_time = max(float(action_time), _ANNOTATIONS_VISIBLE_UNTIL)
+        updated.append((action_time, func, args, kwargs))
+    if not has_delayed_clear:
+        updated.append((
+            _ANNOTATIONS_VISIBLE_UNTIL,
+            _clear_screen_with_layout_reset,
+            (),
+            {"restore_chat": True},
+        ))
+    ACTION_QUEUE.clear()
+    ACTION_QUEUE.extend(updated)
+    _sort_action_queue()
+
+
+def _record_annotation_time(action_time: float) -> None:
+    global _ANNOTATIONS_VISIBLE_UNTIL
+    _ANNOTATIONS_VISIBLE_UNTIL = max(
+        _ANNOTATIONS_VISIBLE_UNTIL,
+        float(action_time) + _ANNOTATIONS_VISIBLE_AFTER_FINAL_SECONDS,
+    )
+    _reschedule_annotation_cleanup_actions()
+
+
+def _schedule_spaced_annotation(requested_time: float) -> float:
+    global _NEXT_ANNOTATION_TIME
+    action_time = float(requested_time)
+    if _NEXT_ANNOTATION_TIME is not None:
+        action_time = max(action_time, _NEXT_ANNOTATION_TIME)
+    _NEXT_ANNOTATION_TIME = action_time + _ANNOTATION_GAP_SECONDS
+    _record_annotation_time(action_time)
+    return action_time
 
 
 def _ensure_queue_processor():
@@ -259,9 +331,18 @@ async def _create_text_non_overlapping(
     return created_id
 
 
-async def _clear_screen_with_layout_reset():
+async def _clear_screen_with_layout_reset(restore_chat: bool = False):
+    global _ANNOTATIONS_VISIBLE_UNTIL, _NEXT_ANNOTATION_TIME
     _ACTIVE_TEXT_RECTS.clear()
+    _BOX_VISIBLE_UNTIL_BY_ID.clear()
+    _ANNOTATIONS_VISIBLE_UNTIL = 0.0
+    _NEXT_ANNOTATION_TIME = None
     await _clear_screen()
+    if restore_chat:
+        try:
+            await send_vision_chat_restore()
+        except Exception as exc:
+            print(f"[JARVIS][queue] chat restore skipped: {exc}")
 
 
 async def _destroy_text_with_layout_reset(text_id: str):
@@ -272,6 +353,7 @@ async def _destroy_text_with_layout_reset(text_id: str):
 def stop_all_actions():
     """Immediately stop and clear queued overlay actions."""
     global _ACTION_TASK, _LAST_DIRECT_RESPONSE, _WAITED_AFTER_DIRECT_RESPONSE
+    global _ANNOTATIONS_VISIBLE_UNTIL, _NEXT_ANNOTATION_TIME
     ACTION_QUEUE.clear()
     if _ACTION_TASK is not None and not _ACTION_TASK.done():
         _ACTION_TASK.cancel()
@@ -279,6 +361,14 @@ def stop_all_actions():
     _LAST_DIRECT_RESPONSE = None
     _WAITED_AFTER_DIRECT_RESPONSE = True
     _ACTIVE_TEXT_RECTS.clear()
+    _BOX_VISIBLE_UNTIL_BY_ID.clear()
+    _ANNOTATIONS_VISIBLE_UNTIL = 0.0
+    _NEXT_ANNOTATION_TIME = None
+
+
+def clear_annotation_actions():
+    """Cancel queued JARVIS overlay annotations without stopping the active request."""
+    stop_all_actions()
 
 
 # ================================================================================
@@ -286,7 +376,12 @@ def stop_all_actions():
 # ================================================================================
 
 def clear_screen(time: float):
-    queue_action(time, _clear_screen_with_layout_reset, (), {})
+    action_time = float(time)
+    restore_chat = False
+    if action_time > 0.05 and _ANNOTATIONS_VISIBLE_UNTIL:
+        action_time = max(action_time, _ANNOTATIONS_VISIBLE_UNTIL)
+        restore_chat = True
+    queue_action(action_time, _clear_screen_with_layout_reset, (), {"restore_chat": restore_chat})
 
 
 def create_text(
@@ -301,6 +396,7 @@ def create_text(
     text_id: str = None,
 ):
     x, y = denormalize(x, y)
+    _record_annotation_time(float(time))
     queue_action(
         time,
         _create_text_non_overlapping,
@@ -342,6 +438,8 @@ def create_text_for_box(
     align: str = None,
     padding: int = 6,
 ):
+    action_time = float(time)
+    _record_annotation_time(action_time)
     box_x, box_y = denormalize(box["x"], box["y"])
     box_w, box_h = denormalize(box["width"], box["height"])
     box = {"x": box_x, "y": box_y, "width": box_w, "height": box_h}
@@ -373,7 +471,7 @@ def create_text_for_box(
 
     anchor_align = align or default_align
     queue_action(
-        time,
+        action_time,
         _create_text_non_overlapping,
         (
             int(anchor_x),
@@ -391,11 +489,19 @@ def create_text_for_box(
 
 
 def destroy_box(time: float, box_id: str):
-    queue_action(time, _destroy_box, (box_id,), {})
+    action_time = float(time)
+    if box_id:
+        action_time = max(action_time, _BOX_VISIBLE_UNTIL_BY_ID.get(str(box_id), 0.0))
+    if _ANNOTATIONS_VISIBLE_UNTIL:
+        action_time = max(action_time, _ANNOTATIONS_VISIBLE_UNTIL)
+    queue_action(action_time, _destroy_box, (box_id,), {})
 
 
 def destroy_text(time: float, text_id: str):
-    queue_action(time, _destroy_text_with_layout_reset, (text_id,), {})
+    action_time = float(time)
+    if _ANNOTATIONS_VISIBLE_UNTIL:
+        action_time = max(action_time, _ANNOTATIONS_VISIBLE_UNTIL)
+    queue_action(action_time, _destroy_text_with_layout_reset, (text_id,), {})
 
 
 def draw_bounding_box(
@@ -411,10 +517,16 @@ def draw_bounding_box(
     auto_contrast: bool = False,
     fill: str | None = None,
 ):
+    action_time = _schedule_spaced_annotation(float(time))
+    visible_until = action_time + _ANNOTATIONS_VISIBLE_AFTER_FINAL_SECONDS
+    if box_id:
+        key = str(box_id)
+        _BOX_VISIBLE_UNTIL_BY_ID[key] = max(_BOX_VISIBLE_UNTIL_BY_ID.get(key, 0.0), visible_until)
+
     x_min, y_min = denormalize(x_min, y_min)
     x_max, y_max = denormalize(x_max, y_max)
     queue_action(
-        time,
+        action_time,
         _draw_bounding_box,
         (y_min, x_min, y_max, x_max, box_id, stroke, stroke_width, opacity, auto_contrast, fill),
         {},
@@ -442,6 +554,7 @@ def draw_pointer_to_object(
 
     x_pos, y_pos = denormalize(x_pos, y_pos)
     text_x, text_y = denormalize(text_x, text_y)
+    _record_annotation_time(float(time))
 
     queue_action(
         time,

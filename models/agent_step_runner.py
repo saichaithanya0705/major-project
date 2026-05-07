@@ -13,10 +13,13 @@ import traceback
 from typing import Any, Callable
 
 from agents.cua_cli.agent import CLIAgent
+from agents.jarvis.artifact import build_jarvis_visual_artifact
 from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
 from core.assistant_logging import log_assistant_event
 from models.contracts import RoutedStepResult
 from models.routing_policy import _clean_text, _routing_task_text
+from ui.visualization_api.chat_artifact import send_chat_vision_artifact
+from ui.visualization_api.chat_visibility import send_vision_chat_restore
 from ui.visualization_api.status_bubble import (
     complete_status_bubble,
     show_status_bubble,
@@ -129,6 +132,7 @@ async def run_routed_agent_step(
     jarvis_model: str,
     request_id: str,
     get_stored_screenshot: Callable[[], Any],
+    prepare_vision_screenshot: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     def _step(
         *,
@@ -162,15 +166,46 @@ async def run_routed_agent_step(
     if agent_name == "jarvis":
         await _start_non_rapid_status("Analyzing current screen...", source="jarvis")
         started = time.monotonic()
-        screenshot = get_stored_screenshot()
+        if prepare_vision_screenshot is not None:
+            screenshot = await prepare_vision_screenshot(keep_chat_hidden=True)
+        else:
+            screenshot = get_stored_screenshot()
         jarvis_prompt = JARVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{routing_result.get('query', '')}"
         try:
             jarvis_result = await model.generate_jarvis_response(jarvis_prompt, screenshot)
+            function_calls = jarvis_result.get("function_calls") or []
             jarvis_summary = _clean_text(
                 jarvis_result.get("summary"),
                 "JARVIS completed the visual guidance task.",
                 max_len=420,
             )
+            visual_artifact = build_jarvis_visual_artifact(
+                screenshot,
+                function_calls,
+            )
+            has_visual_annotations = any(
+                str(tool_name) in {
+                    "draw_bounding_box",
+                    "draw_pointer_to_object",
+                    "create_text",
+                    "create_text_for_box",
+                }
+                for tool_name, _args in function_calls
+            )
+            if visual_artifact:
+                await _safe_ui_call(
+                    send_chat_vision_artifact(
+                        summary=jarvis_summary or "Screen analysis snapshot",
+                        artifact=visual_artifact,
+                        source="jarvis",
+                    ),
+                    "send_chat_vision_artifact",
+                )
+            if not has_visual_annotations:
+                await _safe_ui_call(
+                    send_vision_chat_restore(),
+                    "send_vision_chat_restore",
+                )
             elapsed = time.monotonic() - started
             print(f"[JARVIS] Completed in {elapsed:.2f}s")
             log_assistant_event(
@@ -200,6 +235,10 @@ async def run_routed_agent_step(
                 source="jarvis",
             )
         except Exception as exc:
+            await _safe_ui_call(
+                send_vision_chat_restore(),
+                "send_vision_chat_restore",
+            )
             error_message = _clean_text(str(exc), "JARVIS task failed.", max_len=420)
             log_assistant_event(
                 "agent_step_failed",
@@ -365,7 +404,10 @@ async def run_routed_agent_step(
 
     if agent_name == "cua_vision":
         await _start_non_rapid_status("Running computer-use task...", source="cua_vision")
-        screenshot = get_stored_screenshot()
+        if prepare_vision_screenshot is not None:
+            screenshot = await prepare_vision_screenshot(keep_chat_hidden=False)
+        else:
+            screenshot = get_stored_screenshot()
         from agents.cua_vision.agent import VisionAgent
         vision_agent = VisionAgent(model_name=jarvis_model)
         task = routing_result.get("task", "")

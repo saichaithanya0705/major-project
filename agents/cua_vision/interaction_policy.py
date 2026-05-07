@@ -50,6 +50,8 @@ def default_status_text(tool_name: str, click_tool_to_type: Mapping[str, str]) -
         return "Using shortcut..."
     if tool_name == "go_to_element":
         return "Positioning cursor to target..."
+    if tool_name == "click_target":
+        return "Clicking target..."
     if tool_name in click_tool_to_type:
         return "Clicking target..."
     if tool_name == "crop_and_search":
@@ -76,6 +78,9 @@ def describe_action_for_feedback(
     )
     if tool_name in click_tool_to_type:
         return f"{click_tool_to_type[tool_name]} on {target}"
+    if tool_name == "click_target":
+        click_type = str(args.get("type_of_click") or "left click").strip()
+        return f"{click_type} on {target}"
     if tool_name == "type_string":
         return "typing into the current field"
     if tool_name in {"press_ctrl_hotkey", "press_alt_hotkey", "press_key_for_duration"}:

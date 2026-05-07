@@ -86,10 +86,26 @@ class BrowserAgent:
     def _register_cleanup_hook(cls) -> None:
         if cls._cleanup_registered:
             return
-        # Best-effort synchronous cleanup marker. OS process teardown will close
-        # any remaining browser processes if async cleanup cannot run here.
-        atexit.register(lambda: None)
+        atexit.register(cls._cleanup_shared_temp_dirs_sync)
         cls._cleanup_registered = True
+
+    @classmethod
+    def _cleanup_shared_temp_dirs_sync(cls) -> None:
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        for attr_name, expected_prefix in (
+            ("_shared_browser_use_user_data_dir", "jarvis-browser-use-"),
+            ("_shared_playwright_home", "jarvis-playwright-home-"),
+        ):
+            raw_path = getattr(cls, attr_name, None)
+            if not raw_path:
+                continue
+            try:
+                path = Path(raw_path).resolve()
+                if cls._is_subpath(path, temp_root) and path.name.startswith(expected_prefix):
+                    shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                pass
+            setattr(cls, attr_name, None)
 
     @staticmethod
     def _is_subpath(path: Path, root: Path) -> bool:

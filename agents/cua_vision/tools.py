@@ -9,6 +9,7 @@ import inspect
 
 from dotenv import load_dotenv
 from PIL import ImageGrab
+from agents.cua_vision.action_policy import normalize_click_type, validate_vision_tool_call
 
 class _FunctionCallingConfig:
     def __init__(self, mode: str):
@@ -50,12 +51,14 @@ from agents.cua_vision.keyboard import (
     release_held_key,
 )
 from agents.cua_vision.screen_context import (
+    ScreenFrame,
     _bbox_center_to_screen_coords,
     _bbox_logical_dimensions,
     _bbox_to_capture_pixel_box,
     _get_active_window_bbox,
     _should_force_zoom,
     capture_active_window,
+    capture_active_window_frame,
     get_active_window_title,
     save_go_to_element_debug_snapshot,
 )
@@ -87,6 +90,7 @@ load_dotenv()
 # ================================================================================
 
 TOOL_METADATA_KEYS = {"status_text", "target_description"}
+INTERNAL_TOOL_ARGS = {"screen_frame"}
 
 FORCED_ZOOM_PAD_PX = 400
 
@@ -121,29 +125,38 @@ def task_is_complete(text: str = "Done."):
 # SCREEN CAPTURE UTILITIES
 # ================================================================================
 
-def go_to_element(
+def _resolve_target_point_from_bbox(
     ymin: float,
     xmin: float,
     ymax: float,
     xmax: float,
     target_description: str = "",
+    screen_frame: ScreenFrame | None = None,
 ):
-    """
-    Move cursor to the center of a target bounding box.
+    if screen_frame is not None:
+        context = screen_frame.context_dict()
+    else:
+        context = _get_last_capture_context()
+        if not context:
+            capture_active_window()
+            context = _get_last_capture_context() or {}
 
-    The bbox should be in active-window coordinates (0-1000, 0-1, or pixels).
-    """
-    context = _get_last_capture_context()
-    if not context:
-        capture_active_window()
-        context = _get_last_capture_context() or {}
-
-    bbox_w, bbox_h = _bbox_logical_dimensions(ymin, xmin, ymax, xmax)
+    bbox_w, bbox_h = _bbox_logical_dimensions(
+        ymin,
+        xmin,
+        ymax,
+        xmax,
+        screen_frame=screen_frame,
+        context=context,
+    )
     target = target_description.strip() if isinstance(target_description, str) else "target"
     auto_zoom = _should_force_zoom(bbox_w, bbox_h)
 
     if auto_zoom:
-        screenshot = _get_last_capture_image()
+        if screen_frame is not None:
+            screenshot = screen_frame.image
+        else:
+            screenshot = _get_last_capture_image()
         if screenshot is None:
             screenshot = capture_active_window()
             context = _get_last_capture_context() or context
@@ -169,9 +182,43 @@ def go_to_element(
         )
         x, y = result["x"], result["y"]
     else:
-        x, y = _bbox_center_to_screen_coords(ymin, xmin, ymax, xmax)
+        x, y = _bbox_center_to_screen_coords(
+            ymin,
+            xmin,
+            ymax,
+            xmax,
+            screen_frame=screen_frame,
+            context=context,
+        )
 
-    context = _get_last_capture_context() or {}
+    if screen_frame is not None:
+        context = screen_frame.context_dict()
+    else:
+        context = _get_last_capture_context() or {}
+    return x, y, bbox_w, bbox_h, auto_zoom, context, target
+
+
+def go_to_element(
+    ymin: float,
+    xmin: float,
+    ymax: float,
+    xmax: float,
+    target_description: str = "",
+    screen_frame: ScreenFrame | None = None,
+):
+    """
+    Move cursor to the center of a target bounding box.
+
+    The bbox should be in active-window coordinates (0-1000, 0-1, or pixels).
+    """
+    x, y, bbox_w, bbox_h, auto_zoom, context, target = _resolve_target_point_from_bbox(
+        ymin=ymin,
+        xmin=xmin,
+        ymax=ymax,
+        xmax=xmax,
+        target_description=target_description,
+        screen_frame=screen_frame,
+    )
     mode = context.get("mode", "unknown")
     logical_w = context.get("logical_width", context.get("width", "?"))
     logical_h = context.get("logical_height", context.get("height", "?"))
@@ -186,6 +233,49 @@ def go_to_element(
     print(
         "[VisionAgent] go_to_element bbox "
         f"size=({bbox_w:.1f}x{bbox_h:.1f}) auto_zoom={'on' if auto_zoom else 'off'}"
+    )
+
+
+def click_target(
+    ymin: float,
+    xmin: float,
+    ymax: float,
+    xmax: float,
+    target_description: str,
+    type_of_click: str = "left click",
+    screen_frame: ScreenFrame | None = None,
+):
+    """
+    Atomically move to and click a visible target bounding box.
+
+    This avoids binding a click to stale cursor state between separate model
+    tool calls.
+    """
+    click_type = normalize_click_type(type_of_click)
+    x, y, bbox_w, bbox_h, auto_zoom, context, target = _resolve_target_point_from_bbox(
+        ymin=ymin,
+        xmin=xmin,
+        ymax=ymax,
+        xmax=xmax,
+        target_description=target_description,
+        screen_frame=screen_frame,
+    )
+    move_cursor(x, y, duration=0.2)
+    if click_type == "left click":
+        click_left_click()
+    elif click_type == "double left click":
+        click_double_left_click()
+    elif click_type == "right click":
+        click_right_click()
+    else:
+        raise ValueError(f"Unsupported click type: {type_of_click}")
+
+    mode = context.get("mode", "unknown")
+    print(
+        "[VisionAgent] click_target "
+        f"{click_type} on {target} at ({x:.1f}, {y:.1f}) "
+        f"mode={mode} bbox=({bbox_w:.1f}x{bbox_h:.1f}) "
+        f"auto_zoom={'on' if auto_zoom else 'off'}"
     )
 
 
@@ -236,6 +326,7 @@ def crop_and_search(
     xmin: float,
     ymax: float,
     xmax: float,
+    screen_frame: ScreenFrame | None = None,
 ):
     """
     Agentic vision precision tool.
@@ -246,8 +337,13 @@ def crop_and_search(
     if not isinstance(target_description, str) or not target_description.strip():
         raise ValueError("target_description is required for crop_and_search")
 
-    screenshot = capture_active_window()
-    context = _get_last_capture_context() or {}
+    if screen_frame is not None:
+        screenshot = screen_frame.image
+        context = screen_frame.context_dict()
+    else:
+        frame = capture_active_window_frame()
+        screenshot = frame.image
+        context = frame.context_dict()
     offset = (
         float(context.get("offset_x", 0.0)),
         float(context.get("offset_y", 0.0)),
@@ -289,6 +385,8 @@ def _filter_tool_args(tool_name: str, args: dict) -> dict:
     allowed = set(signature.parameters.keys())
     filtered = {}
     for key, value in (args or {}).items():
+        if key in INTERNAL_TOOL_ARGS:
+            continue
         if key in TOOL_METADATA_KEYS and key not in allowed:
             continue
         if key in allowed:
@@ -296,13 +394,28 @@ def _filter_tool_args(tool_name: str, args: dict) -> dict:
     return filtered
 
 
-def execute_tool_call(tool_name: str, args: dict):
+def execute_tool_call(
+    tool_name: str,
+    args: dict,
+    *,
+    active_window: str | None = None,
+    screen_frame: ScreenFrame | None = None,
+):
     """Execute a tool call while dropping UI metadata-only arguments."""
     tool = VISION_TOOL_MAP.get(tool_name)
     if tool is None:
         raise ValueError(f"Unknown tool: {tool_name}")
 
     filtered_args = _filter_tool_args(tool_name, args)
+    if active_window is None:
+        active_window = get_active_window_title()
+    filtered_args = validate_vision_tool_call(
+        tool_name,
+        filtered_args,
+        active_window=active_window,
+    )
+    if screen_frame is not None and "screen_frame" in inspect.signature(tool).parameters:
+        filtered_args["screen_frame"] = screen_frame
     tool(**filtered_args)
 
 
@@ -317,6 +430,7 @@ VISION_TOOL_MAP = {
     "press_ctrl_hotkey": press_ctrl_hotkey,
     "press_alt_hotkey": press_alt_hotkey,
     "go_to_element": go_to_element,
+    "click_target": click_target,
     "click_left_click": click_left_click,
     "click_double_left_click": click_double_left_click,
     "click_right_click": click_right_click,

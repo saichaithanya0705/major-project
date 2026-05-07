@@ -6,6 +6,7 @@
   const DEFAULT_BACKEND_PORT = 58870;
   const STORAGE_KEY = 'jarvis-browser-ui.sessions.v1';
   const EVENT_CHANNEL = 'jarvis-browser-ui.events.v1';
+  const MAX_IMAGE_DATA_URL_CHARS = 8_000_000;
   const retentionDays = 30;
   const purgeDays = 30;
   const listeners = new Map();
@@ -64,7 +65,39 @@
     const ts = Number.isFinite(message.ts) ? Number(message.ts) : Date.now();
     if (!role || !text) return null;
     if (!['user', 'assistant', 'system', 'terminal'].includes(role)) return null;
-    return { role, text, ts };
+    const normalized = { role, text, ts };
+    const artifacts = role === 'assistant'
+      ? normalizeMessageArtifacts(message.artifacts)
+      : [];
+    if (artifacts.length > 0) {
+      normalized.artifacts = artifacts;
+    }
+    return normalized;
+  }
+
+  function normalizeVisionArtifact(artifact) {
+    if (!artifact || typeof artifact !== 'object') return null;
+    const kind = typeof artifact.kind === 'string' ? artifact.kind.trim() : '';
+    const imageDataUrl = typeof artifact.imageDataUrl === 'string' ? artifact.imageDataUrl.trim() : '';
+    if (kind !== 'vision_screenshot') return null;
+    if (!imageDataUrl.startsWith('data:image/png;base64,')) return null;
+    if (imageDataUrl.length > MAX_IMAGE_DATA_URL_CHARS) return null;
+    const width = Number(artifact.width);
+    const height = Number(artifact.height);
+    const outlineCount = Number(artifact.outlineCount);
+    return {
+      kind,
+      title: typeof artifact.title === 'string' && artifact.title.trim() ? artifact.title.trim().slice(0, 80) : 'Analyzed screen',
+      imageDataUrl,
+      width: Number.isFinite(width) && width > 0 ? Math.round(width) : 0,
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : 0,
+      outlineCount: Number.isFinite(outlineCount) && outlineCount > 0 ? Math.round(outlineCount) : 0,
+    };
+  }
+
+  function normalizeMessageArtifacts(artifacts) {
+    if (!Array.isArray(artifacts)) return [];
+    return artifacts.map(normalizeVisionArtifact).filter(Boolean).slice(0, 4);
   }
 
   function normalizeSession(session) {
@@ -228,6 +261,9 @@
       dispatch('hide-input-window');
       window.close();
     },
+    showInputWindow: () => {
+      dispatch('show-input-window');
+    },
     requestStopAll: () => {
       dispatch('stop-all');
     },
@@ -243,12 +279,13 @@
           const host = typeof config?.host === 'string' && config.host.trim() ? config.host.trim() : '127.0.0.1';
           const portValue = Number(config?.port);
           const port = Number.isInteger(portValue) && portValue > 0 ? portValue : DEFAULT_BACKEND_PORT;
-          return { host, port };
+          const authToken = typeof config?.authToken === 'string' ? config.authToken.trim() : '';
+          return { host, port, authToken };
         }
       } catch {
         // Fall through to local default.
       }
-      return { host: '127.0.0.1', port: DEFAULT_BACKEND_PORT };
+      return { host: '127.0.0.1', port: DEFAULT_BACKEND_PORT, authToken: '' };
     },
     getChatSessionInfo: async () => {
       const state = buildState();
@@ -291,6 +328,7 @@
       return { updatedAt: session.updatedAt, readOnly: false };
     },
     getChatSessionState: async (sessionId = null) => buildState(sessionId),
+    openVisionArtifactImage: async () => ({ opened: false }),
     createChatSession: async () => {
       const store = ensureStoreShape();
       const sessions = getSessionList(store);
