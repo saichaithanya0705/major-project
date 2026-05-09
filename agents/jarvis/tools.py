@@ -44,6 +44,7 @@ else:
     types = _genai_types
 
 from core.settings import get_screen_size, get_viewport_size
+from ui.visualization_api.chat_response import send_chat_response
 from ui.visualization_api.clear_screen import _clear_screen
 from ui.visualization_api.create_text import _create_text
 from ui.visualization_api.client import get_client
@@ -412,6 +413,10 @@ def direct_response(
     source: str = "jarvis",
 ):
     global _LAST_DIRECT_RESPONSE, _WAITED_AFTER_DIRECT_RESPONSE
+    if str(source or "").strip().lower() == "rapid_response":
+        _dispatch_now(send_chat_response(text, source=source))
+        return
+
     _LAST_DIRECT_RESPONSE = time.monotonic()
     _WAITED_AFTER_DIRECT_RESPONSE = False
     x, y = _get_command_anchor()

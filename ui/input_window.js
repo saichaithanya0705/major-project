@@ -955,6 +955,352 @@ function renderGeneratingIndicatorContent(content, statusText) {
   content.classList.add('chat-msg-content--generating');
 }
 
+function normalizeRichMessageMarkdown(text) {
+  let value = typeof text === 'string' ? text.trim() : '';
+  if (!value) return '';
+
+  value = value.replace(/\r\n?/g, '\n');
+
+  // Browser-agent summaries sometimes arrive with Markdown block separators
+  // collapsed into spaces. Restore the most common separators before parsing.
+  value = value.replace(/([^\n])\s+(#{1,6}\s+)/g, '$1\n\n$2');
+  value = value.replace(/([^\n])\s+(\*\*\d+[.)]\s+[^*]{2,90}\*\*)/g, '$1\n\n$2');
+  value = value.replace(/\s+\*\s+(?=\*\*[A-Za-z0-9][^*]{1,80}\*\*)/g, '\n- ');
+  return value;
+}
+
+function appendMessageTextNode(parent, text) {
+  if (!text) return;
+  parent.appendChild(document.createTextNode(text));
+}
+
+function findNextInlineMarkdownMarker(text, start) {
+  const markers = ['`', '[', '**', '__', '*', 'http://', 'https://'];
+  let next = text.length;
+  for (const marker of markers) {
+    const position = text.indexOf(marker, start);
+    if (position !== -1 && position < next) {
+      next = position;
+    }
+  }
+  return next;
+}
+
+function safeMessageHref(rawHref) {
+  const value = typeof rawHref === 'string' ? rawHref.trim() : '';
+  if (!value || /[\u0000-\u001f\u007f]/.test(value)) return '';
+
+  try {
+    const parsed = new URL(value, window.location.href);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
+      return parsed.href;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function createSafeMessageLink(label, href) {
+  const safeHref = safeMessageHref(href);
+  if (!safeHref) return null;
+
+  const link = document.createElement('a');
+  link.className = 'chat-rich-link';
+  link.href = safeHref;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = label || safeHref;
+  return link;
+}
+
+function appendInlineMarkdown(parent, text) {
+  const value = typeof text === 'string' ? text : '';
+  let index = 0;
+
+  while (index < value.length) {
+    const rest = value.slice(index);
+    const urlMatch = rest.match(/^https?:\/\/[^\s<>()]+[^\s<>().,!?;:]/i);
+    if (urlMatch) {
+      const link = createSafeMessageLink(urlMatch[0], urlMatch[0]);
+      if (link) {
+        parent.appendChild(link);
+      } else {
+        appendMessageTextNode(parent, urlMatch[0]);
+      }
+      index += urlMatch[0].length;
+      continue;
+    }
+
+    if (value[index] === '`') {
+      const closing = value.indexOf('`', index + 1);
+      if (closing > index + 1) {
+        const code = document.createElement('code');
+        code.className = 'chat-rich-inline-code';
+        code.textContent = value.slice(index + 1, closing);
+        parent.appendChild(code);
+        index = closing + 1;
+        continue;
+      }
+    }
+
+    if (value[index] === '[') {
+      const labelEnd = value.indexOf('](', index + 1);
+      const hrefEnd = labelEnd === -1 ? -1 : value.indexOf(')', labelEnd + 2);
+      if (labelEnd > index && hrefEnd > labelEnd + 2) {
+        const label = value.slice(index + 1, labelEnd);
+        const href = value.slice(labelEnd + 2, hrefEnd);
+        const link = createSafeMessageLink(label, href);
+        if (link) {
+          parent.appendChild(link);
+        } else {
+          appendMessageTextNode(parent, value.slice(index, hrefEnd + 1));
+        }
+        index = hrefEnd + 1;
+        continue;
+      }
+    }
+
+    const strongMarker = value.startsWith('**', index) ? '**' : (value.startsWith('__', index) ? '__' : '');
+    if (strongMarker) {
+      const closing = value.indexOf(strongMarker, index + 2);
+      if (closing > index + 2) {
+        const strong = document.createElement('strong');
+        appendInlineMarkdown(strong, value.slice(index + 2, closing));
+        parent.appendChild(strong);
+        index = closing + 2;
+        continue;
+      }
+    }
+
+    if (value[index] === '*' && value[index + 1] !== '*' && value[index + 1] !== ' ') {
+      const closing = value.indexOf('*', index + 1);
+      if (closing > index + 1) {
+        const emphasis = document.createElement('em');
+        appendInlineMarkdown(emphasis, value.slice(index + 1, closing));
+        parent.appendChild(emphasis);
+        index = closing + 1;
+        continue;
+      }
+    }
+
+    const next = findNextInlineMarkdownMarker(value, index + 1);
+    appendMessageTextNode(parent, value.slice(index, next));
+    index = next;
+  }
+}
+
+function isRichMessageBlockStarter(line) {
+  return /^\s*$/.test(line)
+    || /^\s*```/.test(line)
+    || /^\s{0,3}#{1,6}\s+/.test(line)
+    || /^\s{0,3}>\s?/.test(line)
+    || /^\s{0,3}[-*+]\s+/.test(line)
+    || /^\s*\|?.+\|.+\|?\s*$/.test(line)
+    || /^\s{0,3}\d+[.)]\s+/.test(line);
+}
+
+function splitRichMessageTableRow(line) {
+  if (typeof line !== 'string' || !line.includes('|')) return null;
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  const cells = trimmed.split('|').map((cell) => cell.trim());
+  return cells.length > 1 ? cells : null;
+}
+
+function parseRichMessageTableDelimiter(line, expectedCells) {
+  const cells = splitRichMessageTableRow(line);
+  if (!cells || cells.length !== expectedCells) return null;
+
+  const alignments = [];
+  for (const cell of cells) {
+    const value = cell.replace(/\s+/g, '');
+    if (!/^:?-{3,}:?$/.test(value)) return null;
+    if (value.startsWith(':') && value.endsWith(':')) {
+      alignments.push('center');
+    } else if (value.endsWith(':')) {
+      alignments.push('right');
+    } else {
+      alignments.push('left');
+    }
+  }
+  return alignments;
+}
+
+function appendRichMessageTableCell(row, tagName, text, align) {
+  const cell = document.createElement(tagName);
+  cell.className = `chat-rich-table-cell chat-rich-table-cell--${align}`;
+  appendInlineMarkdown(cell, text);
+  row.appendChild(cell);
+}
+
+function renderRichMessageContent(content, text) {
+  if (!content) return;
+
+  const source = normalizeRichMessageMarkdown(text);
+  if (!source) {
+    content.textContent = '';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const lines = source.split('\n');
+  let index = 0;
+  let paragraphLines = [];
+
+  const flushParagraph = () => {
+    const paragraphText = paragraphLines.map((line) => line.trim()).filter(Boolean).join(' ');
+    paragraphLines = [];
+    if (!paragraphText) return;
+
+    const paragraph = document.createElement('p');
+    paragraph.className = 'chat-rich-paragraph';
+    appendInlineMarkdown(paragraph, paragraphText);
+    fragment.appendChild(paragraph);
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      index += 1;
+      continue;
+    }
+
+    const fenceMatch = line.match(/^\s*```([A-Za-z0-9_-]+)?\s*$/);
+    if (fenceMatch) {
+      flushParagraph();
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+
+      const pre = document.createElement('pre');
+      pre.className = 'chat-rich-code-block';
+      const code = document.createElement('code');
+      if (fenceMatch[1]) {
+        code.dataset.language = fenceMatch[1];
+      }
+      code.textContent = codeLines.join('\n');
+      pre.appendChild(code);
+      fragment.appendChild(pre);
+      continue;
+    }
+
+    const headingMatch = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (headingMatch) {
+      flushParagraph();
+      const level = headingMatch[1].length;
+      const heading = document.createElement(level <= 2 ? 'h3' : 'h4');
+      heading.className = `chat-rich-heading chat-rich-heading--level-${level}`;
+      appendInlineMarkdown(heading, headingMatch[2].trim());
+      fragment.appendChild(heading);
+      index += 1;
+      continue;
+    }
+
+    const tableHeader = splitRichMessageTableRow(line);
+    const tableAlignments = tableHeader && index + 1 < lines.length
+      ? parseRichMessageTableDelimiter(lines[index + 1], tableHeader.length)
+      : null;
+    if (tableHeader && tableAlignments) {
+      flushParagraph();
+      const scroller = document.createElement('div');
+      scroller.className = 'chat-rich-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'chat-rich-table';
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      tableHeader.forEach((cell, cellIndex) => {
+        appendRichMessageTableCell(headerRow, 'th', cell, tableAlignments[cellIndex] || 'left');
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      index += 2;
+      while (index < lines.length) {
+        const rowCells = splitRichMessageTableRow(lines[index]);
+        if (!rowCells || !lines[index].trim()) break;
+
+        const row = document.createElement('tr');
+        tableHeader.forEach((_, cellIndex) => {
+          appendRichMessageTableCell(
+            row,
+            'td',
+            rowCells[cellIndex] || '',
+            tableAlignments[cellIndex] || 'left',
+          );
+        });
+        tbody.appendChild(row);
+        index += 1;
+      }
+      table.appendChild(tbody);
+      scroller.appendChild(table);
+      fragment.appendChild(scroller);
+      continue;
+    }
+
+    const quoteMatch = line.match(/^\s{0,3}>\s?(.*)$/);
+    if (quoteMatch) {
+      flushParagraph();
+      const quoteLines = [];
+      while (index < lines.length) {
+        const current = lines[index].match(/^\s{0,3}>\s?(.*)$/);
+        if (!current) break;
+        quoteLines.push(current[1].trim());
+        index += 1;
+      }
+      const quote = document.createElement('blockquote');
+      quote.className = 'chat-rich-quote';
+      appendInlineMarkdown(quote, quoteLines.join(' '));
+      fragment.appendChild(quote);
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^\s{0,3}[-*+]\s+(.+)$/);
+    const orderedMatch = line.match(/^\s{0,3}\d+[.)]\s+(.+)$/);
+    if (unorderedMatch || orderedMatch) {
+      flushParagraph();
+      const ordered = Boolean(orderedMatch);
+      const list = document.createElement(ordered ? 'ol' : 'ul');
+      list.className = ordered ? 'chat-rich-list chat-rich-list--ordered' : 'chat-rich-list';
+
+      while (index < lines.length) {
+        const itemMatch = ordered
+          ? lines[index].match(/^\s{0,3}\d+[.)]\s+(.+)$/)
+          : lines[index].match(/^\s{0,3}[-*+]\s+(.+)$/);
+        if (!itemMatch) break;
+
+        const itemLines = [itemMatch[1].trim()];
+        index += 1;
+        while (index < lines.length && lines[index].trim() && !isRichMessageBlockStarter(lines[index])) {
+          itemLines.push(lines[index].trim());
+          index += 1;
+        }
+
+        const item = document.createElement('li');
+        appendInlineMarkdown(item, itemLines.join(' '));
+        list.appendChild(item);
+      }
+      fragment.appendChild(list);
+      continue;
+    }
+
+    paragraphLines.push(line);
+    index += 1;
+  }
+
+  flushParagraph();
+  content.replaceChildren(fragment);
+}
+
 function ensurePendingAssistantTicker() {
   if (pendingAssistantTicker) return;
   pendingAssistantTicker = setInterval(() => {
@@ -980,11 +1326,18 @@ function setMessageElementText(el, text, options = {}) {
   const timestamp = Number.isFinite(options.ts) ? Number(options.ts) : Number(el.dataset.ts || Date.now());
 
   if (content && role === 'assistant' && pending) {
+    content.classList.remove('chat-msg-content--rich');
     renderGeneratingIndicatorContent(content, value);
     ensurePendingAssistantTicker();
   } else if (content) {
     content.classList.remove('chat-msg-content--generating');
-    content.textContent = value;
+    if (role === 'assistant') {
+      content.classList.add('chat-msg-content--rich');
+      renderRichMessageContent(content, value);
+    } else {
+      content.classList.remove('chat-msg-content--rich');
+      content.textContent = value;
+    }
   }
   if (roleEl) {
     roleEl.textContent = getMessageRoleLabel(role);
@@ -2790,6 +3143,18 @@ async function connectSocket() {
 
     if (payload.command === 'chat_vision_artifact') {
       appendVisionArtifactMessage(payload);
+      return;
+    }
+
+    if (payload.command === 'chat_response') {
+      if (!shouldDisplayReplyInChat(payload)) {
+        clearPendingAssistant();
+        return;
+      }
+      const responseText = payload.responseText || payload.text || '';
+      const agentTrace = getPersistableAgentWorkTrace();
+      finalizePendingAssistant(responseText);
+      applyFinalAssistantLifecycle(responseText, agentTrace);
       return;
     }
 

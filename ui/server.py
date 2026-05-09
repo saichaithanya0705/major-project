@@ -31,6 +31,7 @@ class VisualizationServer:
     MAX_REQUEST_ID_CHARS = 160
     MAX_SESSION_ID_CHARS = 160
     MAX_DRAW_TEXT_CHARS = 1200
+    MAX_CHAT_RESPONSE_CHARS = 120000
     AUTH_CLOSE_CODE = 1008
     DEFAULT_ALLOWED_ORIGINS = {
         "",
@@ -497,6 +498,18 @@ class VisualizationServer:
                     payload["theme"] = theme
                     payload["color"] = theme.get("accent")
                     self.texts[payload["id"]] = payload
+                    await self._broadcast(payload)
+                elif command == "chat_response":
+                    try:
+                        payload["text"] = self._safe_text(
+                            payload.get("text", ""),
+                            max_chars=self.MAX_CHAT_RESPONSE_CHARS,
+                            field_name="chat_response text",
+                        )
+                    except ValueError as exc:
+                        await self._send_error(websocket, event="overlay_error", error=str(exc))
+                        continue
+                    payload["source"] = payload.get("source") or "rapid_response"
                     await self._broadcast(payload)
                 elif command == "remove_box":
                     self.boxes.pop(payload.get("id"), None)

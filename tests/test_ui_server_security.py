@@ -148,6 +148,26 @@ async def test_overlay_input_is_size_limited() -> None:
     assert "too long" in websocket.sent[-1]["error"].lower(), websocket.sent
 
 
+async def test_chat_response_accepts_long_final_reply_without_draw_text_limit() -> None:
+    long_reply = "x" * (VisualizationServer.MAX_DRAW_TEXT_CHARS + 1)
+    server = VisualizationServer()
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({
+                "command": "chat_response",
+                "source": "rapid_response",
+                "text": long_reply,
+            })
+        ],
+    )
+
+    await server._handle_client(websocket)
+
+    assert websocket.sent[-1]["command"] == "chat_response", websocket.sent
+    assert websocket.sent[-1]["source"] == "rapid_response", websocket.sent
+    assert websocket.sent[-1]["text"] == long_reply, websocket.sent
+
+
 async def test_capture_screenshot_does_not_block_following_overlay_input() -> None:
     capture_started = threading.Event()
     release_capture = threading.Event()
@@ -252,6 +272,7 @@ async def run_checks() -> None:
     await test_websocket_accepts_valid_auth_token_and_local_origin()
     await test_websocket_rejects_cross_origin_even_with_token()
     await test_overlay_input_is_size_limited()
+    await test_chat_response_accepts_long_final_reply_without_draw_text_limit()
     await test_capture_screenshot_does_not_block_following_overlay_input()
     await test_transcribe_audio_is_size_limited()
     test_electron_server_config_returns_runtime_auth_token(Path(os.environ.get("TMP", ".")) / "ui-security-test")

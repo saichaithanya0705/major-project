@@ -94,6 +94,40 @@ def test_submit_command_routes_without_unconditional_screenshot_capture() -> Non
     assert "capture_screenshot" not in submit_body
 
 
+def test_chat_response_command_finalizes_pending_assistant() -> None:
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+
+    assert "payload.command === 'chat_response'" in input_window_js
+    assert "payload.responseText || payload.text || ''" in input_window_js
+    assert "finalizePendingAssistant(responseText)" in input_window_js
+
+
+def test_assistant_replies_render_structured_markdown_safely() -> None:
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+    input_window_css = (ROOT_DIR / "ui" / "input_window.css").read_text(encoding="utf-8")
+    renderer_start = input_window_js.index("function normalizeRichMessageMarkdown")
+    renderer_end = input_window_js.index("function ensurePendingAssistantTicker", renderer_start)
+    renderer_block = input_window_js[renderer_start:renderer_end]
+
+    assert "function renderRichMessageContent(content, text)" in input_window_js
+    assert "content.classList.add('chat-msg-content--rich')" in input_window_js
+    assert "appendInlineMarkdown(paragraph, paragraphText)" in renderer_block
+    assert "document.createElement(level <= 2 ? 'h3' : 'h4')" in renderer_block
+    assert "document.createElement(ordered ? 'ol' : 'ul')" in renderer_block
+    assert "document.createElement('pre')" in renderer_block
+    assert "document.createElement('blockquote')" in renderer_block
+    assert "document.createElement('table')" in renderer_block
+    assert "new URL(value, window.location.href)" in renderer_block
+    assert "link.rel = 'noopener noreferrer'" in renderer_block
+    assert "innerHTML" not in renderer_block
+
+    assert ".chat-msg-content--rich" in input_window_css
+    assert ".chat-rich-heading" in input_window_css
+    assert ".chat-rich-table" in input_window_css
+    assert ".chat-rich-code-block" in input_window_css
+    assert ".chat-rich-link" in input_window_css
+
+
 def test_input_window_shell_keeps_header_status_and_body_as_siblings() -> None:
     parents = _input_window_parent_map()
 
