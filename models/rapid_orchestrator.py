@@ -4,6 +4,7 @@ Rapid-response orchestration flow extracted from models.models.
 
 from __future__ import annotations
 
+import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -18,13 +19,15 @@ class RapidOrchestratorDeps:
     run_routed_agent_step: Callable[..., Awaitable[dict[str, Any]]]
     get_stored_screenshot: Callable[[], Any]
     prepare_vision_screenshot: Callable[..., Awaitable[Any]]
-    clean_text: Callable[[object, str, int], str]
+    clean_text: Callable[[object, str, int | None], str]
     format_chain_state_for_prompt: Callable[..., str]
     apply_routing_guardrails: Callable[..., dict[str, Any]]
     routing_task_text: Callable[[dict[str, Any]], str]
     routing_signature: Callable[[dict[str, Any]], tuple[str, str]]
     user_requested_repeat: Callable[[str], bool]
     finalize_direct_response_text: Callable[..., str]
+    is_direct_qa_request: Callable[[str], bool]
+    answer_direct_request: Callable[..., Awaitable[str]]
     screen_context_message: Callable[[dict[str, Any]], str]
     router_tool_map: dict[str, Any]
     log_assistant_event: Callable[..., None]
@@ -35,6 +38,140 @@ class RapidOrchestratorDeps:
 
 def _normalized_task_text(value: object) -> str:
     return " ".join(str(value or "").split()).strip().lower()
+
+
+_TASK_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TASK_TOKEN_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "can",
+        "could",
+        "com",
+        "current",
+        "do",
+        "does",
+        "for",
+        "from",
+        "http",
+        "https",
+        "i",
+        "in",
+        "is",
+        "it",
+        "its",
+        "just",
+        "main",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "please",
+        "should",
+        "that",
+        "the",
+        "this",
+        "to",
+        "using",
+        "was",
+        "were",
+        "what",
+        "whats",
+        "will",
+        "with",
+        "would",
+        "www",
+        "you",
+    }
+)
+_TASK_TOKEN_SYNONYMS = {
+    "analysed": "analyze",
+    "analyses": "analyze",
+    "analysing": "analyze",
+    "analysis": "analyze",
+    "analyse": "analyze",
+    "extract": "read",
+    "extracted": "read",
+    "extracting": "read",
+    "fetch": "read",
+    "fetched": "read",
+    "fetching": "read",
+    "findings": "finding",
+    "headings": "heading",
+    "locally": "local",
+    "readable": "read",
+    "reading": "read",
+    "repository": "repo",
+    "repositories": "repo",
+    "said": "content",
+    "say": "content",
+    "says": "content",
+    "summaries": "summarize",
+    "summarise": "summarize",
+    "summarised": "summarize",
+    "summarises": "summarize",
+    "summarising": "summarize",
+    "summary": "summarize",
+    "titles": "title",
+    "urls": "url",
+    "webpage": "page",
+    "webpages": "page",
+    "website": "site",
+    "websites": "site",
+}
+
+
+def _canonical_task_token(token: str) -> str:
+    mapped = _TASK_TOKEN_SYNONYMS.get(token)
+    if mapped:
+        return mapped
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if len(token) > 4 and token.endswith("ed"):
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def _meaningful_task_tokens(value: object) -> set[str]:
+    tokens: set[str] = set()
+    for raw_token in _TASK_TOKEN_RE.findall(_normalized_task_text(value)):
+        token = _canonical_task_token(raw_token)
+        if len(token) < 2 or token in _TASK_TOKEN_STOPWORDS:
+            continue
+        tokens.add(token)
+    return tokens
+
+
+def _routed_task_covers_user_request(
+    *,
+    user_prompt: str,
+    routing_result: dict[str, Any],
+    step_result: dict[str, Any],
+    routing_task_text: Callable[[dict[str, Any]], str],
+) -> bool:
+    requested_tokens = _meaningful_task_tokens(user_prompt)
+    if not requested_tokens:
+        return False
+
+    candidate_tokens = set()
+    candidate_tokens.update(_meaningful_task_tokens(routing_task_text(routing_result)))
+    candidate_tokens.update(_meaningful_task_tokens(step_result.get("task")))
+    if not candidate_tokens:
+        return False
+
+    return requested_tokens.issubset(candidate_tokens)
 
 
 def _step_marked_complete(step_result: dict[str, Any]) -> bool:
@@ -109,7 +246,14 @@ def _should_finish_after_successful_agent_step(
 
     routed_task = _normalized_task_text(routing_task_text(routing_result))
     completed_task = _normalized_task_text(step_result.get("task"))
-    return requested in {routed_task, completed_task}
+    if requested in {routed_task, completed_task}:
+        return True
+    return _routed_task_covers_user_request(
+        user_prompt=user_prompt,
+        routing_result=routing_result,
+        step_result=step_result,
+        routing_task_text=routing_task_text,
+    )
 
 
 async def run_rapid_request(
@@ -131,6 +275,55 @@ async def run_rapid_request(
     seen_step_signatures: dict[tuple[str, str], int] = {}
     blocked_step_signatures: set[tuple[str, str]] = set()
     latest_screen_context: Optional[dict[str, Any]] = None
+
+    if deps.is_direct_qa_request(user_prompt):
+        direct_started = time.monotonic()
+        try:
+            direct_answer = await deps.answer_direct_request(
+                model=model,
+                user_prompt=user_prompt,
+                history_block=deps.format_rapid_history_for_prompt(),
+            )
+            direct_text = deps.finalize_direct_response_text(
+                user_prompt=user_prompt,
+                chain_steps=chain_steps,
+                text=deps.clean_text(direct_answer, "Rapid response provided.", None),
+            )
+            deps.log_assistant_event(
+                "router_decision",
+                request_id=request_id,
+                agent="direct",
+                task=deps.clean_text(user_prompt, "", 420),
+                duration_seconds=time.monotonic() - direct_started,
+                metadata={"step_index": 0, "reason": "direct_qa_fast_path"},
+            )
+            tool = deps.router_tool_map.get("direct_response")
+            if tool:
+                tool(text=direct_text, source="rapid_response")
+            deps.append_rapid_history("assistant", direct_text, "rapid")
+            deps.log_assistant_event(
+                "request_completed",
+                request_id=request_id,
+                agent="direct",
+                task=deps.clean_text(user_prompt, "", 420),
+                message=direct_text,
+                success=True,
+                duration_seconds=time.monotonic() - direct_started,
+                metadata={"delegated_steps": 0, "fast_direct_qa": True},
+            )
+            return
+        except Exception as exc:
+            error_text = deps.clean_text(str(exc), "Direct answer failed.", 420)
+            deps.log_assistant_event(
+                "direct_answer_failed",
+                request_id=request_id,
+                agent="direct",
+                task=deps.clean_text(user_prompt, "", 420),
+                message=error_text,
+                error=str(exc),
+                success=False,
+                duration_seconds=time.monotonic() - direct_started,
+            )
 
     for step_index in range(deps.max_router_chain_steps):
         history_block = deps.format_rapid_history_for_prompt()
@@ -256,7 +449,7 @@ async def run_rapid_request(
             direct_text = deps.finalize_direct_response_text(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=deps.clean_text(raw_direct_text, "Rapid response provided.", 420),
+                text=deps.clean_text(raw_direct_text, "Rapid response provided.", None),
             )
             tool = deps.router_tool_map.get("direct_response")
             if tool:
@@ -444,7 +637,7 @@ async def run_rapid_request(
             direct_text = deps.finalize_direct_response_text(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=deps.clean_text(step_result.get("message"), "Task completed.", 420),
+                text=deps.clean_text(step_result.get("message"), "Task completed.", None),
             )
             tool = deps.router_tool_map.get("direct_response")
             if tool:

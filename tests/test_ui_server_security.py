@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -147,6 +148,43 @@ async def test_overlay_input_is_size_limited() -> None:
     assert "too long" in websocket.sent[-1]["error"].lower(), websocket.sent
 
 
+async def test_capture_screenshot_does_not_block_following_overlay_input() -> None:
+    capture_started = threading.Event()
+    release_capture = threading.Event()
+    observed = []
+
+    def _blocking_capture():
+        capture_started.set()
+        release_capture.wait(timeout=1)
+        return None
+
+    async def _fake_overlay_input(text, session_id=None):
+        observed.append((text, session_id))
+
+    server = VisualizationServer(
+        on_capture_screenshot=_blocking_capture,
+        on_overlay_input=_fake_overlay_input,
+    )
+    websocket = _FakeWebSocket([
+        json.dumps({"event": "capture_screenshot"}),
+        json.dumps({
+            "event": "overlay_input",
+            "requestId": "overlay-after-capture",
+            "sessionId": "chat-1",
+            "text": "Tell me everything about elon musk.",
+        }),
+    ])
+
+    try:
+        await asyncio.wait_for(server._handle_client(websocket), timeout=0.25)
+        assert capture_started.wait(timeout=0.25)
+        assert observed == [("Tell me everything about elon musk.", "chat-1")], observed
+    finally:
+        release_capture.set()
+        if server._background_tasks:
+            await asyncio.gather(*list(server._background_tasks), return_exceptions=True)
+
+
 async def test_transcribe_audio_is_size_limited() -> None:
     observed = []
     server = VisualizationServer(
@@ -214,6 +252,7 @@ async def run_checks() -> None:
     await test_websocket_accepts_valid_auth_token_and_local_origin()
     await test_websocket_rejects_cross_origin_even_with_token()
     await test_overlay_input_is_size_limited()
+    await test_capture_screenshot_does_not_block_following_overlay_input()
     await test_transcribe_audio_is_size_limited()
     test_electron_server_config_returns_runtime_auth_token(Path(os.environ.get("TMP", ".")) / "ui-security-test")
 

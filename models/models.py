@@ -44,6 +44,7 @@ from models.routing_policy import (
     _finalize_direct_response_text,
     _format_chain_state_for_prompt,
     _is_execution_request,
+    _is_direct_qa_request,
     _is_visual_explanation_request,
     _normalize_router_decision_payload,
     _normalize_screen_context_payload,
@@ -276,6 +277,8 @@ async def call_gemini(
             routing_signature=_routing_signature,
             user_requested_repeat=_user_requested_repeat,
             finalize_direct_response_text=_finalize_direct_response_text,
+            is_direct_qa_request=_is_direct_qa_request,
+            answer_direct_request=_answer_direct_request,
             screen_context_message=_screen_context_message,
             router_tool_map=ROUTER_TOOL_MAP,
             log_assistant_event=log_assistant_event,
@@ -301,6 +304,18 @@ async def call_gemini(
             metadata={"traceback": traceback.format_exc()},
         )
         raise
+
+
+async def _answer_direct_request(
+    *,
+    model: "GeminiModel",
+    user_prompt: str,
+    history_block: str = "",
+) -> str:
+    return await model.answer_direct_request(
+        user_prompt=user_prompt,
+        history_block=history_block,
+    )
 
 
 # ================================================================================
@@ -358,6 +373,7 @@ class GeminiModel:
         self.ollama_router_num_predict = runtime_config.ollama_router_num_predict
         self.nvidia_router_max_tokens = runtime_config.nvidia_router_max_tokens
         self.openrouter_router_max_tokens = runtime_config.openrouter_router_max_tokens
+        self.router_wall_timeout_grace_seconds = 5.0
         self.ollama_router_think = runtime_config.ollama_router_think
         self.gemini_backup_model = runtime_config.gemini_backup_model
 
@@ -379,6 +395,13 @@ class GeminiModel:
             top_k=40,
             max_output_tokens=1200,
             response_mime_type="application/json",
+        )
+
+        self.direct_answer_config = types.GenerateContentConfig(
+            temperature=0.4,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=1800,
         )
 
     @staticmethod
@@ -636,6 +659,80 @@ class GeminiModel:
             parse_json_object_from_text=_parse_json_object_from_text,
         )
 
+    async def answer_direct_request(
+        self,
+        *,
+        user_prompt: str,
+        history_block: str = "",
+    ) -> str:
+        """Answer general Q&A directly without screen capture or agent routing."""
+        direct_prompt = (
+            "You are JARVIS in direct Q&A mode. Answer the user's factual or conversational "
+            "question directly in plain text. Do not inspect the screen, use browser automation, "
+            "or claim to have live/current data unless the user provided it. Keep the answer useful "
+            "and structured, but avoid unnecessary length.\n"
+            f"{history_block}\n"
+            f"# User's Latest Request:\n{user_prompt}"
+        )
+
+        try:
+            try:
+                await set_model_name(f"{self.jarvis_model} (Direct)")
+            except Exception as ui_exc:
+                print(f"[DirectQA] Model label update skipped: {ui_exc}")
+
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.jarvis_model,
+                    contents=[direct_prompt],
+                    config=self.direct_answer_config,
+                ),
+                timeout=45,
+            )
+            text = _clean_text(getattr(response, "text", ""), "", max_len=None)
+            if text:
+                return text
+            raise RuntimeError("Direct answer model returned empty text.")
+        except Exception as exc:
+            if (
+                self._is_gemini_temporary_error(exc)
+                and self.gemini_backup_model
+                and self.gemini_backup_model != self.jarvis_model
+            ):
+                try:
+                    print(
+                        f"[DirectQA] Primary model unavailable; retrying with backup "
+                        f"{self.gemini_backup_model}"
+                    )
+                    response = await asyncio.wait_for(
+                        self.client.aio.models.generate_content(
+                            model=self.gemini_backup_model,
+                            contents=[direct_prompt],
+                            config=self.direct_answer_config,
+                        ),
+                        timeout=45,
+                    )
+                    text = _clean_text(getattr(response, "text", ""), "", max_len=None)
+                    if text:
+                        return text
+                except Exception as backup_exc:
+                    print(f"[DirectQA] Gemini backup failed: {backup_exc}")
+
+            fallback_text = await self._try_openrouter_text_fallback(
+                label="DirectQA",
+                system_prompt=(
+                    "You are JARVIS in direct Q&A mode. Answer factual or conversational "
+                    "questions directly in plain text. Do not use screen context."
+                ),
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=1400,
+                purpose="text",
+            )
+            if fallback_text:
+                return _clean_text(fallback_text, "", max_len=None)
+            raise
+
     def _normalize_router_decision(
         self,
         payload: dict[str, Any],
@@ -655,6 +752,28 @@ class GeminiModel:
             nvidia_enabled=self._nvidia_router_enabled(),
             openrouter_enabled=self._openrouter_router_enabled(),
             ollama_enabled=bool(self.ollama_router_model and self.ollama_base_url),
+        )
+
+    def _router_wall_timeout_seconds(self, provider: str) -> float:
+        if provider == "nvidia":
+            provider_timeout = getattr(self, "nvidia_timeout_seconds", 45)
+        elif provider == "openrouter":
+            provider_timeout = getattr(self, "openrouter_timeout_seconds", 45)
+        else:
+            provider_timeout = getattr(self, "ollama_router_timeout_seconds", 90)
+        grace_seconds = getattr(self, "router_wall_timeout_grace_seconds", 5.0)
+        return max(0.001, float(provider_timeout) + float(grace_seconds))
+
+    async def _call_router_provider_with_wall_timeout(
+        self,
+        provider: str,
+        call,
+        prompt: str,
+    ) -> dict[str, Any]:
+        timeout_seconds = self._router_wall_timeout_seconds(provider)
+        return await asyncio.wait_for(
+            asyncio.to_thread(call, prompt),
+            timeout=timeout_seconds,
         )
 
     async def route_request(self, prompt: str) -> dict:
@@ -691,7 +810,11 @@ class GeminiModel:
                         await set_model_name(f"{self.nvidia_router_model} (NVIDIA)")
                     except Exception as ui_exc:
                         print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await asyncio.to_thread(self._call_nvidia_router_sync, prompt)
+                    payload = await self._call_router_provider_with_wall_timeout(
+                        "nvidia",
+                        self._call_nvidia_router_sync,
+                        prompt,
+                    )
                     routed = _normalize_router_decision_payload(
                         payload,
                         prompt,
@@ -702,7 +825,11 @@ class GeminiModel:
                         await set_model_name(f"{self.openrouter_router_model} (OpenRouter)")
                     except Exception as ui_exc:
                         print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await asyncio.to_thread(self._call_openrouter_router_sync, prompt)
+                    payload = await self._call_router_provider_with_wall_timeout(
+                        "openrouter",
+                        self._call_openrouter_router_sync,
+                        prompt,
+                    )
                     routed = _normalize_router_decision_payload(
                         payload,
                         prompt,
@@ -713,7 +840,11 @@ class GeminiModel:
                         await set_model_name(f"{self.ollama_router_model} (Ollama)")
                     except Exception as ui_exc:
                         print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await asyncio.to_thread(self._call_ollama_router_sync, prompt)
+                    payload = await self._call_router_provider_with_wall_timeout(
+                        "ollama",
+                        self._call_ollama_router_sync,
+                        prompt,
+                    )
                     routed = _normalize_router_decision_payload(
                         payload,
                         prompt,
@@ -726,7 +857,13 @@ class GeminiModel:
                 )
                 return routed
             except Exception as exc:
-                error = _clean_text(str(exc), "Router generation failed.", max_len=420)
+                if isinstance(exc, asyncio.TimeoutError):
+                    error = (
+                        f"{provider} router timed out after "
+                        f"{self._router_wall_timeout_seconds(provider):.1f}s."
+                    )
+                else:
+                    error = _clean_text(str(exc), "Router generation failed.", max_len=420)
                 print(f"[Router] {provider} routing failed: {error}")
                 last_error = error
 

@@ -12,7 +12,7 @@ from typing import Any, Callable, Optional
 import requests
 
 
-CleanText = Callable[[object, str, int], str]
+CleanText = Callable[[object, str, int | None], str]
 ParseJsonObject = Callable[[str], dict[str, Any]]
 
 _ROUTER_TEXT_TOOL_TO_AGENT = {

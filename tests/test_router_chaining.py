@@ -90,6 +90,46 @@ async def test_chains_multiple_agents_then_finishes() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_direct_response_preserves_full_assistant_message() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    direct_messages: list[str] = []
+    long_message = " ".join(f"assistant-detail-{index}" for index in range(90))
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "direct", "response_text": long_message},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini("explain this in detail", "rapid", "jarvis")
+        assert direct_messages == [long_message], direct_messages[-1]
+    finally:
+        model_module.GeminiModel = original_model_cls
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+def test_router_normalization_preserves_full_direct_response() -> None:
+    model = object.__new__(model_module.GeminiModel)
+    long_message = " ".join(f"normalized-detail-{index}" for index in range(90))
+
+    route = model_module.GeminiModel._normalize_router_decision(
+        model,
+        {"agent": "direct", "response_text": long_message},
+        "# User's Latest Request:\nTell me everything about elon musk.",
+        provider_name="unit-test",
+    )
+
+    assert route == {"agent": "direct", "response_text": long_message}, route
+
+
 async def test_repeated_step_loop_recovers_and_finishes() -> None:
     original_model_cls = model_module.GeminiModel
     original_run_step = model_module._run_routed_agent_step
@@ -186,6 +226,67 @@ async def test_single_full_agent_step_finishes_without_followup_router() -> None
         assert executed_agents == ["browser"], executed_agents
         assert _CountingRouterModel.route_calls == 1, _CountingRouterModel.route_calls
         assert direct_messages == ["Browser task completed quickly."], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+async def test_completed_browser_summary_finishes_when_router_rewrites_task() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_messages: list[str] = []
+
+    class _CountingRouterModel(_FakeRouterModel):
+        route_calls = 0
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            type(self).route_calls += 1
+            return await super().route_request(prompt)
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", routing_result.get("query", "")),
+            "success": True,
+            "complete": True,
+            "message": "Example Domain is a small demonstration page used in documentation.",
+            "source": "browser_use",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    _CountingRouterModel.sequence = [
+        {
+            "agent": "browser",
+            "task": "Open https://example.com, read the page content, and summarize the main finding.",
+        },
+        {"agent": "direct", "response_text": "This second route should not run."},
+    ]
+    _CountingRouterModel.route_calls = 0
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _CountingRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "summarize example.com",
+            "rapid",
+            "jarvis",
+        )
+        assert executed_agents == ["browser"], executed_agents
+        assert _CountingRouterModel.route_calls == 1, _CountingRouterModel.route_calls
+        assert direct_messages == [
+            "Example Domain is a small demonstration page used in documentation."
+        ], direct_messages
     finally:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
@@ -334,6 +435,7 @@ async def test_screen_context_then_actionable_agent() -> None:
     original_run_step = model_module._run_routed_agent_step
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
     original_get_stored_screenshot = model_module.get_stored_screenshot
+    original_prepare_vision_screenshot = model_module.prepare_vision_screenshot
 
     executed_agents: list[str] = []
     direct_messages: list[str] = []
@@ -351,6 +453,9 @@ async def test_screen_context_then_actionable_agent() -> None:
 
     def _fake_direct_response(**kwargs):
         direct_messages.append(str(kwargs.get("text", "")))
+
+    async def _fake_prepare_vision_screenshot(*, keep_chat_hidden=False):
+        return None
 
     _FakeRouterModel.sequence = [
         {"agent": "screen_context", "task": "clone this repository for me and open it up on localhost", "focus": "extract github repo url"},
@@ -371,6 +476,7 @@ async def test_screen_context_then_actionable_agent() -> None:
     model_module._run_routed_agent_step = _fake_run_step
     model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
     model_module.get_stored_screenshot = lambda: None
+    model_module.prepare_vision_screenshot = _fake_prepare_vision_screenshot
     try:
         await model_module.call_gemini(
             "clone this repository for me and open it up on localhost",
@@ -385,6 +491,7 @@ async def test_screen_context_then_actionable_agent() -> None:
         model_module.GeminiModel = original_model_cls
         model_module._run_routed_agent_step = original_run_step
         model_module.get_stored_screenshot = original_get_stored_screenshot
+        model_module.prepare_vision_screenshot = original_prepare_vision_screenshot
         if original_direct_response is not None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
@@ -616,6 +723,58 @@ async def test_call_gemini_uses_session_scoped_rapid_history() -> None:
     assert "alpha-only memory" not in prompts[1], prompts[1]
     assert "beta asks a question" not in prompts[2], prompts[2]
     assert "alpha-only memory" in prompts[2], prompts[2]
+
+
+async def test_direct_qa_bypasses_router_and_screenshot_capture() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+    original_prepare_vision_screenshot = model_module.prepare_vision_screenshot
+
+    direct_messages: list[str] = []
+
+    class _DirectQAModel:
+        route_calls = 0
+        direct_calls = 0
+
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            type(self).route_calls += 1
+            return {"agent": "screen_context", "task": "this should not run"}
+
+        async def answer_direct_request(self, *, user_prompt: str, history_block: str = "") -> str:
+            type(self).direct_calls += 1
+            assert "Tell me everything about elon musk." in user_prompt
+            assert "Tell me everything about elon musk." in history_block
+            return "Elon Musk is an entrepreneur and business executive."
+
+    async def _fail_prepare_screenshot(*, keep_chat_hidden=False):
+        raise AssertionError("direct Q&A should not capture the screen")
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _DirectQAModel
+    model_module.prepare_vision_screenshot = _fail_prepare_screenshot
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "Tell me everything about elon musk.",
+            "rapid",
+            "jarvis",
+        )
+        assert _DirectQAModel.direct_calls == 1, _DirectQAModel.direct_calls
+        assert _DirectQAModel.route_calls == 0, _DirectQAModel.route_calls
+        assert direct_messages == [
+            "Elon Musk is an entrepreneur and business executive."
+        ], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module.prepare_vision_screenshot = original_prepare_vision_screenshot
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
 def test_router_refusal_task_is_replaced_with_original_request() -> None:
@@ -979,8 +1138,11 @@ async def run_checks() -> None:
     test_openrouter_tool_payload_parses_tool_calls()
     await test_openrouter_router_failure_falls_back_to_ollama()
     await test_chains_multiple_agents_then_finishes()
+    await test_direct_response_preserves_full_assistant_message()
+    test_router_normalization_preserves_full_direct_response()
     await test_repeated_step_loop_recovers_and_finishes()
     await test_single_full_agent_step_finishes_without_followup_router()
+    await test_completed_browser_summary_finishes_when_router_rewrites_task()
     await test_partial_browser_step_continues_with_visual_agent_before_finishing()
     await test_invalid_route_result_falls_back_to_direct()
     await test_direct_response_repeat_artifact_is_sanitized()
@@ -990,6 +1152,7 @@ async def run_checks() -> None:
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
     await test_window_management_request_reroutes_jarvis_to_cua_vision()
     await test_call_gemini_uses_session_scoped_rapid_history()
+    await test_direct_qa_bypasses_router_and_screenshot_capture()
 
 
 if __name__ == "__main__":

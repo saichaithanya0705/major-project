@@ -78,6 +78,7 @@ class VisualizationServer:
         self._last_overlay_text = ""
         self._last_overlay_session_id = ""
         self._last_overlay_ts = 0.0
+        self._background_tasks = set()
 
     @staticmethod
     def _overlay_session_callback_style(callback) -> str:
@@ -121,6 +122,26 @@ class VisualizationServer:
         if asyncio.iscoroutine(result):
             return await result
         return result
+
+    def _track_background_task(self, task: asyncio.Task) -> None:
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def _capture_screenshot_background(self) -> None:
+        if not self.on_capture_screenshot:
+            return
+        try:
+            if inspect.iscoroutinefunction(self.on_capture_screenshot):
+                result = await self.on_capture_screenshot()
+            else:
+                result = await asyncio.to_thread(self.on_capture_screenshot)
+            if asyncio.iscoroutine(result):
+                result = await result
+            self._store_screenshot(result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[VisualizationServer] Screenshot capture failed: {exc}")
 
     @staticmethod
     def _safe_text(value, *, max_chars: int, field_name: str) -> str:
@@ -399,6 +420,11 @@ class VisualizationServer:
         )
 
     async def stop(self):
+        for task in list(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
+            self._background_tasks.clear()
         if self._server is None:
             return
         self._server.close()
@@ -555,10 +581,8 @@ class VisualizationServer:
                         print(f"clicked: {payload.get('id')}")
                     if event == "capture_screenshot":
                         if self.on_capture_screenshot:
-                            result = self.on_capture_screenshot()
-                            if asyncio.iscoroutine(result):
-                                result = await result
-                            self._store_screenshot(result)
+                            task = asyncio.create_task(self._capture_screenshot_background())
+                            self._track_background_task(task)
                         continue
                     if event == "transcribe_audio":
                         request_id = payload.get("requestId") or payload.get("request_id")

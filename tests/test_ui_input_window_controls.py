@@ -83,6 +83,17 @@ def test_composer_action_swaps_between_send_and_stop_contract() -> None:
     assert "#command-send[data-mode=\"stop\"]" in input_window_css
 
 
+def test_submit_command_routes_without_unconditional_screenshot_capture() -> None:
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+    start = input_window_js.index("function submitCommand()")
+    end = input_window_js.index("commandInput?.addEventListener", start)
+    submit_body = input_window_js[start:end]
+
+    assert "event: 'overlay_input'" in submit_body
+    assert "EXECUTION_PHASES.ROUTING" in submit_body
+    assert "capture_screenshot" not in submit_body
+
+
 def test_input_window_shell_keeps_header_status_and_body_as_siblings() -> None:
     parents = _input_window_parent_map()
 

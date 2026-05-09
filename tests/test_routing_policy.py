@@ -8,6 +8,7 @@ Usage:
 import asyncio
 import os
 import sys
+import time
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
@@ -108,10 +109,53 @@ async def test_route_request_calls_llm_even_for_deterministic_looking_prompt() -
     assert routed == {"agent": "browser", "task": "open localhost 3000"}, routed
 
 
+async def test_route_request_wall_timeout_falls_back_to_next_provider() -> None:
+    model = model_module.GeminiModel.__new__(model_module.GeminiModel)
+    model.router_provider = "openrouter"
+    model.nvidia_api_key = "nvidia-key"
+    model.nvidia_router_model = "nvidia-router"
+    model.nvidia_url = "https://nvidia.example.test"
+    model.nvidia_timeout_seconds = 1
+    model.openrouter_api_key = "openrouter-key"
+    model.openrouter_url = "https://router.example.test"
+    model.openrouter_router_model = "openrouter-router"
+    model.openrouter_timeout_seconds = 0.01
+    model.ollama_router_model = ""
+    model.ollama_base_url = ""
+    model.router_wall_timeout_grace_seconds = 0.01
+
+    calls: list[str] = []
+    original_set_model_name = model_module.set_model_name
+
+    def _slow_openrouter_router(prompt: str) -> dict:
+        calls.append("openrouter")
+        time.sleep(0.2)
+        return {"agent": "direct", "response_text": "late"}
+
+    def _working_nvidia_router(prompt: str) -> dict:
+        calls.append("nvidia")
+        return {"agent": "direct", "response_text": "done"}
+
+    async def _fake_set_model_name(_value: str) -> None:
+        return None
+
+    model._call_openrouter_router_sync = _slow_openrouter_router
+    model._call_nvidia_router_sync = _working_nvidia_router
+    model_module.set_model_name = _fake_set_model_name
+    try:
+        routed = await model.route_request("# User's Latest Request:\nhello")
+    finally:
+        model_module.set_model_name = original_set_model_name
+
+    assert calls[:2] == ["openrouter", "nvidia"], calls
+    assert routed == {"agent": "direct", "response_text": "done"}, routed
+
+
 if __name__ == "__main__":
     test_router_prompt_uses_general_capability_fit_not_surface_hardcoding()
     test_router_tool_descriptions_distinguish_shell_state_from_visual_ui()
     test_browser_route_with_desktop_app_profile_requirement_is_repaired_to_vision()
     test_plain_web_automation_still_routes_to_browser()
     asyncio.run(test_route_request_calls_llm_even_for_deterministic_looking_prompt())
+    asyncio.run(test_route_request_wall_timeout_falls_back_to_next_provider())
     print("[test_routing_policy] All checks passed.")

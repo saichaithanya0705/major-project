@@ -186,16 +186,63 @@ _BROWSER_SURFACE_MARKERS = (
     "https://",
     "www.",
 )
+_DIRECT_QA_START_MARKERS = (
+    "tell me about",
+    "tell me everything about",
+    "who is",
+    "who was",
+    "what is",
+    "what are",
+    "what was",
+    "explain",
+    "define",
+    "describe",
+    "why is",
+    "why are",
+    "how does",
+    "how do",
+    "give me an overview of",
+    "give me a summary of",
+)
+_CONTEXT_DEPENDENT_MARKERS = (
+    "my screen",
+    "the screen",
+    "this screen",
+    "on screen",
+    "on my screen",
+    "what you see",
+    "currently open",
+    "current page",
+    "current tab",
+    "this page",
+    "this tab",
+    "this",
+    "this repo",
+    "this repository",
+    "this file",
+    "this folder",
+    "this project",
+    "this app",
+    "this window",
+    "that repo",
+    "that url",
+    "that page",
+    "that",
+    "these",
+    "those",
+    "visible",
+    "here",
+)
 _ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
 
 
-def _clean_text(value: Any, fallback: str, max_len: int = 1400) -> str:
+def _clean_text(value: Any, fallback: str, max_len: int | None = 1400) -> str:
     if value is None:
         return fallback
     text = " ".join(str(value).split())
     if not text:
         return fallback
-    if len(text) > max_len:
+    if max_len is not None and len(text) > max_len:
         return f"{text[:max_len - 3]}..."
     return text
 
@@ -499,6 +546,31 @@ def _is_visual_explanation_request(user_prompt: str) -> bool:
     return False
 
 
+def _is_direct_qa_request(user_prompt: str) -> bool:
+    lowered = (user_prompt or "").lower().strip()
+    if not lowered:
+        return False
+
+    if _is_execution_request(lowered):
+        return False
+    if _is_visual_explanation_request(lowered):
+        return False
+    if _matches_any_marker(lowered, _CONTEXT_DEPENDENT_MARKERS):
+        return False
+    if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
+        return False
+    if _matches_any_marker(lowered, _BROWSER_SURFACE_MARKERS):
+        return False
+
+    if any(lowered.startswith(marker) for marker in _DIRECT_QA_START_MARKERS):
+        return True
+    if " everything about " in f" {lowered} ":
+        return True
+    if re.match(r"^(who|what|why|how|when|where)\b", lowered):
+        return True
+    return False
+
+
 def _choose_actionable_agent(task_text: str, latest_screen_context: Optional[dict[str, Any]]) -> str:
     recommended = ""
     if latest_screen_context:
@@ -565,7 +637,7 @@ def _normalize_router_decision_payload(
             response_text=_clean_text(
                 payload.get("response_text") or payload.get("text"),
                 "Routing complete.",
-                max_len=420,
+                max_len=None,
             ),
         ).as_dict()
 
@@ -719,7 +791,7 @@ def _finalize_direct_response_text(
     chain_steps: list[dict[str, Any]],
     text: str,
 ) -> str:
-    cleaned = _clean_text(text, "Task completed.", max_len=420)
+    cleaned = _clean_text(text, "Task completed.", max_len=None)
     if not chain_steps:
         return cleaned
     if _user_requested_repeat(user_prompt):

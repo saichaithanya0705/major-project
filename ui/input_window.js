@@ -2907,19 +2907,18 @@ function submitCommand() {
   resetAgentWorkTraceForNewTurn();
   lastAssistantText = '';
   appendMessage('user', text, { pending: false, persist: true, ts: now });
-  pendingAssistantEl = appendMessage('assistant', 'Capturing screen…', {
+  pendingAssistantEl = appendMessage('assistant', 'Routing request…', {
     pending: true,
     persist: false,
     ts: now,
   });
-  setLifecyclePhase(EXECUTION_PHASES.PREPARING, {
-    text: 'Capturing screen…',
-    detail: 'Collecting the current workspace before routing your request.',
+  setLifecyclePhase(EXECUTION_PHASES.ROUTING, {
+    text: 'Routing request…',
+    detail: 'Choosing the right path for your request.',
   });
   updateActionAvailability();
 
   const activeSessionId = currentSession?.sessionId || null;
-  const screenshotQueued = sendMessage({ event: 'capture_screenshot', sessionId: activeSessionId });
   const requestQueued = sendMessage({
     event: 'overlay_input',
     text,
@@ -2927,7 +2926,7 @@ function submitCommand() {
     requestId: `overlay_${now}_${Math.random().toString(16).slice(2, 8)}`,
   });
 
-  if (!screenshotQueued || !requestQueued) {
+  if (!requestQueued) {
     clearPendingAssistant();
     appendSystemNotice('Unable to send the request while reconnecting.');
     setLifecyclePhase(EXECUTION_PHASES.RECONNECTING, {
