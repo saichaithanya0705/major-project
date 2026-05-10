@@ -42,6 +42,7 @@ from models.routing_policy import (
     _clean_text,
     _extract_latest_request,
     _finalize_direct_response_text,
+    _format_direct_response_text,
     _format_chain_state_for_prompt,
     _is_execution_request,
     _is_direct_qa_request,
@@ -207,6 +208,25 @@ def _format_rapid_history_for_prompt(session_id: str | None = None) -> str:
     return RAPID_SESSION_STATE.format_history_for_prompt(session_id=session_id)
 
 
+def _enrich_routing_result_for_session(
+    routing_result: dict[str, Any],
+    user_prompt: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    return RAPID_SESSION_STATE.enrich_routing_result(
+        routing_result,
+        user_prompt=user_prompt,
+        session_id=session_id,
+    )
+
+
+def _record_step_context_for_session(
+    step_result: dict[str, Any],
+    session_id: str | None = None,
+) -> None:
+    RAPID_SESSION_STATE.record_step_context(step_result, session_id=session_id)
+
+
 async def _run_routed_agent_step(
     model: "GeminiModel",
     routing_result: dict[str, Any],
@@ -259,11 +279,29 @@ async def call_gemini(
         def format_session_history_for_prompt() -> str:
             return _format_rapid_history_for_prompt(session_id=rapid_session_id)
 
+        def enrich_session_routing_result(
+            routing_result: dict[str, Any],
+            user_prompt_text: str,
+        ) -> dict[str, Any]:
+            return _enrich_routing_result_for_session(
+                routing_result,
+                user_prompt_text,
+                session_id=rapid_session_id,
+            )
+
+        def record_session_step_context(step_result: dict[str, Any]) -> None:
+            _record_step_context_for_session(
+                step_result,
+                session_id=rapid_session_id,
+            )
+
         deps = RapidOrchestratorDeps(
             model_factory=GeminiModel,
             append_rapid_history=append_session_history,
             format_rapid_history_for_prompt=format_session_history_for_prompt,
             run_routed_agent_step=_run_routed_agent_step,
+            enrich_routing_result=enrich_session_routing_result,
+            record_step_context=record_session_step_context,
             get_stored_screenshot=get_stored_screenshot,
             prepare_vision_screenshot=prepare_vision_screenshot,
             clean_text=lambda value, fallback, max_len: _clean_text(
@@ -668,9 +706,10 @@ class GeminiModel:
         """Answer general Q&A directly without screen capture or agent routing."""
         direct_prompt = (
             "You are JARVIS in direct Q&A mode. Answer the user's factual or conversational "
-            "question directly in plain text. Do not inspect the screen, use browser automation, "
+            "question directly in clean Markdown for chat. Use headings, bullets, or tables when "
+            "they make the answer easier to scan. Do not inspect the screen, use browser automation, "
             "or claim to have live/current data unless the user provided it. Keep the answer useful "
-            "and structured, but avoid unnecessary length.\n"
+            "and structured, but avoid unnecessary length. Do not use raw HTML.\n"
             f"{history_block}\n"
             f"# User's Latest Request:\n{user_prompt}"
         )
@@ -689,7 +728,7 @@ class GeminiModel:
                 ),
                 timeout=45,
             )
-            text = _clean_text(getattr(response, "text", ""), "", max_len=None)
+            text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
             if text:
                 return text
             raise RuntimeError("Direct answer model returned empty text.")
@@ -712,7 +751,7 @@ class GeminiModel:
                         ),
                         timeout=45,
                     )
-                    text = _clean_text(getattr(response, "text", ""), "", max_len=None)
+                    text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
                     if text:
                         return text
                 except Exception as backup_exc:
@@ -730,7 +769,94 @@ class GeminiModel:
                 purpose="text",
             )
             if fallback_text:
-                return _clean_text(fallback_text, "", max_len=None)
+                return _format_direct_response_text(fallback_text, "", max_len=None)
+            raise
+
+    async def answer_web_qa_request(
+        self,
+        *,
+        user_prompt: str,
+        sources: list[dict[str, str]],
+    ) -> str:
+        """Synthesize a source-grounded web answer from Tavily search results."""
+        source_lines = []
+        for index, source in enumerate(sources[:8], start=1):
+            title = _clean_text(source.get("title"), f"Source {index}", max_len=160)
+            url = _clean_text(source.get("url"), "", max_len=260)
+            content = _format_direct_response_text(source.get("content"), "", max_len=1000)
+            source_lines.append(
+                f"[{index}] {title}\nURL: {url}\nSnippet: {content or 'No snippet provided.'}"
+            )
+
+        if not source_lines:
+            return "I could not find useful web sources for that question."
+
+        web_prompt = (
+            "You are JARVIS in source-grounded web Q&A mode. Answer the user's question "
+            "using only the provided Tavily web search sources. If the sources disagree or "
+            "do not contain enough evidence, say that clearly. Keep the answer concise, "
+            "use clean Markdown, and do not invent facts beyond the sources.\n\n"
+            f"# User's Question\n{user_prompt}\n\n"
+            "# Tavily Sources\n"
+            + "\n\n".join(source_lines)
+        )
+
+        try:
+            try:
+                await set_model_name(f"{self.jarvis_model} (Web QA)")
+            except Exception as ui_exc:
+                print(f"[WebQA] Model label update skipped: {ui_exc}")
+
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.jarvis_model,
+                    contents=[web_prompt],
+                    config=self.direct_answer_config,
+                ),
+                timeout=45,
+            )
+            text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
+            if text:
+                return text
+            raise RuntimeError("Web QA model returned empty text.")
+        except Exception as exc:
+            if (
+                self._is_gemini_temporary_error(exc)
+                and self.gemini_backup_model
+                and self.gemini_backup_model != self.jarvis_model
+            ):
+                try:
+                    print(
+                        f"[WebQA] Primary model unavailable; retrying with backup "
+                        f"{self.gemini_backup_model}"
+                    )
+                    response = await asyncio.wait_for(
+                        self.client.aio.models.generate_content(
+                            model=self.gemini_backup_model,
+                            contents=[web_prompt],
+                            config=self.direct_answer_config,
+                        ),
+                        timeout=45,
+                    )
+                    text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
+                    if text:
+                        return text
+                except Exception as backup_exc:
+                    print(f"[WebQA] Gemini backup failed: {backup_exc}")
+
+            fallback_text = await self._try_openrouter_text_fallback(
+                label="WebQA",
+                system_prompt=(
+                    "You are JARVIS in source-grounded web Q&A mode. Answer using only "
+                    "the provided search source snippets. Use clean Markdown."
+                ),
+                user_prompt=web_prompt,
+                temperature=0.2,
+                max_tokens=1400,
+                purpose="text",
+            )
+            if fallback_text:
+                return _format_direct_response_text(fallback_text, "", max_len=None)
             raise
 
     def _normalize_router_decision(

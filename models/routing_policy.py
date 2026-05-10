@@ -204,6 +204,53 @@ _DIRECT_QA_START_MARKERS = (
     "give me an overview of",
     "give me a summary of",
 )
+_WEB_QA_MARKERS = (
+    "as of today",
+    "as of now",
+    "current",
+    "currently",
+    "latest",
+    "live",
+    "newest",
+    "news",
+    "recent",
+    "recently",
+    "today",
+    "up to date",
+    "up-to-date",
+    "with citations",
+    "with sources",
+    "cite sources",
+    "citation",
+    "citations",
+    "source-grounded",
+    "sources",
+    "web search",
+    "search the web",
+    "look up",
+)
+_WEB_QA_DYNAMIC_SUBJECT_MARKERS = (
+    "ceo",
+    "company",
+    "companies",
+    "court",
+    "election",
+    "law",
+    "laws",
+    "legal",
+    "net worth",
+    "politics",
+    "president",
+    "price",
+    "prices",
+    "regulation",
+    "rules",
+    "schedule",
+    "score",
+    "sports",
+    "stock",
+    "weather",
+)
 _CONTEXT_DEPENDENT_MARKERS = (
     "my screen",
     "the screen",
@@ -233,7 +280,15 @@ _CONTEXT_DEPENDENT_MARKERS = (
     "visible",
     "here",
 )
-_ROUTER_AGENT_CHOICES = {"direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"}
+_ROUTER_AGENT_CHOICES = {
+    "direct",
+    "jarvis",
+    "browser",
+    "cua_cli",
+    "cua_vision",
+    "screen_context",
+    "web_qa",
+}
 
 
 def _clean_text(value: Any, fallback: str, max_len: int | None = 1400) -> str:
@@ -244,6 +299,25 @@ def _clean_text(value: Any, fallback: str, max_len: int | None = 1400) -> str:
         return fallback
     if max_len is not None and len(text) > max_len:
         return f"{text[:max_len - 3]}..."
+    return text
+
+
+def _format_direct_response_text(
+    value: Any,
+    fallback: str = "Task completed.",
+    max_len: int | None = None,
+) -> str:
+    if value is None:
+        return fallback
+
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = "\n".join(line.rstrip() for line in text.split("\n")).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if not text:
+        return fallback
+    if max_len is not None and len(text) > max_len:
+        return f"{text[:max_len - 3].rstrip()}..."
     return text
 
 
@@ -551,6 +625,8 @@ def _is_direct_qa_request(user_prompt: str) -> bool:
     if not lowered:
         return False
 
+    if _is_web_qa_request(lowered):
+        return False
     if _is_execution_request(lowered):
         return False
     if _is_visual_explanation_request(lowered):
@@ -568,6 +644,39 @@ def _is_direct_qa_request(user_prompt: str) -> bool:
         return True
     if re.match(r"^(who|what|why|how|when|where)\b", lowered):
         return True
+    return False
+
+
+def _is_web_qa_request(user_prompt: str) -> bool:
+    lowered = (user_prompt or "").lower().strip()
+    if not lowered:
+        return False
+
+    if _is_visual_explanation_request(lowered):
+        return False
+    if _matches_any_marker(lowered, _CONTEXT_DEPENDENT_MARKERS):
+        return False
+    if _matches_any_marker(lowered, _CLI_EXECUTION_MARKERS):
+        return False
+
+    if _matches_any_marker(lowered, _WEB_QA_MARKERS):
+        if not _matches_any_marker(lowered, _BROWSER_EXECUTION_MARKERS):
+            return True
+        browser_automation_markers = (
+            "click",
+            "fill",
+            "submit",
+            "open",
+            "go to",
+            "login",
+            "log in",
+            "sign in",
+            "type",
+        )
+        return not _matches_any_marker(lowered, browser_automation_markers)
+
+    if _matches_any_marker(lowered, _WEB_QA_DYNAMIC_SUBJECT_MARKERS):
+        return bool(re.match(r"^(who|what|why|how|when|where|tell me|give me)\b", lowered))
     return False
 
 
@@ -634,7 +743,7 @@ def _normalize_router_decision_payload(
     if agent == "direct":
         return RouteDecision(
             agent="direct",
-            response_text=_clean_text(
+            response_text=_format_direct_response_text(
                 payload.get("response_text") or payload.get("text"),
                 "Routing complete.",
                 max_len=None,
@@ -651,7 +760,7 @@ def _normalize_router_decision_payload(
             ),
         ).as_dict()
 
-    if agent in {"browser", "cua_cli", "cua_vision"}:
+    if agent in {"browser", "cua_cli", "cua_vision", "web_qa"}:
         task_text = _clean_text(
             payload.get("task") or payload.get("query"),
             latest_request,
@@ -723,6 +832,14 @@ def _apply_routing_guardrails(
             "task": resume_task,
         }
 
+    if _is_web_qa_request(user_prompt) and agent in {"direct", "browser"}:
+        task_text = _clean_text(user_prompt, "", max_len=420)
+        print("[Router][Guardrail] Re-routing source-grounded Q&A request -> web_qa")
+        return {
+            "agent": "web_qa",
+            "task": task_text,
+        }
+
     if (
         execution_request
         and agent == "screen_context"
@@ -791,7 +908,7 @@ def _finalize_direct_response_text(
     chain_steps: list[dict[str, Any]],
     text: str,
 ) -> str:
-    cleaned = _clean_text(text, "Task completed.", max_len=None)
+    cleaned = _format_direct_response_text(text, "Task completed.", max_len=None)
     if not chain_steps:
         return cleaned
     if _user_requested_repeat(user_prompt):

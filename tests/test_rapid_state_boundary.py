@@ -66,6 +66,87 @@ def run_checks() -> None:
     assert "session beta secret" in beta_prompt, beta_prompt
     assert "session alpha secret" not in beta_prompt, beta_prompt
 
+    context_state = RapidSessionState(max_history=5)
+    context_state.append_history(
+        role="assistant",
+        text="Substantive answer to preserve.",
+        source="web_qa",
+        cleaner=lambda value: value.strip(),
+        session_id="chat-context",
+    )
+    context_state.append_history(
+        role="assistant",
+        text="The answer has been written to your desktop as context_dump.txt.",
+        source="rapid",
+        cleaner=lambda value: value.strip(),
+        session_id="chat-context",
+    )
+
+    context = context_state.get_context("chat-context")
+    assert context["last_assistant_message"] == "Substantive answer to preserve.", context
+
+    enrichment_state = RapidSessionState(max_history=5)
+    enrichment_state.record_assistant_context(
+        role="assistant",
+        text="Sourced answer that should only be copied for contextual requests.",
+        source="web_qa",
+        session_id="chat-enrichment",
+    )
+
+    non_contextual_write = {
+        "agent": "cua_cli",
+        "task": "write a README file on desktop",
+    }
+    non_contextual_result = enrichment_state.enrich_routing_result(
+        non_contextual_write,
+        user_prompt="write a README file on desktop",
+        session_id="chat-enrichment",
+    )
+    assert non_contextual_result is non_contextual_write, non_contextual_result
+
+    contextual_write = enrichment_state.enrich_routing_result(
+        {"agent": "cua_cli", "task": "write it down in a file on desktop"},
+        user_prompt="write it down in a file on desktop",
+        session_id="chat-enrichment",
+    )
+    assert "Sourced answer that should only be copied" in contextual_write["task"], contextual_write
+
+    artifact_state = RapidSessionState(max_history=5)
+    artifact_state.record_step_context(
+        {
+            "success": True,
+            "message": r"Read C:\Users\SAI\Desktop\notes.txt.",
+            "tool_calls": [
+                {
+                    "tool_name": "read_file",
+                    "parameters": {"file_path": r"C:\Users\SAI\Desktop\notes.txt"},
+                    "status": "success",
+                }
+            ],
+        },
+        session_id="chat-artifact",
+    )
+    assert "last_file_path" not in artifact_state.get_context("chat-artifact")
+
+    artifact_state.record_step_context(
+        {
+            "success": True,
+            "message": r"The answer has been written to C:\Users\SAI\Desktop\context_dump.txt.",
+            "tool_calls": [
+                {
+                    "tool_name": "write_file",
+                    "parameters": {"file_path": r"C:\Users\SAI\Desktop\context_dump.txt"},
+                    "status": "success",
+                }
+            ],
+        },
+        session_id="chat-artifact",
+    )
+    assert (
+        artifact_state.get_context("chat-artifact")["last_file_path"]
+        == r"C:\Users\SAI\Desktop\context_dump.txt"
+    )
+
 
 if __name__ == "__main__":
     run_checks()

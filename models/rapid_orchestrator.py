@@ -17,6 +17,8 @@ class RapidOrchestratorDeps:
     append_rapid_history: Callable[[str, str, str], None]
     format_rapid_history_for_prompt: Callable[[], str]
     run_routed_agent_step: Callable[..., Awaitable[dict[str, Any]]]
+    enrich_routing_result: Callable[[dict[str, Any], str], dict[str, Any]]
+    record_step_context: Callable[[dict[str, Any]], None]
     get_stored_screenshot: Callable[[], Any]
     prepare_vision_screenshot: Callable[..., Awaitable[Any]]
     clean_text: Callable[[object, str, int | None], str]
@@ -237,7 +239,7 @@ def _should_finish_after_successful_agent_step(
         return False
 
     agent = str(step_result.get("agent") or routing_result.get("agent") or "").strip().lower()
-    if agent not in {"browser", "cua_cli", "cua_vision"}:
+    if agent not in {"browser", "cua_cli", "cua_vision", "web_qa"}:
         return False
 
     requested = _normalized_task_text(user_prompt)
@@ -287,7 +289,7 @@ async def run_rapid_request(
             direct_text = deps.finalize_direct_response_text(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=deps.clean_text(direct_answer, "Rapid response provided.", None),
+                text=direct_answer,
             )
             deps.log_assistant_event(
                 "router_decision",
@@ -385,6 +387,7 @@ async def run_rapid_request(
             routing_result=routing_result,
             latest_screen_context=latest_screen_context,
         )
+        routing_result = deps.enrich_routing_result(routing_result, user_prompt)
         incomplete_step = _latest_unresolved_incomplete_step(chain_steps)
         should_recover_from_incomplete = (
             incomplete_step is not None
@@ -449,7 +452,7 @@ async def run_rapid_request(
             direct_text = deps.finalize_direct_response_text(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=deps.clean_text(raw_direct_text, "Rapid response provided.", None),
+                text=raw_direct_text,
             )
             tool = deps.router_tool_map.get("direct_response")
             if tool:
@@ -622,6 +625,7 @@ async def run_rapid_request(
             prepare_vision_screenshot=deps.prepare_vision_screenshot,
         )
         chain_steps.append(step_result)
+        deps.record_step_context(step_result)
         deps.append_rapid_history(
             "assistant",
             step_result.get("message", ""),
@@ -637,7 +641,7 @@ async def run_rapid_request(
             direct_text = deps.finalize_direct_response_text(
                 user_prompt=user_prompt,
                 chain_steps=chain_steps,
-                text=deps.clean_text(step_result.get("message"), "Task completed.", None),
+                text=step_result.get("message"),
             )
             tool = deps.router_tool_map.get("direct_response")
             if tool:

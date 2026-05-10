@@ -24,6 +24,14 @@ def _clean_text(value: object, fallback: str, max_len: int) -> str:
 
 
 def run_checks() -> None:
+    legacy_web_qa = backend_module._parse_router_text_tool_call(
+        'invoke_web_qa(task="What is the latest news about SpaceX?")'
+    )
+    assert legacy_web_qa == {
+        "agent": "web_qa",
+        "task": "What is the latest news about SpaceX?",
+    }, legacy_web_qa
+
     captured_openrouter: dict[str, Any] = {}
     captured_router: dict[str, Any] = {}
 

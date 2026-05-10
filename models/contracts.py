@@ -7,7 +7,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-RouteAgent = Literal["direct", "jarvis", "browser", "cua_cli", "cua_vision", "screen_context"]
+RouteAgent = Literal[
+    "direct",
+    "jarvis",
+    "browser",
+    "cua_cli",
+    "cua_vision",
+    "screen_context",
+    "web_qa",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +31,7 @@ class RouteDecision:
             raise ValueError("Direct route decisions require response_text.")
         if self.agent == "jarvis" and not self.query.strip():
             raise ValueError("Jarvis route decisions require query.")
-        if self.agent in {"browser", "cua_cli", "cua_vision"} and not self.task.strip():
+        if self.agent in {"browser", "cua_cli", "cua_vision", "web_qa"} and not self.task.strip():
             raise ValueError(f"{self.agent} route decisions require task.")
         if self.agent == "screen_context" and not self.task.strip():
             raise ValueError("screen_context route decisions require task.")

@@ -12,6 +12,7 @@ const SOURCE_LABELS = new Map([
   ['cua_vision', 'Computer'],
   ['screen_context', 'Screen'],
   ['screen_judge', 'Screen'],
+  ['web_qa', 'Web QA'],
 ]);
 
 function truncateText(value, maxChars = MAX_TRACE_TEXT_CHARS) {

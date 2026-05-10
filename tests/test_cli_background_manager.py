@@ -75,8 +75,9 @@ async def run_checks() -> None:
 
     original_run_cli = CLIAgent._run_cli
     original_start_bg = CLIAgent._start_background_process
+    original_wait_for_any_port = CLIAgent._wait_for_any_port
 
-    async def _fake_run_cli_generic_error(self, task, timeout, status_callback=None):
+    async def _fake_run_cli_generic_error(self, task, timeout, status_callback=None, tool_context_task=None):
         return CLIResponse(
             success=False,
             output="",
@@ -105,7 +106,38 @@ async def run_checks() -> None:
     finally:
         CLIAgent._run_cli = original_run_cli
 
-    async def _fake_run_cli(self, task, timeout, status_callback=None):
+    async def _fake_run_cli_tool_error_with_zero_exit(self, task, timeout, status_callback=None, tool_context_task=None):
+        return CLIResponse(
+            success=True,
+            output="I am unable to write the context to a file on your desktop.",
+            error=None,
+            tool_calls=[
+                {
+                    "tool_name": "write_file",
+                    "tool_id": "write_file-missing",
+                    "parameters": {
+                        "file_path": r"C:\Users\SAI\Desktop\gemini_cli_context.txt",
+                        "content": "context",
+                    },
+                    "result": 'Tool "write_file" not found.',
+                    "status": "error",
+                    "error": {
+                        "type": "tool_not_registered",
+                        "message": 'Tool "write_file" not found.',
+                    },
+                }
+            ],
+        )
+
+    CLIAgent._run_cli = _fake_run_cli_tool_error_with_zero_exit
+    try:
+        tool_failure = await agent.execute("write all this down in a file on desktop", timeout=30)
+        assert not tool_failure.get("success"), tool_failure
+        assert 'Tool "write_file" not found.' in str(tool_failure.get("error", "")), tool_failure
+    finally:
+        CLIAgent._run_cli = original_run_cli
+
+    async def _fake_run_cli(self, task, timeout, status_callback=None, tool_context_task=None):
         return CLIResponse(
             success=False,
             output="Server starting at http://127.0.0.1:3000",
@@ -135,8 +167,12 @@ async def run_checks() -> None:
             ],
         }
 
+    async def _fake_wait_for_any_port(cls, ports, timeout_seconds=8.0):
+        return None
+
     CLIAgent._run_cli = _fake_run_cli
     CLIAgent._start_background_process = classmethod(_fake_start_background_process)
+    CLIAgent._wait_for_any_port = classmethod(_fake_wait_for_any_port)
     try:
         timeout_promoted = await agent.execute(
             "go into ~/Desktop/demo-app and run npm start",
@@ -148,6 +184,7 @@ async def run_checks() -> None:
     finally:
         CLIAgent._run_cli = original_run_cli
         CLIAgent._start_background_process = original_start_bg
+        CLIAgent._wait_for_any_port = original_wait_for_any_port
 
 
 if __name__ == "__main__":

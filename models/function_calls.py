@@ -82,6 +82,26 @@ invoke_browser_declaration = {
     },
 }
 
+invoke_web_qa_declaration = {
+    "name": "invoke_web_qa",
+    "description": (
+        "Delegate to the Web QA Agent for source-grounded factual answers using Tavily MCP web search. "
+        "Use for current/latest/recent information, public figures or companies where facts may have changed, "
+        "or when the user asks for sources, citations, web search, or up-to-date information. "
+        "Do not use for browser automation or filling websites."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "The factual question to answer using web search. Preserve the user's original wording.",
+            },
+        },
+        "required": ["task"],
+    },
+}
+
 invoke_cua_cli_declaration = {
     "name": "invoke_cua_cli",
     "description": (
@@ -148,6 +168,11 @@ def invoke_browser(task: str):
     pass
 
 
+def invoke_web_qa(task: str):
+    """Marker function - signals that WebQAAgent should be called."""
+    pass
+
+
 def invoke_cua_cli(task: str):
     """Marker function - signals that CLIAgent should be called."""
     pass
@@ -171,6 +196,7 @@ ROUTER_TOOLS = [types.Tool(function_declarations=[
     direct_response_declaration,
     invoke_jarvis_declaration,
     invoke_browser_declaration,
+    invoke_web_qa_declaration,
     invoke_cua_cli_declaration,
     invoke_cua_vision_declaration,
     request_screen_context_declaration,
@@ -180,6 +206,7 @@ ROUTER_TOOL_MAP = {
     "direct_response": direct_response,
     "invoke_jarvis": invoke_jarvis,
     "invoke_browser": invoke_browser,
+    "invoke_web_qa": invoke_web_qa,
     "invoke_cua_cli": invoke_cua_cli,
     "invoke_cua_vision": invoke_cua_vision,
     "request_screen_context": request_screen_context,

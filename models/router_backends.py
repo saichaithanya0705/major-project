@@ -19,6 +19,7 @@ _ROUTER_TEXT_TOOL_TO_AGENT = {
     "direct_response": "direct",
     "invoke_jarvis": "jarvis",
     "invoke_browser": "browser",
+    "invoke_web_qa": "web_qa",
     "invoke_cua_cli": "cua_cli",
     "invoke_cua_vision": "cua_vision",
     "request_screen_context": "screen_context",

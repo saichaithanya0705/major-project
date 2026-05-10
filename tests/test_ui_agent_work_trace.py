@@ -44,6 +44,8 @@ def test_agent_trace_sources_exclude_router_replies() -> None:
             "  rapid: traceModule.isAgentTraceSource('rapid_response'),\n"
             "  cli: traceModule.isAgentTraceSource('cua_cli'),\n"
             "  browserLabel: traceModule.getAgentTraceSourceLabel('browser_use'),\n"
+            "  webQa: traceModule.isAgentTraceSource('web_qa'),\n"
+            "  webQaLabel: traceModule.getAgentTraceSourceLabel('web_qa'),\n"
             "}));"
         ),
     )
@@ -52,6 +54,8 @@ def test_agent_trace_sources_exclude_router_replies() -> None:
         "rapid": False,
         "cli": True,
         "browserLabel": "Browser",
+        "webQa": True,
+        "webQaLabel": "Web QA",
     }
 
 
@@ -74,6 +78,26 @@ def test_agent_trace_opens_while_running_and_collapses_after_success() -> None:
     assert result["done"]["isOpen"] is False
     assert result["done"]["status"] == "completed"
     assert result["done"]["summary"] == "CLI task completed."
+
+
+def test_web_qa_trace_records_sourced_answer_without_router_reply_source() -> None:
+    result = _run_agent_trace_eval(
+        (
+            "const trace = traceModule.createAgentWorkTraceState();\n"
+            "const running = trace.applyEvent({ command: 'show_status_bubble', source: 'web_qa', text: 'Searching the web...' });\n"
+            "const done = trace.applyEvent({ command: 'complete_status_bubble', source: 'web_qa', doneText: 'Task done', responseText: 'Sourced answer\\n\\nSources:\\n- [Example](https://example.com)' });\n"
+            "const ignored = trace.applyEvent({ command: 'chat_response', source: 'rapid_response', text: 'Sourced answer\\n\\nSources:\\n- [Example](https://example.com)' });\n"
+            "process.stdout.write(JSON.stringify({ running, done, ignored }));"
+        ),
+    )
+
+    assert result["running"]["isOpen"] is True
+    assert result["running"]["entries"][-1]["label"] == "Web QA"
+    assert result["done"]["isOpen"] is False
+    assert result["done"]["status"] == "completed"
+    assert result["done"]["entries"][-1]["source"] == "web_qa"
+    assert result["done"]["summary"] == "Sourced answer Sources: - [Example](https://example.com)"
+    assert result["ignored"] == result["done"]
 
 
 def test_agent_trace_stays_open_after_failure() -> None:

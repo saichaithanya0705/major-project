@@ -72,6 +72,8 @@ if (-not (Test-Path $envPath)) {
 @'
 GEMINI_API_KEY="YOUR_API_KEY"
 
+TAVILY_API_KEY="YOUR_TAVILY_API_KEY"
+
 ELEVENLABS_URL="YOUR_API_KEY"
 ELEVENLABS_API_KEY="YOUR_API_KEY"
 '@ | Set-Content -Path $envPath -Encoding UTF8

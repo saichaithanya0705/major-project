@@ -14,6 +14,7 @@ import {
   isGeneratingPlaceholderText,
 } from './generating_indicator.mjs';
 import { getAssistantLifecycleOutcome } from './chat_outcome.mjs';
+import { shouldDisplayReplyInChat } from './chat_reply_policy.mjs';
 
 const commandInput = document.getElementById('command-input');
 const commandSend = document.getElementById('command-send');
@@ -64,7 +65,6 @@ const MAX_ASSISTANT_CACHE = 120;
 const MAX_MESSAGE_ARTIFACTS = 4;
 const MAX_IMAGE_DATA_URL_CHARS = 8_000_000;
 const ASSISTANT_THINKING_TEXT = 'Waiting for model response…';
-const CHAT_REPLY_SOURCES = new Set(['rapid_response']);
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 16000;
 const MAX_TERMINAL_SUMMARY_SOURCE_CHARS = 2200;
 const MAX_TERMINAL_SUMMARY_CHARS = 360;
@@ -135,16 +135,6 @@ let historyDeleteAllArchived = null;
 const assistantMessageCache = [];
 const chatHistory = [];
 const agentWorkTrace = createAgentWorkTraceState();
-
-function normalizeAgentSource(value) {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function shouldDisplayReplyInChat(payload) {
-  const source = normalizeAgentSource(payload?.source);
-  if (!source) return true;
-  return CHAT_REPLY_SOURCES.has(source);
-}
 
 function normalizeTerminalText(value, maxChars = MAX_TERMINAL_TRANSCRIPT_CHARS) {
   const text = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : '';

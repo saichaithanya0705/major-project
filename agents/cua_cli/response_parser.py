@@ -8,6 +8,25 @@ import json
 from typing import Any
 
 
+def _tool_error_message(tool_call: dict[str, Any]) -> str:
+    raw_error = tool_call.get("error")
+    if isinstance(raw_error, dict):
+        message = raw_error.get("message") or raw_error.get("error") or ""
+    elif raw_error is not None:
+        message = raw_error
+    else:
+        message = tool_call.get("result") or ""
+    return " ".join(str(message or "").split())
+
+
+def _last_completed_tool_failed(tool_calls: list[dict[str, Any]]) -> bool:
+    for tool_call in reversed(tool_calls):
+        status = str(tool_call.get("status") or "").strip().lower()
+        if status:
+            return status == "error"
+    return False
+
+
 def parse_stream_json_response(
     *,
     stdout: str,
@@ -61,6 +80,17 @@ def parse_stream_json_response(
                 error = event.get("error", "Task failed")
 
     output = "".join(output_parts)
+    if error is None and _last_completed_tool_failed(tool_calls):
+        last_error = next(
+            (
+                _tool_error_message(tool_call)
+                for tool_call in reversed(tool_calls)
+                if str(tool_call.get("status") or "").strip().lower() == "error"
+            ),
+            "",
+        )
+        error = last_error or "A CLI tool call failed."
+
     return {
         "success": returncode == 0 and error is None,
         "output": output,

@@ -25,6 +25,19 @@ _ENV_KEYS = (
 )
 
 
+def _allowed_tools_from_command(cmd: list[str]) -> set[str]:
+    allowed: set[str] = set()
+    for index, token in enumerate(cmd[:-1]):
+        if token != "--allowed-tools":
+            continue
+        allowed.update(
+            tool.strip()
+            for tool in cmd[index + 1].split(",")
+            if tool.strip()
+        )
+    return allowed
+
+
 def _restore_env(snapshot: dict[str, str | None]) -> None:
     for key, value in snapshot.items():
         if value is None:
@@ -51,6 +64,29 @@ def run_checks() -> None:
         assert default_env.get("JARVIS_CLI_PERMISSIVE_POLICY") != "1", default_env
         assert default_env.get("GEMINI_SANDBOX") != "false", default_env
         assert str(Path.home().resolve()) not in trusted_default, trusted_default
+
+        file_task_tools = _allowed_tools_from_command(
+            default_agent._build_command("write it down in a file on desktop")
+        )
+        assert "write_file" in file_task_tools, file_task_tools
+        assert "replace" in file_task_tools, file_task_tools
+        assert "run_shell_command" not in file_task_tools, file_task_tools
+
+        terminal_task_tools = _allowed_tools_from_command(
+            default_agent._build_command(
+                "By using the terminal create a desktop file named note.txt"
+            )
+        )
+        assert "write_file" in terminal_task_tools, terminal_task_tools
+        assert "replace" in terminal_task_tools, terminal_task_tools
+        assert "run_shell_command" in terminal_task_tools, terminal_task_tools
+
+        clone_task_tools = _allowed_tools_from_command(
+            default_agent._build_command("clone this repo and run tests")
+        )
+        assert "write_file" in clone_task_tools, clone_task_tools
+        assert "replace" in clone_task_tools, clone_task_tools
+        assert "run_shell_command" in clone_task_tools, clone_task_tools
 
         os.environ["JARVIS_CLI_FULL_TRUST"] = "1"
         full_trust_agent = CLIAgent(gemini_cli_path=cli_path)

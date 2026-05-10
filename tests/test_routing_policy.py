@@ -14,9 +14,17 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
 import models.models as model_module
-from models.function_calls import invoke_cua_cli_declaration, invoke_cua_vision_declaration
+from models.function_calls import (
+    invoke_cua_cli_declaration,
+    invoke_cua_vision_declaration,
+    invoke_web_qa_declaration,
+)
 from models.prompts import OLLAMA_ROUTER_SYSTEM_PROMPT, RAPID_RESPONSE_SYSTEM_PROMPT
-from models.routing_policy import _apply_routing_guardrails
+from models.routing_policy import (
+    _apply_routing_guardrails,
+    _is_direct_qa_request,
+    _is_web_qa_request,
+)
 
 
 def test_router_prompt_uses_general_capability_fit_not_surface_hardcoding() -> None:
@@ -45,6 +53,45 @@ def test_router_tool_descriptions_distinguish_shell_state_from_visual_ui() -> No
     assert "pointer/keyboard" in vision_description
     assert "only on screen" in vision_description
     assert "shell command can inspect" in vision_description
+
+
+def test_router_prompt_exposes_web_qa_for_source_grounded_questions() -> None:
+    combined = "\n".join(
+        [
+            RAPID_RESPONSE_SYSTEM_PROMPT,
+            OLLAMA_ROUTER_SYSTEM_PROMPT,
+            str(invoke_web_qa_declaration.get("description", "")),
+        ]
+    ).lower()
+
+    assert "web_qa" in combined
+    assert "tavily" in combined
+    assert "current" in combined
+    assert "sources" in combined
+
+
+def test_web_qa_intent_bypasses_direct_fast_path() -> None:
+    current_prompt = "What is the latest news about Elon Musk?"
+    sourced_prompt = "Tell me everything about Elon Musk with sources."
+    timeless_prompt = "Explain what recursion is."
+
+    assert _is_web_qa_request(current_prompt) is True
+    assert _is_web_qa_request(sourced_prompt) is True
+    assert _is_direct_qa_request(current_prompt) is False
+    assert _is_direct_qa_request(sourced_prompt) is False
+    assert _is_web_qa_request(timeless_prompt) is False
+    assert _is_direct_qa_request(timeless_prompt) is True
+
+
+def test_source_grounded_direct_route_is_repaired_to_web_qa() -> None:
+    prompt = "Tell me the latest about Elon Musk with sources."
+    route = _apply_routing_guardrails(
+        user_prompt=prompt,
+        routing_result={"agent": "direct", "response_text": "Elon Musk is a business executive."},
+        latest_screen_context=None,
+    )
+
+    assert route == {"agent": "web_qa", "task": prompt}, route
 
 
 def test_browser_route_with_desktop_app_profile_requirement_is_repaired_to_vision() -> None:
@@ -154,6 +201,9 @@ async def test_route_request_wall_timeout_falls_back_to_next_provider() -> None:
 if __name__ == "__main__":
     test_router_prompt_uses_general_capability_fit_not_surface_hardcoding()
     test_router_tool_descriptions_distinguish_shell_state_from_visual_ui()
+    test_router_prompt_exposes_web_qa_for_source_grounded_questions()
+    test_web_qa_intent_bypasses_direct_fast_path()
+    test_source_grounded_direct_route_is_repaired_to_web_qa()
     test_browser_route_with_desktop_app_profile_requirement_is_repaired_to_vision()
     test_plain_web_automation_still_routes_to_browser()
     asyncio.run(test_route_request_calls_llm_even_for_deterministic_looking_prompt())

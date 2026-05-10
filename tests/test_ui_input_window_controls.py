@@ -1,5 +1,10 @@
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from html.parser import HTMLParser
+
+import pytest
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -51,6 +56,24 @@ def _input_window_parent_map() -> dict[str, str | None]:
     return parser.parents
 
 
+def _run_node_module(script: str) -> dict[str, object]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for UI module contract tests")
+
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        cwd=ROOT_DIR,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    return json.loads(result.stdout)
+
+
 def test_input_window_header_uses_compact_jarvis_actions_contract() -> None:
     input_html = (ROOT_DIR / "ui" / "input.html").read_text(encoding="utf-8")
 
@@ -100,6 +123,47 @@ def test_chat_response_command_finalizes_pending_assistant() -> None:
     assert "payload.command === 'chat_response'" in input_window_js
     assert "payload.responseText || payload.text || ''" in input_window_js
     assert "finalizePendingAssistant(responseText)" in input_window_js
+
+
+def test_web_qa_status_is_trace_only_until_router_chat_response() -> None:
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+
+    assert "from './chat_reply_policy.mjs'" in input_window_js
+    policy = _run_node_module(
+        """
+        const policy = await import('./ui/chat_reply_policy.mjs');
+        process.stdout.write(JSON.stringify({
+          rapid: policy.shouldDisplayReplyInChat({ source: 'rapid_response' }),
+          rapidCase: policy.shouldDisplayReplyInChat({ source: ' RAPID_RESPONSE ' }),
+          webQa: policy.shouldDisplayReplyInChat({ source: 'web_qa' }),
+          trace: policy.shouldDisplayReplyInChat({ source: 'agent_work_trace' }),
+          missingSource: policy.shouldDisplayReplyInChat({}),
+        }));
+        """
+    )
+    assert policy == {
+        "rapid": True,
+        "rapidCase": True,
+        "webQa": False,
+        "trace": False,
+        "missingSource": True,
+    }
+
+    complete_block = input_window_js.split("payload.command === 'complete_status_bubble'", 1)[1].split(
+        "if (payload.command === 'hide_status_bubble'",
+        1,
+    )[0]
+    assert "applyAgentWorkTraceEvent(payload)" in complete_block
+    assert "if (shouldDisplayReplyInChat(payload))" in complete_block
+    assert "finalizePendingAssistant(responseText)" in complete_block
+    assert "Checking result" in complete_block
+
+    chat_response_block = input_window_js.split("payload.command === 'chat_response'", 1)[1].split(
+        "if (payload.command === 'draw_text'",
+        1,
+    )[0]
+    assert "finalizePendingAssistant(responseText)" in chat_response_block
+    assert "applyFinalAssistantLifecycle(responseText, agentTrace)" in chat_response_block
 
 
 def test_assistant_replies_render_structured_markdown_safely() -> None:

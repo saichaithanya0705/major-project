@@ -46,13 +46,15 @@ def test_vision_artifact_prefers_native_image_viewer() -> None:
     input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
     preload_js = (ROOT_DIR / "ui" / "preload.js").read_text(encoding="utf-8")
     main_js = (ROOT_DIR / "ui" / "main.js").read_text(encoding="utf-8")
+    artifact_lifecycle_js = (ROOT_DIR / "ui" / "artifact_lifecycle.js").read_text(encoding="utf-8")
 
     assert "openVisionArtifactImage" in input_window_js
     assert "window.api?.openVisionArtifactImage" in input_window_js
     assert "open-vision-artifact-image" in preload_js
     assert "open-vision-artifact-image" in main_js
     assert "shell.openPath" in main_js
-    assert "vision-artifact-images" in main_js
+    assert "getVisionArtifactImageDir" in main_js
+    assert "vision-artifact-images" in artifact_lifecycle_js
 
 
 def test_jarvis_output_layer_hidden_for_now() -> None:

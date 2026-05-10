@@ -53,6 +53,7 @@ from agents.cua_cli.stream_event_policy import (
     safe_preview,
     status_from_stream_event,
 )
+from agents.cua_cli.tool_allowlist_policy import allowed_tools_for_task
 from agents.cua_cli.workspace_policy import (
     compute_workspace_dirs,
     dedupe_workspace_dirs,
@@ -183,8 +184,14 @@ class CLIAgent:
                 f"Gemini CLI not built. Run 'npm install && npm run build' in {self.gemini_cli_path}"
             )
 
-    def _build_command(self, task: str) -> list[str]:
+    def _build_command(
+        self,
+        task: str,
+        *,
+        tool_context_task: Optional[str] = None,
+    ) -> list[str]:
         """Build the command to execute the CLI."""
+        tool_context = tool_context_task or task
         cmd = [
             "node",
             self.cli_bin,
@@ -193,7 +200,11 @@ class CLIAgent:
             "--approval-mode", self.approval_mode,
         ]
 
-        for include_dir in self._workspace_dirs_for_task(task):
+        allowed_tools = allowed_tools_for_task(tool_context, self.approval_mode)
+        if allowed_tools:
+            cmd.extend(["--allowed-tools", ",".join(allowed_tools)])
+
+        for include_dir in self._workspace_dirs_for_task(tool_context):
             cmd.extend(["--include-directories", include_dir])
 
         if self.model:
@@ -698,6 +709,16 @@ class CLIAgent:
                 messages.append(cleaned)
         return messages
 
+    @staticmethod
+    def _last_tool_call_failed(tool_calls: Optional[List[Dict[str, Any]]]) -> bool:
+        for tool_call in reversed(tool_calls or []):
+            if not isinstance(tool_call, dict):
+                continue
+            status = str(tool_call.get("status") or "").strip().lower()
+            if status:
+                return status == "error"
+        return False
+
     @classmethod
     def _normalize_cli_response(cls, response: CLIResponse) -> CLIResponse:
         tool_errors = cls._collect_tool_error_messages(response.tool_calls)
@@ -705,6 +726,9 @@ class CLIAgent:
             return response
 
         primary_error = tool_errors[-1]
+        if cls._last_tool_call_failed(response.tool_calls):
+            response.success = False
+
         if not response.output and not response.success:
             response.output = primary_error
 
@@ -772,6 +796,7 @@ class CLIAgent:
                 prepared_task,
                 run_timeout,
                 status_callback=status_callback,
+                tool_context_task=task,
             )
             if (
                 short_timeout_applied
@@ -784,6 +809,7 @@ class CLIAgent:
                     prepared_task,
                     timeout,
                     status_callback=status_callback,
+                    tool_context_task=task,
                 )
             if (
                 response.success
@@ -796,6 +822,7 @@ class CLIAgent:
                     retry_task,
                     run_timeout,
                     status_callback=status_callback,
+                    tool_context_task=task,
                 )
             response = self._normalize_cli_response(response)
             # If CLI used a server-like launch command in tool calls, auto-persist it.
@@ -901,13 +928,14 @@ class CLIAgent:
         task: str,
         timeout: int,
         status_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        tool_context_task: Optional[str] = None,
     ) -> CLIResponse:
         """
         Run the gemini-cli with the given task.
 
         Returns structured response parsed from JSON output.
         """
-        cmd = self._build_command(task)
+        cmd = self._build_command(task, tool_context_task=tool_context_task)
         session_id = uuid.uuid4().hex[:8]
 
         env = self._build_cli_env()

@@ -15,9 +15,10 @@ from typing import Any, Callable
 from agents.cua_cli.agent import CLIAgent
 from agents.jarvis.artifact import build_jarvis_visual_artifact
 from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
+from agents.web_qa.agent import WebQAAgent
 from core.assistant_logging import log_assistant_event
 from models.contracts import RoutedStepResult
-from models.routing_policy import _clean_text, _routing_task_text
+from models.routing_policy import _clean_text, _format_direct_response_text, _routing_task_text
 from ui.visualization_api.chat_artifact import send_chat_vision_artifact
 from ui.visualization_api.chat_visibility import send_vision_chat_restore
 from ui.visualization_api.status_bubble import (
@@ -93,6 +94,12 @@ def _browser_completion_message(result: dict[str, Any]) -> str:
     return "Browser task completed."
 
 
+def _web_qa_completion_message(result: dict[str, Any]) -> str:
+    if not result.get("success"):
+        return _clean_text(result.get("error"), "Web QA task failed.")
+    return _format_direct_response_text(result.get("result"), "Web QA task completed.")
+
+
 def _vision_completion_message(result: dict[str, Any]) -> str:
     if not result.get("success"):
         return _clean_text(result.get("error"), "Computer task failed.")
@@ -142,6 +149,7 @@ async def run_routed_agent_step(
         message: str,
         source: str,
         complete: bool | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload = RoutedStepResult(
             agent=agent,
@@ -152,6 +160,8 @@ async def run_routed_agent_step(
         ).as_dict()
         if complete is not None:
             payload["complete"] = complete
+        if tool_calls is not None:
+            payload["tool_calls"] = tool_calls
         return payload
 
     agent_name = routing_result.get("agent")
@@ -321,6 +331,61 @@ async def run_routed_agent_step(
             complete=bool(result.get("complete", True)),
         )
 
+    if agent_name == "web_qa":
+        await _start_non_rapid_status("Searching the web...", source="web_qa")
+        task = routing_result.get("task", "")
+        print(f"[Router] Web QA Agent answering: {task}")
+        web_qa_agent = WebQAAgent(model=model)
+        started = time.monotonic()
+        web_qa_traceback = None
+        try:
+            result = await web_qa_agent.execute(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            web_qa_traceback = traceback.format_exc()
+            result = {"success": False, "result": None, "error": str(exc), "complete": True}
+
+        message = _web_qa_completion_message(result)
+        if result.get("success", False):
+            log_assistant_event(
+                "agent_step_completed",
+                request_id=request_id,
+                agent="web_qa",
+                task=task_text,
+                message=message,
+                success=True,
+                duration_seconds=time.monotonic() - started,
+            )
+        else:
+            metadata = {}
+            if web_qa_traceback:
+                metadata["traceback"] = web_qa_traceback
+            log_assistant_event(
+                "agent_step_failed",
+                request_id=request_id,
+                agent="web_qa",
+                task=task_text,
+                message=message,
+                error=_clean_text(result.get("error"), "Web QA task failed.", max_len=420),
+                success=False,
+                duration_seconds=time.monotonic() - started,
+                metadata=metadata or None,
+            )
+        await _finish_non_rapid_status(
+            message,
+            result.get("success", False),
+            source="web_qa",
+        )
+        return _step(
+            agent="web_qa",
+            task=task,
+            success=bool(result.get("success", False)),
+            message=message,
+            source="web_qa",
+            complete=bool(result.get("complete", True)),
+        )
+
     if agent_name == "cua_cli":
         await _start_non_rapid_status("Running CLI task...", source="cua_cli")
         task = routing_result.get("task", "")
@@ -400,6 +465,7 @@ async def run_routed_agent_step(
             success=bool(result.get("success", False)),
             message=message,
             source="cua_cli",
+            tool_calls=result.get("tool_calls"),
         )
 
     if agent_name == "cua_vision":

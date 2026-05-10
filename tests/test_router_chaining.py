@@ -118,7 +118,12 @@ async def test_direct_response_preserves_full_assistant_message() -> None:
 
 def test_router_normalization_preserves_full_direct_response() -> None:
     model = object.__new__(model_module.GeminiModel)
-    long_message = " ".join(f"normalized-detail-{index}" for index in range(90))
+    long_message = (
+        "## Normalized detail\n\n"
+        + "\n".join(f"- normalized-detail-{index}" for index in range(5))
+        + "\n\n"
+        + "Closing paragraph."
+    )
 
     route = model_module.GeminiModel._normalize_router_decision(
         model,
@@ -128,6 +133,68 @@ def test_router_normalization_preserves_full_direct_response() -> None:
     )
 
     assert route == {"agent": "direct", "response_text": long_message}, route
+
+
+def test_router_normalization_accepts_web_qa_route() -> None:
+    model = object.__new__(model_module.GeminiModel)
+
+    route = model_module.GeminiModel._normalize_router_decision(
+        model,
+        {"agent": "web_qa", "task": "What is the latest news about SpaceX?"},
+        "# User's Latest Request:\nWhat is the latest news about SpaceX?",
+        provider_name="unit-test",
+    )
+
+    assert route == {
+        "agent": "web_qa",
+        "task": "What is the latest news about SpaceX?",
+    }, route
+
+
+async def test_web_qa_route_executes_agent_and_finishes() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    executed_agents: list[str] = []
+    direct_calls: list[dict[str, Any]] = []
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
+        agent = routing_result.get("agent", "unknown")
+        executed_agents.append(agent)
+        return {
+            "agent": agent,
+            "task": routing_result.get("task", ""),
+            "success": True,
+            "message": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
+            "source": "web_qa",
+        }
+
+    def _fake_direct_response(**kwargs):
+        direct_calls.append(dict(kwargs))
+
+    _FakeRouterModel.sequence = [
+        {"agent": "web_qa", "task": "What is the latest news about SpaceX?"},
+    ]
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FakeRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini("What is the latest news about SpaceX?", "rapid", "jarvis")
+        assert executed_agents == ["web_qa"], executed_agents
+        assert direct_calls == [
+            {
+                "text": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
+                "source": "rapid_response",
+            }
+        ], direct_calls
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
 async def test_repeated_step_loop_recovers_and_finishes() -> None:
@@ -725,6 +792,108 @@ async def test_call_gemini_uses_session_scoped_rapid_history() -> None:
     assert "alpha-only memory" in prompts[2], prompts[2]
 
 
+async def test_contextual_file_followups_enrich_cli_tasks() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = model_module._run_routed_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    session_id = "contextual-file-followup"
+    answer_text = "Bill Gates net worth is roughly $118 billion according to the sourced answer."
+    created_path = r"C:\Users\SAI\Desktop\context_dump.txt"
+    captured_tasks: list[str] = []
+
+    class _QueueRouterModel:
+        routes: list[dict[str, Any]] = []
+
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            if not type(self).routes:
+                return {"agent": "direct", "response_text": "done"}
+            return type(self).routes.pop(0)
+
+    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
+        task = routing_result.get("task", routing_result.get("query", ""))
+        captured_tasks.append(task)
+        agent = routing_result.get("agent", "unknown")
+        if agent == "web_qa":
+            return {
+                "agent": "web_qa",
+                "task": task,
+                "success": True,
+                "message": answer_text,
+                "source": "web_qa",
+            }
+        if "write" in task.lower():
+            return {
+                "agent": "cua_cli",
+                "task": task,
+                "success": True,
+                "message": f"The answer has been written to `{created_path}`.",
+                "source": "cua_cli",
+                "tool_calls": [
+                    {
+                        "tool_name": "write_file",
+                        "parameters": {"file_path": created_path},
+                        "status": "success",
+                    }
+                ],
+            }
+        return {
+            "agent": "cua_cli",
+            "task": task,
+            "success": True,
+            "message": "Opened the file in VS Code.",
+            "source": "cua_cli",
+        }
+
+    model_module.RAPID_SESSION_STATE.clear_history(session_id)
+    model_module.GeminiModel = _QueueRouterModel
+    model_module._run_routed_agent_step = _fake_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = lambda **_kwargs: None
+    try:
+        _QueueRouterModel.routes = [
+            {"agent": "web_qa", "task": "what is the net worth of bill gates"},
+        ]
+        await model_module.call_gemini(
+            "what is the net worth of bill gates",
+            "rapid",
+            "jarvis",
+            session_id=session_id,
+        )
+
+        _QueueRouterModel.routes = [
+            {"agent": "cua_cli", "task": "write it down in a file on desktop"},
+        ]
+        await model_module.call_gemini(
+            "write it down in a file on desktop",
+            "rapid",
+            "jarvis",
+            session_id=session_id,
+        )
+
+        _QueueRouterModel.routes = [
+            {"agent": "cua_cli", "task": "open the file through vscode"},
+        ]
+        await model_module.call_gemini(
+            "open the file through vscode",
+            "rapid",
+            "jarvis",
+            session_id=session_id,
+        )
+    finally:
+        model_module.GeminiModel = original_model_cls
+        model_module._run_routed_agent_step = original_run_step
+        model_module.RAPID_SESSION_STATE.clear_history(session_id)
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+    assert len(captured_tasks) == 3, captured_tasks
+    assert answer_text in captured_tasks[1], captured_tasks[1]
+    assert created_path in captured_tasks[2], captured_tasks[2]
+
+
 async def test_direct_qa_bypasses_router_and_screenshot_capture() -> None:
     original_model_cls = model_module.GeminiModel
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
@@ -773,6 +942,46 @@ async def test_direct_qa_bypasses_router_and_screenshot_capture() -> None:
     finally:
         model_module.GeminiModel = original_model_cls
         model_module.prepare_vision_screenshot = original_prepare_vision_screenshot
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
+async def test_direct_qa_preserves_structured_response_formatting() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    rich_answer = (
+        "## Elon Musk\n\n"
+        "- Born June 28, 1971.\n"
+        "- Co-founded Zip2 and X.com.\n\n"
+        "| Company | Role |\n"
+        "| --- | --- |\n"
+        "| SpaceX | Founder |\n"
+    )
+    direct_messages: list[str] = []
+
+    class _FormattedDirectQAModel:
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+        async def answer_direct_request(self, *, user_prompt: str, history_block: str = "") -> str:
+            return rich_answer
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    model_module._RAPID_CONVERSATION_HISTORY.clear()
+    model_module.GeminiModel = _FormattedDirectQAModel
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        await model_module.call_gemini(
+            "Tell me everything about elon musk.",
+            "rapid",
+            "jarvis",
+        )
+        assert direct_messages == [rich_answer.strip()], direct_messages
+    finally:
+        model_module.GeminiModel = original_model_cls
         if original_direct_response is not None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
@@ -1140,6 +1349,8 @@ async def run_checks() -> None:
     await test_chains_multiple_agents_then_finishes()
     await test_direct_response_preserves_full_assistant_message()
     test_router_normalization_preserves_full_direct_response()
+    test_router_normalization_accepts_web_qa_route()
+    await test_web_qa_route_executes_agent_and_finishes()
     await test_repeated_step_loop_recovers_and_finishes()
     await test_single_full_agent_step_finishes_without_followup_router()
     await test_completed_browser_summary_finishes_when_router_rewrites_task()
@@ -1152,7 +1363,9 @@ async def run_checks() -> None:
     await test_execution_request_reroutes_jarvis_to_browser_when_url_task()
     await test_window_management_request_reroutes_jarvis_to_cua_vision()
     await test_call_gemini_uses_session_scoped_rapid_history()
+    await test_contextual_file_followups_enrich_cli_tasks()
     await test_direct_qa_bypasses_router_and_screenshot_capture()
+    await test_direct_qa_preserves_structured_response_formatting()
 
 
 if __name__ == "__main__":

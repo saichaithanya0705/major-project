@@ -202,15 +202,10 @@ class VisualizationServer:
         return str(values[0]).strip() if values else ""
 
     def _is_authorized_websocket(self, websocket) -> bool:
-        # Unit-test fakes may call _handle_client directly without request metadata.
-        # Real websocket connections have request/path metadata and must pass token/origin checks.
         if not self.auth_token:
             return True
         path = self._websocket_path(websocket)
         headers = self._websocket_headers(websocket)
-        has_request_metadata = bool(path and path != "/") or bool(headers)
-        if not has_request_metadata and type(websocket).__module__.startswith("tests."):
-            return True
         origin = self._header_value(headers, "Origin")
         if not self._origin_is_allowed(origin):
             return False

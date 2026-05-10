@@ -80,6 +80,9 @@ OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 # OLLAMA_ROUTER_NUM_PREDICT = "240"
 # OLLAMA_ROUTER_THINK = "false"
 
+# Optional source-grounded Web QA via Tavily MCP.
+TAVILY_API_KEY = "YOUR_TAVILY_API_KEY"
+
 ELEVENLABS_API_KEY = "YOUR_API_KEY"
 ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"   # Optional
 ELEVENLABS_MODEL_ID = "eleven_multilingual_v2" # Optional
