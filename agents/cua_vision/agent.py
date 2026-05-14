@@ -7,6 +7,7 @@ what's on screen and decide what actions to take.
 """
 import time
 import inspect
+from dataclasses import asdict
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -20,6 +21,7 @@ from agents.cua_vision.tools import (
     execute_tool_call,
 )
 from integrations.audio import tts_speak
+from agents.cua_vision.contracts import CuaRunResult
 from agents.cua_vision.single_call import OpenRouterFallbackError, SingleCallVisionEngine
 from agents.cua_vision.tool_declarations import VISION_FUNCTION_DECLARATIONS
 from agents.cua_vision.prompts import (
@@ -95,21 +97,32 @@ class VisionAgent:
         self.chat_history = []
 
         try:
-            await self._call_interaction_loop(task, screenshot)
+            loop_result = await self._call_interaction_loop(task, screenshot)
+            if isinstance(loop_result, CuaRunResult):
+                return {
+                    "success": loop_result.success,
+                    "complete": loop_result.complete,
+                    "result": loop_result.result,
+                    "error": loop_result.error,
+                    "critic": asdict(loop_result.critic) if loop_result.critic else None,
+                }
             return {
                 "success": True,
+                "complete": True,
                 "result": "Task completed",
                 "error": None
             }
         except OpenRouterFallbackError as e:
             return {
                 "success": False,
+                "complete": False,
                 "result": None,
                 "error": str(e)
             }
         except Exception as e:
             return {
                 "success": False,
+                "complete": False,
                 "result": None,
                 "error": str(e)
             }

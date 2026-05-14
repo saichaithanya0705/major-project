@@ -20,6 +20,7 @@ from agents.cua_vision.action_guard import (
     infer_click_type,
     register_action_and_detect_click_loop,
     resolve_click_type,
+    task_expects_repeated_actions,
 )
 from agents.cua_vision.interaction_policy import (
     build_fallback_context,
@@ -27,6 +28,16 @@ from agents.cua_vision.interaction_policy import (
     describe_action_for_feedback,
     resolve_target_description,
 )
+from agents.cua_vision.contracts import (
+    ActionResult,
+    ActionType,
+    ComputerAction,
+    CriticVerdict,
+    CuaRunResult,
+    TargetKind,
+    TargetRef,
+)
+from agents.cua_vision.criticizer import CuaCriticizer
 from agents.cua_vision.prompts import (
     VISION_AGENT_SYSTEM_PROMPT,
     WINDOWS_APP_LAUNCH_WORKFLOW,
@@ -99,6 +110,13 @@ POST_BATCH_DELAY_SECONDS = 0.05
 VISUAL_NOOP_SIMILARITY_THRESHOLD = 0.9995
 TARGET_REGION_NOOP_SIMILARITY_THRESHOLD = 0.995
 REPEATED_VISUAL_NOOP_FALLBACK_THRESHOLD = 2
+REPEATED_NON_CLICK_NOOP_STOP_THRESHOLD = 2
+NON_CLICK_NOOP_STOP_TOOLS = {
+    "type_string",
+    "press_ctrl_hotkey",
+    "press_alt_hotkey",
+    "press_key_for_duration",
+}
 MAX_RUNTIME_OBSERVATIONS = 4
 TARGET_REGION_PADDING_PX = 24
 TARGET_REGION_MIN_SIDE_PX = 48
@@ -150,6 +168,10 @@ class DebugStopAfterFirstGoTo(RuntimeError):
     """Raised when debug mode intentionally stops after first go_to_element."""
 
 
+class RepeatedNoopActionError(RuntimeError):
+    """Raised when a repeated non-click action is visibly doing nothing."""
+
+
 class OpenRouterFallbackError(RuntimeError):
     """Raised when no configured vision provider responds."""
 
@@ -175,6 +197,12 @@ class SingleCallVisionEngine:
         self._last_visual_noop_signature = None
         self._repeated_visual_noop_count = 0
         self._last_position_bbox_args = None
+        self._executed_action_count = 0
+        self._last_action_had_visible_effect: bool | None = None
+        self._criticizer = CuaCriticizer()
+        self._last_completion_verdict = None
+        self._terminal_incomplete_verdict = None
+        self._rejected_completion_count = 0
         self._current_screen_frame: ScreenFrame | None = None
         self._max_steps = _env_int("CUA_VISION_MAX_STEPS", DEFAULT_MAX_STEPS, minimum=1, maximum=100)
         self._max_duration_seconds = _env_float(
@@ -227,7 +255,11 @@ class SingleCallVisionEngine:
                     should_continue = await self._handle_no_function_call(task)
                     if should_continue:
                         continue
-                    return
+                    return CuaRunResult(
+                        success=True,
+                        complete=False,
+                        result="Vision model did not return an executable action.",
+                    )
 
                 function_calls = self._normalize_function_call_batch(function_calls)
                 if len(function_calls) > 1:
@@ -235,10 +267,35 @@ class SingleCallVisionEngine:
 
                 done = await self._handle_function_calls(task, function_calls)
                 if done:
-                    return
+                    if self._terminal_incomplete_verdict is not None:
+                        return CuaRunResult(
+                            success=True,
+                            complete=False,
+                            result=self._terminal_incomplete_verdict.reason,
+                            critic=self._terminal_incomplete_verdict,
+                        )
+                    return CuaRunResult(
+                        success=True,
+                        complete=True,
+                        result="Task completed",
+                        critic=self._last_completion_verdict,
+                    )
 
                 self._raise_if_stopped()
                 await asyncio.sleep(POST_BATCH_DELAY_SECONDS)
+        except RepeatedNoopActionError as exc:
+            verdict = CriticVerdict(
+                complete=False,
+                should_continue=False,
+                confidence=0.45,
+                reason=str(exc),
+            )
+            return CuaRunResult(
+                success=True,
+                complete=False,
+                result=str(exc),
+                critic=verdict,
+            )
         finally:
             await self._hide_statuses(delay_ms=400)
 
@@ -652,6 +709,22 @@ IMPORTANT:
                 if self._should_verify_visual_effect(name)
                 else (None, None)
             )
+            if name in {"tts_speak", "task_is_complete"}:
+                if await self._should_accept_model_completion(task, args):
+                    tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
+                    if tool_screen_frame is None:
+                        execute_tool_call(name, args)
+                    else:
+                        execute_tool_call(name, args, screen_frame=tool_screen_frame)
+                    await self._set_status("Task complete")
+                    await self._hide_statuses(delay_ms=700)
+                    return True
+                if self._rejected_completion_count >= 2:
+                    self._terminal_incomplete_verdict = self._last_completion_verdict
+                    return True
+                await self._set_status("Completion needs verification. Continuing...")
+                return False
+
             tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
             if name in {"crop_and_search", "go_to_element"}:
                 # These tools can do blocking model work; run them off-loop.
@@ -670,6 +743,7 @@ IMPORTANT:
                 else:
                     execute_tool_call(name, args, screen_frame=tool_screen_frame)
             self.consecutive_failures = 0
+            self._executed_action_count += 1
 
             if name in POSITIONING_TOOLS:
                 self.last_target_description = resolve_target_description(
@@ -700,11 +774,6 @@ IMPORTANT:
                     "target_description": resolved_target,
                 }
 
-            if name in {"tts_speak", "task_is_complete"}:
-                await self._set_status("Task complete")
-                await self._hide_statuses(delay_ms=700)
-                return True
-
             if self._register_action_and_detect_click_loop(task, name, signature, click_type):
                 target = resolve_target_description(
                     task=task,
@@ -717,6 +786,16 @@ IMPORTANT:
                     f"on {target}. Stopping to avoid infinite retries."
                 )
                 await self._hide_statuses(delay_ms=700)
+                self._terminal_incomplete_verdict = CriticVerdict(
+                    complete=False,
+                    should_continue=False,
+                    confidence=0.45,
+                    reason=(
+                        "Stopped a repeated position+click loop without independent "
+                        "completion evidence."
+                    ),
+                    next_hint="Re-observe the target and use a different action strategy.",
+                )
                 return True
 
             post_action_frame = await self._wait_for_ui_settle()
@@ -734,7 +813,7 @@ IMPORTANT:
             )
             return False
         except Exception as e:
-            if isinstance(e, DebugStopAfterFirstGoTo):
+            if isinstance(e, (DebugStopAfterFirstGoTo, RepeatedNoopActionError)):
                 raise
             print(f"[VisionAgent] Tool execution failed: {e}")
             self.consecutive_failures += 1
@@ -1021,6 +1100,7 @@ IMPORTANT:
     ) -> None:
         if not self._should_verify_visual_effect(name):
             self._reset_visual_noop_state()
+            self._last_action_had_visible_effect = None
             return
 
         metrics = self._visual_similarity_metrics(
@@ -1044,7 +1124,10 @@ IMPORTANT:
 
         if not globally_unchanged or not target_unchanged:
             self._reset_visual_noop_state()
+            self._last_action_had_visible_effect = True
             return
+
+        self._last_action_had_visible_effect = False
 
         if signature == self._last_visual_noop_signature:
             self._repeated_visual_noop_count += 1
@@ -1072,6 +1155,17 @@ IMPORTANT:
             similarity_bits.append(f"target={target_similarity:.4f}")
         print(f"[VisionAgent] {observation} {' '.join(similarity_bits)}")
 
+        if (
+            click_type is None
+            and name in NON_CLICK_NOOP_STOP_TOOLS
+            and self._repeated_visual_noop_count >= REPEATED_NON_CLICK_NOOP_STOP_THRESHOLD
+            and not task_expects_repeated_actions(task)
+        ):
+            await self._set_status(f"{action_description} had no visible effect. Stopping.")
+            raise RepeatedNoopActionError(
+                f"Repeated {action_description} had no visible effect; stopping to avoid a loop."
+            )
+
         if click_type and self._repeated_visual_noop_count >= REPEATED_VISUAL_NOOP_FALLBACK_THRESHOLD:
             await self._set_status(f"{action_description} had no visible effect. Trying precision fallback...")
             fallback_success = await self._attempt_fallback(task, click_type, args)
@@ -1080,6 +1174,38 @@ IMPORTANT:
                 self.repeated_action_count = 0
                 await self._wait_for_ui_settle()
                 self._reset_visual_noop_state()
+
+    async def _should_accept_model_completion(self, task: str, args: dict) -> bool:
+        completion_evidence = (
+            self._executed_action_count > 0
+            and self._last_action_had_visible_effect is not False
+        )
+        action = ComputerAction(
+            action_type=ActionType.COMPLETE,
+            target=TargetRef(TargetKind.NONE),
+            text=str(args.get("text") or args.get("status_text") or ""),
+            raw_name="task_is_complete",
+            raw_args=dict(args),
+        )
+        result = ActionResult(
+            executed=True,
+            message="Model claimed completion.",
+            metrics={"completion_evidence": completion_evidence},
+        )
+        verdict = await self._criticizer.review(
+            task=task,
+            action=action,
+            result=result,
+            model_claimed_complete=True,
+        )
+        self._last_completion_verdict = verdict
+        if verdict.complete:
+            self._rejected_completion_count = 0
+            return True
+        self._rejected_completion_count += 1
+        self._remember_runtime_observation(verdict.reason)
+        print(f"[VisionAgent] Completion rejected by critic: {verdict.reason}")
+        return False
 
     def _raise_if_stopped(self):
         if is_stop_requested():

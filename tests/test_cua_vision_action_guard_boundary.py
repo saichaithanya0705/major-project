@@ -15,6 +15,7 @@ from agents.cua_vision.action_guard import (
     ClickLoopState,
     action_signature,
     register_action_and_detect_click_loop,
+    task_expects_repeated_actions,
     task_expects_repeated_clicks,
 )
 
@@ -90,6 +91,10 @@ def run_checks() -> None:
 
     assert task_expects_repeated_clicks("Click the plus icon 10 times.") is True
     assert task_expects_repeated_clicks("Click Save once.") is False
+    assert task_expects_repeated_actions("Press Down 10 times.") is True
+    assert task_expects_repeated_actions("Keep typing until the field is filled.") is True
+    assert task_expects_repeated_actions("Open VS Code.") is False
+    assert task_expects_repeated_actions("This sometimes opens slowly.") is False
 
 
 if __name__ == "__main__":

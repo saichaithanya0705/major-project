@@ -91,20 +91,43 @@ def extract_position_bbox_args(args: Mapping[str, object]) -> dict[str, float] |
         return None
 
 
-def task_expects_repeated_clicks(task: str) -> bool:
-    text = (task or "").lower()
-    markers = [
+def _task_words(task: str) -> set[str]:
+    return {
+        token
+        for token in "".join(char.lower() if char.isalnum() else " " for char in task or "").split()
+        if token
+    }
+
+
+def task_expects_repeated_actions(task: str) -> bool:
+    text = f" {(task or '').lower()} "
+    words = _task_words(task)
+    repeated_words = {
         "times",
         "repeatedly",
-        "keep clicking",
-        "click again",
-        "double click multiple",
-        "spam click",
+        "multiple",
+        "twice",
+        "thrice",
         "until",
         "every",
         "loop",
-    ]
-    return any(marker in text for marker in markers)
+    }
+    repeated_phrases = (
+        "keep clicking",
+        "keep pressing",
+        "keep typing",
+        "click again",
+        "press again",
+        "type again",
+        "double click multiple",
+        "spam click",
+        "spam press",
+    )
+    return bool(words & repeated_words) or any(phrase in text for phrase in repeated_phrases)
+
+
+def task_expects_repeated_clicks(task: str) -> bool:
+    return task_expects_repeated_actions(task)
 
 
 @dataclass(slots=True)

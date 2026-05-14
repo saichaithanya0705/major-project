@@ -146,8 +146,57 @@ async def test_cli_step_preserves_tool_calls_for_artifact_tracking() -> None:
     assert result["tool_calls"] == tool_calls, result
 
 
+async def test_cli_step_reports_created_file_from_tool_call_when_output_is_generic() -> None:
+    original_start = runner_module._start_non_rapid_status
+    original_finish = runner_module._finish_non_rapid_status
+    original_cli_agent = runner_module.CLIAgent
+
+    created_path = r"C:\Users\SAI\Desktop\bill_gates_net_worth.md"
+    tool_calls = [
+        {
+            "tool_name": "write_file",
+            "parameters": {"file_path": created_path},
+            "status": "success",
+        }
+    ]
+
+    class _FakeCLIAgent:
+        async def execute(self, task: str, status_callback=None):
+            return {
+                "success": True,
+                "result": "",
+                "error": "",
+                "tool_calls": tool_calls,
+            }
+
+    async def _fake_start(text: str, source: str):
+        return None
+
+    async def _fake_finish(message: str, success: bool, source: str):
+        return None
+
+    runner_module.CLIAgent = _FakeCLIAgent
+    runner_module._start_non_rapid_status = _fake_start
+    runner_module._finish_non_rapid_status = _fake_finish
+    try:
+        result = await runner_module.run_routed_agent_step(
+            model=object(),
+            routing_result={"agent": "cua_cli", "task": "write it down"},
+            jarvis_model="jarvis",
+            request_id="req-cli-file",
+            get_stored_screenshot=lambda: None,
+        )
+    finally:
+        runner_module.CLIAgent = original_cli_agent
+        runner_module._start_non_rapid_status = original_start
+        runner_module._finish_non_rapid_status = original_finish
+
+    assert created_path in result["message"], result
+
+
 if __name__ == "__main__":
     asyncio.run(test_completion_status_uses_short_delay())
     asyncio.run(test_web_qa_step_returns_sourced_answer())
     asyncio.run(test_cli_step_preserves_tool_calls_for_artifact_tracking())
+    asyncio.run(test_cli_step_reports_created_file_from_tool_call_when_output_is_generic())
     print("[test_agent_step_runner_latency] All checks passed.")

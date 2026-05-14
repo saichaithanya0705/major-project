@@ -11,22 +11,17 @@ from typing import Callable
 
 from PIL import ImageGrab
 
+from models.output_file_artifacts import (
+    extract_output_file_path_from_tool_calls,
+    extract_path_from_text,
+    looks_like_file_status,
+)
+
 
 Cleaner = Callable[[str], str]
 DEFAULT_RAPID_SESSION_ID = "__default__"
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
-_WINDOWS_PATH_RE = re.compile(
-    r"[A-Za-z]:\\(?:[^\\/:*?\"<>|\r\n`]+\\)*[^\\/:*?\"<>|\r\n`]+"
-)
-_PATH_STRIP_CHARS = " \t\r\n`'\".,;:)]}"
-_FILE_OUTPUT_TOOL_NAMES = {
-    "edit",
-    "edit_file",
-    "replace",
-    "write_file",
-}
-_FILE_PATH_PARAMETER_KEYS = ("file_path", "path", "absolute_path", "target_path")
 _CONTENT_REFERENCE_PHRASES = tuple(
     tuple(_TOKEN_RE.findall(phrase))
     for phrase in (
@@ -41,15 +36,6 @@ _CONTENT_REFERENCE_PHRASES = tuple(
         "the response",
         "this response",
     )
-)
-_FILE_STATUS_MARKERS = (
-    "written to",
-    "saved to",
-    "created at",
-    "created in",
-    "has been written",
-    "has been saved",
-    "file has been",
 )
 
 
@@ -88,48 +74,6 @@ def _normalize_context_text(value: object, max_len: int = 12000) -> str:
     return text
 
 
-def _looks_like_file_status(text: str) -> bool:
-    lowered = " ".join(str(text or "").lower().split())
-    if not lowered:
-        return False
-    has_status = any(marker in lowered for marker in _FILE_STATUS_MARKERS)
-    if not has_status:
-        return False
-    if _extract_path_from_text(text):
-        return True
-    return "desktop" in lowered and bool(re.search(r"\.[a-z0-9]{1,12}\b", lowered))
-
-
-def _extract_path_from_text(text: object) -> str:
-    match = _WINDOWS_PATH_RE.search(str(text or ""))
-    if not match:
-        return ""
-    return match.group(0).strip(_PATH_STRIP_CHARS)
-
-
-def _extract_file_path_from_tool_calls(tool_calls: object) -> str:
-    if not isinstance(tool_calls, list):
-        return ""
-
-    for tool_call in reversed(tool_calls):
-        if not isinstance(tool_call, dict):
-            continue
-        tool_name = str(tool_call.get("tool_name") or "").strip().lower()
-        if tool_name not in _FILE_OUTPUT_TOOL_NAMES:
-            continue
-        status = str(tool_call.get("status") or "").strip().lower()
-        if status and status != "success":
-            continue
-        parameters = tool_call.get("parameters")
-        if not isinstance(parameters, dict):
-            continue
-        for key in _FILE_PATH_PARAMETER_KEYS:
-            path = _extract_path_from_text(parameters.get(key))
-            if path:
-                return path
-    return ""
-
-
 def _task_has_context_reference(task: str) -> bool:
     return _tokens_contain_any_phrase(_task_tokens(task), _CONTENT_REFERENCE_PHRASES)
 
@@ -163,7 +107,7 @@ def _task_is_contextual_file_open(task: str) -> bool:
 
 
 def _task_has_path(task: str) -> bool:
-    return bool(_extract_path_from_text(task))
+    return bool(extract_path_from_text(task))
 
 
 @dataclass(slots=True)
@@ -256,7 +200,7 @@ class RapidSessionState:
         if str(role or "").strip().lower() != "assistant":
             return
         normalized = _normalize_context_text(text)
-        if not normalized or _looks_like_file_status(normalized):
+        if not normalized or looks_like_file_status(normalized):
             return
 
         context = self.get_context(session_id)
@@ -271,10 +215,10 @@ class RapidSessionState:
         if not step_result.get("success"):
             return
 
-        path = _extract_file_path_from_tool_calls(step_result.get("tool_calls"))
+        path = extract_output_file_path_from_tool_calls(step_result.get("tool_calls"))
         message = step_result.get("message")
-        if not path and _looks_like_file_status(str(message or "")):
-            path = _extract_path_from_text(message)
+        if not path and looks_like_file_status(str(message or "")):
+            path = extract_path_from_text(message)
         if path:
             context = self.get_context(session_id)
             context["last_file_path"] = path
@@ -286,12 +230,25 @@ class RapidSessionState:
         user_prompt: str,
         session_id: str | None = None,
     ) -> dict[str, object]:
-        if str(routing_result.get("agent") or "").strip().lower() != "cua_cli":
+        agent = str(routing_result.get("agent") or "").strip().lower()
+        if agent not in {"cua_cli", "cua_vision"}:
             return routing_result
 
         task = str(routing_result.get("task") or routing_result.get("query") or user_prompt or "")
         context = self.get_context(session_id)
         enriched_task = task
+        enriched_agent = agent
+
+        if (
+            agent == "cua_vision"
+            and _task_is_contextual_file_open(task)
+            and not _task_has_path(task)
+            and context.get("last_file_path", "").strip()
+        ):
+            enriched_agent = "cua_cli"
+
+        if enriched_agent != "cua_cli":
+            return routing_result
 
         if _task_is_contextual_file_write(task):
             content = context.get("last_assistant_message", "").strip()
@@ -313,17 +270,17 @@ class RapidSessionState:
                     f"Target file path from this chat session: {path}"
                 )
 
-        if enriched_task == task:
+        if enriched_task == task and enriched_agent == agent:
             return routing_result
 
         enriched = dict(routing_result)
+        enriched["agent"] = enriched_agent
         enriched["task"] = enriched_task
         return enriched
 
     def format_history_for_prompt(self, session_id: str | None = None) -> str:
         history = self.get_history(session_id)
-        if not history:
-            return ""
+        context = self.get_context(session_id)
 
         lines = []
         for entry in list(history)[-20:]:
@@ -340,15 +297,34 @@ class RapidSessionState:
 
             lines.append(f"{label}: {text}")
 
-        if not lines:
+        context_lines = []
+        last_file_path = context.get("last_file_path", "").strip()
+        if last_file_path:
+            context_lines.append(f"- Last created/edited file path: {last_file_path}")
+            context_lines.append(
+                "- For follow-up requests to open, show, or edit this known local file in VS Code "
+                "or another editor, prefer cua_cli with the path; use cua_vision only for visible UI clicks."
+            )
+
+        if not lines and not context_lines:
             return ""
 
-        return (
-            "\n# Conversation History (Rapid-Model Messages Only)\n"
-            "Use this history for context. Agent entries are short summaries only.\n"
-            + "\n".join(lines)
-            + "\n"
-        )
+        blocks = []
+        if lines:
+            blocks.append(
+                "\n# Conversation History (Rapid-Model Messages Only)\n"
+                "Use this history for context. Agent entries are short summaries only.\n"
+                + "\n".join(lines)
+                + "\n"
+            )
+        if context_lines:
+            blocks.append(
+                "\n# Session Context\n"
+                "Use these persisted facts for short follow-up requests.\n"
+                + "\n".join(context_lines)
+                + "\n"
+            )
+        return "".join(blocks)
 
 
 RAPID_SESSION_STATE = RapidSessionState()
