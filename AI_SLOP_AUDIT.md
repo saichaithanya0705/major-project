@@ -2,11 +2,11 @@
 
 Date: 2026-05-10
 
-Scope: code changed during this prompt and directly connected architecture for the latest `web_qa` failure, router hand-off, chat UI rendering, latest `cua_cli` false-success issue, hook-continuation review of the `cua_cli` tool allowlist fix, and the current hook-continuation review of rapid session context/artifact enrichment. `docs/audits/ai-slop/` does not exist in this repository, so this report lives at the repository root.
+Scope: code changed during this prompt and directly connected architecture for the latest `web_qa` failure, router hand-off, chat UI rendering, latest `cua_cli` false-success issue, hook-continuation review of the `cua_cli` tool allowlist fix, rapid session context/artifact enrichment, and the current audit of the assistant file-name memory fix. `docs/audits/ai-slop/` does not exist in this repository, so this report lives at the repository root.
 
 ## Scoped Verdict
 
-Score after this hook repair: 24/100, Low slop risk for the scoped rapid hand-off changes.
+Score after this hook repair: 22/100, Low slop risk for the scoped rapid hand-off changes.
 
 Confidence: Medium. Graphify is stale from 2026-04-27 and the repository-wide scanner is noisy because it includes vendored browser artifacts and package lockfiles, but the scoped source path was inspected and covered with red/green regression tests.
 
@@ -16,12 +16,14 @@ Why:
 - Source inspection found a real slop-like boundary bug in `models/rapid_state.py`: contextual pronouns and file-operation verbs were matched with raw substring checks.
 - Source inspection also found artifact tracking accepted any successful path-bearing tool/message, which could turn a `read_file` path into the next "open the file" target.
 - The root-cause repair now uses token/phrase matching and explicit output-file tool evidence instead of broader string guesses.
+- Current source inspection found and fixed a fresh boundary smell from this prompt: `models/agent_step_runner.py` briefly imported output-file parsing from `models/rapid_state.py`, making execution depend on session-memory internals.
 - Regression tests prove both the original user flow and the newly discovered false-positive cases.
 
 ## Required Triage
 
 - Read `graphify-out/GRAPH_REPORT.md` before source inspection.
 - Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Current hook pass re-ran the same Graphify triage command before source inspection.
 - Graph-only score: 51/100, Moderate.
 - Source-augmented score: 96/100, Severe.
 - The severe source-augmented score is dominated by broad repository signals, including vendored `browser-use` artifacts, package lockfiles, and unrelated high-fanout model/router files. Per the hook scope, this pass audited only code changed in this prompt plus directly connected architecture.
@@ -146,6 +148,30 @@ Root-cause fix:
 - `tests/test_rapid_state_boundary.py:107` verifies contextual writes still receive the prior answer.
 - `tests/test_rapid_state_boundary.py:115` and `tests/test_rapid_state_boundary.py:131` verify `read_file` paths are ignored while `write_file` artifacts are captured.
 
+### 6. Output-file artifact parsing briefly lived in rapid session state
+
+Status: Fixed during current hook continuation.
+
+Evidence:
+
+- Latest real log evidence showed `logs/assistant_activity.jsonl` recorded a successful `write_file` tool call for `C:\Users\SAI\Desktop\bill_gates_net_worth.md`, but the persisted chat message was only `CLI task completed.`, so the direct follow-up could not answer "give me the file name."
+- The first behavior fix exposed `extract_output_file_path_from_tool_calls()` from `models/rapid_state.py` and imported it in `models/agent_step_runner.py:21`. That solved duplication but made the execution layer depend on the rapid session-memory module.
+- Graphify already placed the affected area in low-cohesion connected clusters: Community 6 (`CLIAgent`, routing/execution) and Community 31 (chat/session history), plus thin Community 66 for output-file event creation. That made this ownership boundary an aggressive review target.
+- Red test evidence: `tests/test_output_file_artifacts.py` initially failed because no dedicated artifact-boundary module existed.
+
+Risk:
+
+- Keeping artifact parsing inside session state would invite future execution/UI callers to import from a stateful memory module just to parse tool output.
+- The output-file concept would remain split between visible completion text and session context, increasing the chance that one path remembers a file while the other path forgets it again.
+
+Root-cause fix:
+
+- Added `models/output_file_artifacts.py:1`, a focused boundary module that owns output-file path parsing from successful tool calls, file-status text detection, and Windows path extraction.
+- `models/agent_step_runner.py:21` now imports artifact parsing from `models.output_file_artifacts`, and `models/agent_step_runner.py:87` uses it to turn generic successful CLI output into a visible `Created file: <path>` message.
+- `models/rapid_state.py:14` now imports the same artifact-boundary functions, keeping rapid state focused on session history and context enrichment.
+- `models/rapid_state.py:289` adds the last created/edited path to the rapid prompt's session-context block so short follow-ups have deterministic context.
+- Added `tests/test_output_file_artifacts.py:21` for the parser boundary, `tests/test_agent_step_runner_latency.py:149` for generic CLI output, and `tests/test_rapid_state_boundary.py:152` for the direct follow-up prompt context.
+
 ## Reviewed But Not Changed
 
 - Broad `except Exception` and `Any` usage remain in some boundary modules (`agents/web_qa/mcp_client.py`, `models/agent_step_runner.py`, `models/rapid_orchestrator.py`, `ui/server.py`). In the audited call path, these mostly guard subprocess, MCP, websocket, or model boundaries. They are risk areas, but not confirmed slop from this prompt.
@@ -178,3 +204,10 @@ Root-cause fix:
 - Passed during current hook continuation: `.venv\Scripts\python.exe tests\test_routing_policy.py`
 - Passed during current hook continuation: `.venv\Scripts\python.exe tests\test_router_backends_boundary.py`
 - Passed during current hook continuation: `.venv\Scripts\python.exe -m compileall models tests\test_router_chaining.py tests\test_rapid_state_boundary.py tests\test_agent_step_runner_latency.py`
+- Red evidence during latest hook continuation: `.venv\Scripts\python.exe tests\test_output_file_artifacts.py` failed with `ModuleNotFoundError: No module named 'models.output_file_artifacts'` before the boundary module existed.
+- Passed during latest hook continuation: `.venv\Scripts\python.exe tests\test_output_file_artifacts.py`
+- Passed during latest hook continuation: `.venv\Scripts\python.exe tests\test_agent_step_runner_latency.py`
+- Passed during latest hook continuation: `.venv\Scripts\python.exe tests\test_rapid_state_boundary.py`
+- Passed during latest hook continuation: `.venv\Scripts\python.exe tests\test_router_chaining.py`
+- Passed during latest hook continuation: `.venv\Scripts\python.exe -m pytest tests\test_output_file_artifacts.py tests\test_agent_step_runner_latency.py tests\test_rapid_state_boundary.py tests\test_router_chaining.py` (35 passed)
+- Passed during latest hook continuation: `.venv\Scripts\python.exe -m compileall models tests\test_output_file_artifacts.py tests\test_agent_step_runner_latency.py tests\test_rapid_state_boundary.py tests\test_router_chaining.py`

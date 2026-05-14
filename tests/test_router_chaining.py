@@ -801,6 +801,7 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
     answer_text = "Bill Gates net worth is roughly $118 billion according to the sourced answer."
     created_path = r"C:\Users\SAI\Desktop\context_dump.txt"
     captured_tasks: list[str] = []
+    captured_agents: list[str] = []
 
     class _QueueRouterModel:
         routes: list[dict[str, Any]] = []
@@ -817,6 +818,7 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
         task = routing_result.get("task", routing_result.get("query", ""))
         captured_tasks.append(task)
         agent = routing_result.get("agent", "unknown")
+        captured_agents.append(agent)
         if agent == "web_qa":
             return {
                 "agent": "web_qa",
@@ -874,7 +876,7 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
         )
 
         _QueueRouterModel.routes = [
-            {"agent": "cua_cli", "task": "open the file through vscode"},
+            {"agent": "cua_vision", "task": "open the file through vscode"},
         ]
         await model_module.call_gemini(
             "open the file through vscode",
@@ -890,6 +892,7 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
     assert len(captured_tasks) == 3, captured_tasks
+    assert captured_agents == ["web_qa", "cua_cli", "cua_cli"], captured_agents
     assert answer_text in captured_tasks[1], captured_tasks[1]
     assert created_path in captured_tasks[2], captured_tasks[2]
 

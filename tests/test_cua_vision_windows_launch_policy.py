@@ -40,6 +40,10 @@ def run_checks() -> None:
     assert "Google app" in combined_prompt, combined_prompt
     assert "Alt+Space" in combined_prompt, combined_prompt
     assert 'press_alt_hotkey(key="space"' in combined_prompt, combined_prompt
+    assert "If the app is already visible" in combined_prompt, combined_prompt
+    assert "confirm the launcher/search input is visible" in combined_prompt, combined_prompt
+    assert "do not keep pressing Alt+Space" in combined_prompt, combined_prompt
+    assert "appears unavailable" in combined_prompt, combined_prompt
     assert "press_ctrl_hotkey" in combined_prompt, combined_prompt
     assert "open_windows_google_launcher" not in combined_prompt, combined_prompt
     assert "Command+Space" not in combined_prompt, combined_prompt

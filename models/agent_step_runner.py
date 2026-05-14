@@ -18,6 +18,7 @@ from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
 from agents.web_qa.agent import WebQAAgent
 from core.assistant_logging import log_assistant_event
 from models.contracts import RoutedStepResult
+from models.output_file_artifacts import extract_output_file_path_from_tool_calls
 from models.routing_policy import _clean_text, _format_direct_response_text, _routing_task_text
 from ui.visualization_api.chat_artifact import send_chat_vision_artifact
 from ui.visualization_api.chat_visibility import send_vision_chat_restore
@@ -81,7 +82,12 @@ def _cli_completion_message(result: dict[str, Any]) -> str:
     if not result.get("success"):
         return _clean_text(result.get("error"), "CLI task failed.")
     output = _clean_text(result.get("result"), "")
-    return output if output else "CLI task completed."
+    if output:
+        return output
+    output_file_path = extract_output_file_path_from_tool_calls(result.get("tool_calls"))
+    if output_file_path:
+        return f"Created file: `{output_file_path}`."
+    return "CLI task completed."
 
 
 def _browser_completion_message(result: dict[str, Any]) -> str:
@@ -103,6 +109,13 @@ def _web_qa_completion_message(result: dict[str, Any]) -> str:
 def _vision_completion_message(result: dict[str, Any]) -> str:
     if not result.get("success"):
         return _clean_text(result.get("error"), "Computer task failed.")
+    if result.get("complete") is not True:
+        critic = result.get("critic")
+        if isinstance(critic, dict):
+            reason = _clean_text(critic.get("reason"), "", max_len=420)
+            if reason:
+                return reason
+        return _clean_text(result.get("result"), "Computer task needs more work.")
     return _clean_text(result.get("result"), "Computer task completed.")
 
 
@@ -487,6 +500,7 @@ async def run_routed_agent_step(
             vision_traceback = traceback.format_exc()
             result = {"success": False, "result": None, "error": str(exc)}
         message = _vision_completion_message(result)
+        complete = bool(result.get("complete", False))
         if result.get("success", False):
             log_assistant_event(
                 "agent_step_completed",
@@ -496,6 +510,10 @@ async def run_routed_agent_step(
                 message=message,
                 success=True,
                 duration_seconds=time.monotonic() - started,
+                metadata={
+                    "complete": complete,
+                    "critic": result.get("critic"),
+                },
             )
         else:
             metadata = {}
@@ -514,7 +532,7 @@ async def run_routed_agent_step(
             )
         await _finish_non_rapid_status(
             message,
-            result.get("success", False),
+            bool(result.get("success", False) and complete),
             source="cua_vision",
         )
         return _step(
@@ -523,6 +541,7 @@ async def run_routed_agent_step(
             success=bool(result.get("success", False)),
             message=message,
             source="cua_vision",
+            complete=complete,
         )
 
     return _step(

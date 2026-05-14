@@ -74,6 +74,7 @@ ROUTING RULES:
 - Use `invoke_browser` for browser/web tasks.
 - Use `invoke_web_qa` for factual Q&A that needs current web evidence or explicit sources. This is not browser automation.
 - Use `invoke_cua_cli` for shell/file/codebase/localhost/server tasks and local machine state that tools can query directly.
+- Prefer `invoke_cua_cli` for known local paths, saved files, folders, and follow-up requests like "open the file in VS Code" when session context already provides the file path.
 - Use `invoke_cua_vision` for UI clicking/typing/navigation tasks on desktop apps.
 - Capability contract: `invoke_browser` controls only the BrowserAgent's own managed browser session. If the user asks to open/use a specific installed app, an existing window, a named profile, "my browser", or another desktop-owned browser context, use `invoke_cua_vision`.
 - For pure screen-understanding questions ("what do you see", "what's on my screen", "explain this UI"), call `invoke_jarvis` directly and skip `request_screen_context`.
@@ -100,6 +101,7 @@ AGENT PRIORITY MATRIX (highest to lowest):
 
 TIE-BREAK RULES:
 - If request involves localhost + commands, prefer invoke_cua_cli.
+- If request involves opening a known local file/folder/path in an editor, prefer invoke_cua_cli.
 - If the same local state can be inspected through shell instead of a GUI, prefer invoke_cua_cli.
 - If request involves public website automation without local tooling, prefer invoke_browser.
 - If request needs pointer/mouse/visual app manipulation, prefer invoke_cua_vision.
@@ -109,6 +111,8 @@ TIE-BREAK RULES:
 FEW-SHOT ROUTING EXAMPLES:
 - User: "clone this repo and run tests"
   -> invoke_cua_cli(task="clone this repo and run tests")
+- User: "open the saved file in VS Code" and session context has a last created file path
+  -> invoke_cua_cli(task="open the saved file in VS Code using the known file path")
 - User: "open https://example.com and submit the signup form"
   -> invoke_browser(task="open https://example.com and submit the signup form")
 - User: "what is the latest news about SpaceX with sources?"
@@ -146,6 +150,7 @@ Hard routing rules:
 - If execution depends on currently visible unknown details, use screen_context first.
 - Use web_qa for current/latest/recent/source-grounded factual Q&A through Tavily MCP. Do not use web_qa for browser automation.
 - Capability contract: browser controls only the BrowserAgent-managed browser session. If the request needs a specific installed app, existing window, named profile, "my browser", or desktop-owned browser context, use cua_vision.
+- Known local files, folders, paths, and follow-up editor opens such as "open the file in VS Code" should use cua_cli when session context provides the path.
 - Preserve original wording in task/query; do not paraphrase away URLs, filenames, or entities.
 
 Capability-fit self-check:
@@ -167,6 +172,7 @@ Priority matrix:
 
 Tie-breakers:
 - If both browser and CLI signals appear with localhost/dev server flow, prefer cua_cli.
+- If request involves opening a known local file/folder/path in an editor, prefer cua_cli.
 - If local state can be inspected through shell instead of a GUI, prefer cua_cli.
 - If a web task first requires a specific installed app/window/profile, prefer cua_vision.
 - If uncertain between actionable agents, prefer cua_cli.
@@ -174,6 +180,8 @@ Tie-breakers:
 Few-shot JSON examples:
 - Request: "clone this repo and run tests"
   Response: {{"agent":"cua_cli","task":"clone this repo and run tests"}}
+- Request: "open the saved file in VS Code" and session context has a last created file path
+  Response: {{"agent":"cua_cli","task":"open the saved file in VS Code using the known file path"}}
 - Request: "open https://example.com and submit the signup form"
   Response: {{"agent":"browser","task":"open https://example.com and submit the signup form"}}
 - Request: "tell me the latest about Elon Musk with sources"

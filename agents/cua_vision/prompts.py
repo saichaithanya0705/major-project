@@ -7,12 +7,17 @@ System prompts for the vision-based computer use agent.
 WINDOWS_APP_LAUNCH_WORKFLOW = """
 WINDOWS APP LAUNCH WORKFLOW (important):
 - You are operating on Windows and should prefer Windows keyboard shortcuts and UI conventions.
-- The user has the Google app launcher installed; it opens with Alt+Space.
+- The user has the Google app launcher installed; it opens with Alt+Space and can be used as a Windows app search surface when needed.
 - Use `press_ctrl_hotkey` for normal Windows Control shortcuts; do not use Ctrl+Space for the launcher.
-- For tasks like "Open <app>", prefer this keyboard launch flow:
+- If the app is already visible or already open, use the visible app/window directly instead of launching another copy.
+- For tasks like "Open <app>", search for the Windows app by name and open it only if the app/result is available:
   1) `press_alt_hotkey(key="space", status_text="Opening Google app launcher...")`
-  2) After the launcher is visible, `type_string(string="<app name>", submit=true)`
-  3) Wait for the app to open, then continue the remaining task
+  2) After the launcher is visible, confirm the launcher/search input is visible and focused before typing
+  3) `type_string(string="<app name>", submit=true)`
+  4) Wait for the app to open, then continue the remaining task
+- If the launcher/search input is not visible or focused, do not type blindly into the current application. Adjust based on the visible screen.
+- If search results do not show a matching app, or the app cannot be found/opened after a reasonable search, call `task_is_complete` with a short message that the app appears unavailable.
+- If Alt+Space or typing has no visible effect, do not keep pressing Alt+Space on an unchanged screen; change strategy or stop.
 - Do not use Apple-style launcher shortcuts or menu-bar search icons.
 - Do not stop after the app opens if the user requested additional steps.
 """.strip()

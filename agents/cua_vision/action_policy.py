@@ -17,9 +17,18 @@ MAX_REMEMBER_TEXT_CHARS = 2000
 MAX_TTS_TEXT_CHARS = 800
 MAX_TARGET_DESCRIPTION_CHARS = 240
 MAX_KEY_HOLD_SECONDS = 2.0
+MAX_HOTKEY_PARTS = 4
 VISION_BBOX_FIELDS = ("ymin", "xmin", "ymax", "xmax")
 ALLOWED_CLICK_TYPES = {"left click", "double left click", "right click"}
 ALLOWED_HELD_KEYS = {"w", "a", "s", "d"}
+MODIFIER_KEY_ALIASES = {
+    "control": "ctrl",
+    "cmd": "win",
+    "command": "win",
+    "windows": "win",
+    "option": "alt",
+}
+MODIFIER_KEYS = {"ctrl", "alt", "shift", "win"}
 BLOCKED_CTRL_HOTKEYS = {
     "backspace",
     "delete",
@@ -105,6 +114,48 @@ def validate_hotkey(tool_name: str, key: object) -> str:
     if normalized_key in blocked and not _truthy_env("CUA_VISION_ALLOW_DANGEROUS_HOTKEYS"):
         raise ValueError(f"{tool_name}({normalized_key}) is blocked by the CUA Vision action policy.")
     return normalized_key
+
+
+def normalize_hotkey_keys(keys: object) -> tuple[str, ...]:
+    """
+    Validate a generic hotkey sequence while preserving existing ctrl/alt policy.
+
+    Generic computer-use providers often emit hotkeys as ["ctrl", "l"] or
+    "ctrl+l". Keep that normalization in the policy boundary so callers do not
+    reimplement blocked-key checks.
+    """
+    if isinstance(keys, str):
+        raw_parts = [part.strip() for part in keys.replace(",", "+").split("+")]
+    elif isinstance(keys, (list, tuple)):
+        raw_parts = [str(part).strip() for part in keys]
+    else:
+        raise ValueError("Hotkey keys must be a string or list.")
+
+    normalized = tuple(
+        MODIFIER_KEY_ALIASES.get(part.lower(), part.lower())
+        for part in raw_parts
+        if part
+    )
+    if not normalized:
+        raise ValueError("Hotkey keys are required.")
+    if len(normalized) > MAX_HOTKEY_PARTS:
+        raise ValueError(
+            f"Hotkey has too many keys; maximum is {MAX_HOTKEY_PARTS}."
+        )
+
+    key_set = set(normalized)
+    non_modifiers = [key for key in normalized if key not in MODIFIER_KEYS]
+    if not non_modifiers:
+        raise ValueError("Hotkey must include a non-modifier key.")
+    if len(non_modifiers) > 1:
+        raise ValueError("Hotkey must include exactly one non-modifier key.")
+
+    primary_key = non_modifiers[0]
+    if "ctrl" in key_set:
+        validate_hotkey("press_ctrl_hotkey", primary_key)
+    if "alt" in key_set:
+        validate_hotkey("press_alt_hotkey", primary_key)
+    return normalized
 
 
 def normalize_click_type(value: object) -> str:

@@ -527,6 +527,91 @@ async def test_repeated_visual_noop_click_uses_fallback() -> None:
     assert any("visible UI looked unchanged" in item for item in engine._runtime_observations), engine._runtime_observations
 
 
+async def test_repeated_visual_noop_keyboard_launcher_action_stops_early() -> None:
+    async def _noop_status(_text: str):
+        return None
+
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._set_status = _noop_status  # type: ignore[method-assign]
+
+    frame = Image.new("RGB", (4, 4), color="white")
+    args = {
+        "key": "space",
+        "status_text": "Opening Google app launcher...",
+    }
+    signature = engine._action_signature("press_alt_hotkey", args)
+
+    await engine._handle_post_action_visual_feedback(
+        task="Open VS Code",
+        name="press_alt_hotkey",
+        args=args,
+        signature=signature,
+        click_type=None,
+        pre_action_frame=frame,
+        pre_action_context=None,
+        post_action_frame=frame,
+        post_action_context=None,
+    )
+
+    try:
+        await engine._handle_post_action_visual_feedback(
+            task="Open VS Code",
+            name="press_alt_hotkey",
+            args=args,
+            signature=signature,
+            click_type=None,
+            pre_action_frame=frame,
+            pre_action_context=None,
+            post_action_frame=frame,
+            post_action_context=None,
+        )
+    except RuntimeError as exc:
+        assert "no visible effect" in str(exc).lower(), exc
+    else:
+        raise AssertionError("Expected repeated keyboard no-op guard to stop the launcher loop")
+
+
+async def test_repeated_visual_noop_keyboard_repeat_task_is_allowed() -> None:
+    async def _noop_status(_text: str):
+        return None
+
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._set_status = _noop_status  # type: ignore[method-assign]
+
+    frame = Image.new("RGB", (4, 4), color="white")
+    args = {
+        "key": "down",
+        "duration": 0.1,
+        "status_text": "Pressing Down...",
+    }
+    signature = engine._action_signature("press_key_for_duration", args)
+
+    await engine._handle_post_action_visual_feedback(
+        task="Press Down 3 times",
+        name="press_key_for_duration",
+        args=args,
+        signature=signature,
+        click_type=None,
+        pre_action_frame=frame,
+        pre_action_context=None,
+        post_action_frame=frame,
+        post_action_context=None,
+    )
+    await engine._handle_post_action_visual_feedback(
+        task="Press Down 3 times",
+        name="press_key_for_duration",
+        args=args,
+        signature=signature,
+        click_type=None,
+        pre_action_frame=frame,
+        pre_action_context=None,
+        post_action_frame=frame,
+        post_action_context=None,
+    )
+
+    assert any("after 2 attempts" in item for item in engine._runtime_observations), engine._runtime_observations
+
+
 def test_target_region_similarity_detects_local_change() -> None:
     engine = SingleCallVisionEngine(_DummyAgent())
     engine._last_position_bbox_args = {
@@ -586,5 +671,7 @@ if __name__ == "__main__":
     asyncio.run(test_wait_for_ui_settle_polls_until_stable())
     test_build_model_prompt_includes_runtime_observations()
     asyncio.run(test_repeated_visual_noop_click_uses_fallback())
+    asyncio.run(test_repeated_visual_noop_keyboard_launcher_action_stops_early())
+    asyncio.run(test_repeated_visual_noop_keyboard_repeat_task_is_allowed())
     test_target_region_similarity_detects_local_change()
     print("[test_cua_vision_loop_guard] All checks passed.")

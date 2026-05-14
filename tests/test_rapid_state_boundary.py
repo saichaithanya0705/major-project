@@ -147,6 +147,35 @@ def run_checks() -> None:
         == r"C:\Users\SAI\Desktop\context_dump.txt"
     )
 
+    artifact_state.append_history(
+        role="user",
+        text="give me the file name",
+        source="user",
+        cleaner=lambda value: value.strip(),
+        session_id="chat-artifact",
+    )
+    artifact_prompt = artifact_state.format_history_for_prompt(session_id="chat-artifact")
+    assert (
+        r"C:\Users\SAI\Desktop\context_dump.txt" in artifact_prompt
+    ), artifact_prompt
+
+    contextual_open_from_vision = artifact_state.enrich_routing_result(
+        {"agent": "cua_vision", "task": "open the file in vscode"},
+        user_prompt="open the file in vscode",
+        session_id="chat-artifact",
+    )
+    assert contextual_open_from_vision["agent"] == "cua_cli", contextual_open_from_vision
+    assert (
+        r"C:\Users\SAI\Desktop\context_dump.txt" in contextual_open_from_vision["task"]
+    ), contextual_open_from_vision
+
+    explicit_ui_action_stays_vision = artifact_state.enrich_routing_result(
+        {"agent": "cua_vision", "task": "click the Extensions icon in VS Code"},
+        user_prompt="click the Extensions icon in VS Code",
+        session_id="chat-artifact",
+    )
+    assert explicit_ui_action_stays_vision["agent"] == "cua_vision", explicit_ui_action_stays_vision
+
 
 if __name__ == "__main__":
     run_checks()
