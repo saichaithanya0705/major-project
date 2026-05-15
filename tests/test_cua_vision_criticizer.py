@@ -47,7 +47,7 @@ def test_accepts_completion_with_explicit_evidence() -> None:
         message="complete",
         before=observation(),
         after=observation(),
-        metrics={"completion_evidence": True},
+        metrics={"visible_goal_satisfied": True},
     )
 
     verdict = asyncio.run(
@@ -61,6 +61,29 @@ def test_accepts_completion_with_explicit_evidence() -> None:
 
     assert verdict.complete is True
     assert verdict.should_continue is False
+
+
+def test_rejects_generic_completion_evidence_without_goal_source() -> None:
+    action = ComputerAction(ActionType.COMPLETE, text="done")
+    result = ActionResult(
+        executed=True,
+        message="complete",
+        before=observation(),
+        after=observation(),
+        metrics={"completion_evidence": True},
+    )
+
+    verdict = asyncio.run(
+        CuaCriticizer().review(
+            task="Save the file",
+            action=action,
+            result=result,
+            model_claimed_complete=True,
+        )
+    )
+
+    assert verdict.complete is False
+    assert "goal evidence" in verdict.reason
 
 
 def test_failed_action_requires_recovery() -> None:
@@ -112,7 +135,6 @@ def test_semantic_judge_must_return_strict_verdict() -> None:
         message="complete",
         before=observation(),
         after=observation(),
-        metrics={"completion_evidence": True},
     )
 
     verdict = asyncio.run(
@@ -131,6 +153,7 @@ def test_semantic_judge_must_return_strict_verdict() -> None:
 def run_checks() -> None:
     test_blocks_model_only_completion_claim()
     test_accepts_completion_with_explicit_evidence()
+    test_rejects_generic_completion_evidence_without_goal_source()
     test_failed_action_requires_recovery()
     test_visual_noop_is_not_completion()
     test_semantic_judge_must_return_strict_verdict()

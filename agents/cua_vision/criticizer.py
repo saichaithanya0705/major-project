@@ -89,21 +89,24 @@ class CuaCriticizer:
                 next_hint="Try a more precise target or alternate action.",
             )
         if model_claimed_complete or action.action_type == ActionType.COMPLETE:
+            if self.semantic_judge is not None:
+                return await self._semantic_completion_verdict(task, action, result, session)
             if not _has_completion_evidence(result, session):
                 return CriticVerdict(
                     complete=False,
                     should_continue=True,
                     confidence=0.2,
-                    reason="Completion was claimed without independent visual or structural evidence.",
-                    next_hint="Observe the screen and provide concrete completion evidence.",
+                    reason=(
+                        "Completion was claimed without independent semantic, "
+                        "accessibility, or structural goal evidence."
+                    ),
+                    next_hint="Observe the screen and provide concrete goal-state evidence.",
                 )
-            if self.semantic_judge is not None:
-                return await self._semantic_completion_verdict(task, action, result, session)
             return CriticVerdict(
                 complete=True,
                 should_continue=False,
                 confidence=0.8,
-                reason="Completion claim has independent execution evidence.",
+                reason="Completion claim has independent goal-state evidence.",
             )
         return CriticVerdict(
             complete=False,
@@ -161,14 +164,12 @@ def _looks_like_visual_noop(metrics: Mapping[str, Any], threshold: float) -> boo
 
 def _has_completion_evidence(result: ActionResult, session: CuaSession | None) -> bool:
     metrics = dict(result.metrics or {})
-    for key in (
-        "completion_evidence",
-        "visible_goal_satisfied",
-        "accessibility_goal_satisfied",
-        "semantic_goal_satisfied",
-    ):
+    for key in ("visible_goal_satisfied", "accessibility_goal_satisfied", "semantic_goal_satisfied"):
         if metrics.get(key) is True:
             return True
+    if metrics.get("completion_evidence") is True:
+        source = str(metrics.get("completion_evidence_source") or "").strip().lower()
+        return source in {"semantic", "accessibility", "structural", "goal_state"}
     return False
 
 

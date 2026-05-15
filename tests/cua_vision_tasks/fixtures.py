@@ -61,7 +61,7 @@ class FakeComputerBackend:
             return ActionResult(executed=False, message=message, before=before, after=before)
         metrics = {}
         if action.action_type == ActionType.COMPLETE and self.completion_evidence:
-            metrics["completion_evidence"] = True
+            metrics["visible_goal_satisfied"] = True
         after = observation(before.active_window_title or "Test Window", marker=f"after-{len(self.executed_actions)}")
         self.observations.append(after)
         return ActionResult(

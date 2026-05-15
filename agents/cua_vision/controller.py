@@ -5,7 +5,7 @@ CUA Vision controller loop.
 from __future__ import annotations
 
 import inspect
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, Protocol
 
 from agents.cua_vision.action_normalizer import ActionNormalizationError, normalize_action_payload
@@ -107,6 +107,14 @@ class CuaController:
             executable_action = grounding.action
             result = self._execute_action(executable_action, observation)
             unexpected_window = unexpected_window_change_warning(executable_action, result) is not None
+            if unexpected_window:
+                result = replace(
+                    result,
+                    metrics={
+                        **dict(result.metrics or {}),
+                        "unexpected_window_change": True,
+                    },
+                )
             verdict = await self.criticizer.review(
                 task=task,
                 action=executable_action,
@@ -116,8 +124,6 @@ class CuaController:
                 grounding_confidence=grounding.target.confidence if grounding.target else None,
                 needs_stronger_model=grounding.needs_stronger_model,
             )
-            if unexpected_window:
-                result.metrics["unexpected_window_change"] = True
             session.record_action_result(executable_action, result, critic=verdict)
             self.trajectory.record(
                 session=session,
@@ -134,7 +140,26 @@ class CuaController:
                 return _verdict_result(verdict, result)
             if not verdict.should_continue:
                 return _verdict_result(verdict, result)
-            observation = result.after or self.backend.observe()
+            if result.after is not None:
+                observation = result.after
+            else:
+                try:
+                    observation = self.backend.observe()
+                except Exception as exc:
+                    observe_verdict = CriticVerdict(
+                        complete=False,
+                        should_continue=False,
+                        confidence=0.3,
+                        reason=f"Failed to observe after action: {exc}",
+                        next_hint="Re-establish screen observation before continuing.",
+                    )
+                    return _run_result(
+                        True,
+                        False,
+                        result=observe_verdict.reason,
+                        error=str(exc),
+                        critic=_critic_dict(observe_verdict),
+                    )
             session.record_observation(observation)
 
         verdict = CriticVerdict(

@@ -38,6 +38,7 @@ from agents.cua_vision.contracts import (
     TargetRef,
 )
 from agents.cua_vision.criticizer import CuaCriticizer
+from agents.cua_vision.model_policy import CuaModelPolicy, ModelPolicyContext, ModelRole
 from agents.cua_vision.prompts import (
     VISION_AGENT_SYSTEM_PROMPT,
     WINDOWS_APP_LAUNCH_WORKFLOW,
@@ -200,6 +201,7 @@ class SingleCallVisionEngine:
         self._executed_action_count = 0
         self._last_action_had_visible_effect: bool | None = None
         self._criticizer = CuaCriticizer()
+        self._model_policy = CuaModelPolicy.from_env()
         self._last_completion_verdict = None
         self._terminal_incomplete_verdict = None
         self._rejected_completion_count = 0
@@ -317,7 +319,12 @@ class SingleCallVisionEngine:
         self._thinking_index += 1
         await self._set_status(thinking_text)
 
-        response = await self._generate_provider_step_response(model_prompt, screen_frame.image)
+        response = await self._generate_provider_step_response(
+            model_prompt,
+            screen_frame.image,
+            model_role=ModelRole.PLANNER,
+            model_context=self._next_step_model_policy_context(),
+        )
         self.agent.retries = 0
         return response
 
@@ -331,6 +338,8 @@ class SingleCallVisionEngine:
         temperature: float = 0.2,
         max_tokens: int = 900,
         status_prefix: str = "Calling vision model",
+        model_role: ModelRole = ModelRole.PLANNER,
+        model_context: ModelPolicyContext | None = None,
     ):
         nvidia_api_key = get_nvidia_api_key()
         api_key = get_openrouter_api_key()
@@ -354,8 +363,9 @@ class SingleCallVisionEngine:
         )
         attempts: list[str] = []
         errors: list[str] = []
-        nvidia_models_to_try = get_nvidia_models("vision") if nvidia_api_key else []
-        openrouter_models_to_try = get_openrouter_models("vision") if api_key else []
+        model_purpose = self._model_policy.provider_purpose(model_role, model_context)
+        nvidia_models_to_try = get_nvidia_models(model_purpose) if nvidia_api_key else []
+        openrouter_models_to_try = get_openrouter_models(model_purpose) if api_key else []
         if not openrouter_models_to_try and not nvidia_models_to_try:
             raise OpenRouterFallbackError(
                 "No NVIDIA or OpenRouter vision models are configured."
@@ -438,6 +448,16 @@ class SingleCallVisionEngine:
     async def _generate_openrouter_step_response(self, model_prompt: str, screenshot):
         """Backward-compatible wrapper for the provider-based vision call."""
         return await self._generate_provider_step_response(model_prompt, screenshot)
+
+    def _next_step_model_policy_context(self) -> ModelPolicyContext:
+        return ModelPolicyContext(
+            repeated_noop=self._repeated_visual_noop_count > 0,
+            unclear_screen=any(
+                "inconclusive" in observation.lower()
+                for observation in self._runtime_observations[-MAX_RUNTIME_OBSERVATIONS:]
+            ),
+            completion_claim=self._rejected_completion_count > 0,
+        )
 
     def _build_model_prompt(self, task: str, active_window: str, memory_text):
         memory_json = json.dumps(memory_text)
@@ -709,7 +729,7 @@ IMPORTANT:
                 if self._should_verify_visual_effect(name)
                 else (None, None)
             )
-            if name in {"tts_speak", "task_is_complete"}:
+            if name == "task_is_complete":
                 if await self._should_accept_model_completion(task, args):
                     tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
                     if tool_screen_frame is None:
@@ -723,6 +743,15 @@ IMPORTANT:
                     self._terminal_incomplete_verdict = self._last_completion_verdict
                     return True
                 await self._set_status("Completion needs verification. Continuing...")
+                return False
+
+            if name == "tts_speak":
+                tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
+                if tool_screen_frame is None:
+                    execute_tool_call(name, args)
+                else:
+                    execute_tool_call(name, args, screen_frame=tool_screen_frame)
+                self.consecutive_failures = 0
                 return False
 
             tool_screen_frame = self._screen_frame_for_tool(name, action_screen_frame)
@@ -1113,10 +1142,15 @@ IMPORTANT:
         )
         global_similarity = metrics["global_similarity"]
         target_similarity = metrics["target_similarity"]
-        globally_unchanged = (
-            global_similarity is not None
-            and global_similarity >= VISUAL_NOOP_SIMILARITY_THRESHOLD
-        )
+        if global_similarity is None:
+            self._reset_visual_noop_state()
+            self._last_action_had_visible_effect = None
+            self._remember_runtime_observation(
+                "Visual verification was inconclusive after the last action."
+            )
+            return
+
+        globally_unchanged = global_similarity >= VISUAL_NOOP_SIMILARITY_THRESHOLD
         target_unchanged = (
             target_similarity is None
             or target_similarity >= TARGET_REGION_NOOP_SIMILARITY_THRESHOLD
@@ -1176,9 +1210,9 @@ IMPORTANT:
                 self._reset_visual_noop_state()
 
     async def _should_accept_model_completion(self, task: str, args: dict) -> bool:
-        completion_evidence = (
+        visual_change_since_last_action = (
             self._executed_action_count > 0
-            and self._last_action_had_visible_effect is not False
+            and self._last_action_had_visible_effect is True
         )
         action = ComputerAction(
             action_type=ActionType.COMPLETE,
@@ -1190,7 +1224,14 @@ IMPORTANT:
         result = ActionResult(
             executed=True,
             message="Model claimed completion.",
-            metrics={"completion_evidence": completion_evidence},
+            metrics={
+                "visual_change_since_last_action": visual_change_since_last_action,
+                "completion_evidence_reason": (
+                    "last verified action changed pixels, but no goal-state evidence was provided"
+                    if visual_change_since_last_action
+                    else "no verified semantic, accessibility, or structural goal evidence"
+                ),
+            },
         )
         verdict = await self._criticizer.review(
             task=task,

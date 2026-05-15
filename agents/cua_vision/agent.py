@@ -156,17 +156,16 @@ class VisionAgent:
             supports_positional = False
 
         if supports_keyword:
-            await interact(task, screenshot=screenshot)
-        elif supports_positional:
-            await interact(task, screenshot)
-        else:
-            await interact(task)
+            return await interact(task, screenshot=screenshot)
+        if supports_positional:
+            return await interact(task, screenshot)
+        return await interact(task)
 
     async def _interact_with_screen(self, task: str, screenshot: Image.Image = None):
         """Run the primary single-call execution loop for screen interaction."""
         print('[VisionAgent] Starting single-call screen interaction...')
         engine = SingleCallVisionEngine(self)
-        await engine.run(task, initial_screenshot=screenshot)
+        return await engine.run(task, initial_screenshot=screenshot)
 
     async def look_at_screen_and_respond(self, prompt: str) -> str:
         """

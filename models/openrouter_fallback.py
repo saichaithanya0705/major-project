@@ -39,6 +39,13 @@ DEFAULT_OPENROUTER_VISION_MODELS = (
     "nvidia/nemotron-nano-12b-v2-vl:free",
     "openrouter/free",
 )
+DEFAULT_OPENROUTER_STRONG_VISION_MODELS = (
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "openrouter/free",
+)
 DEFAULT_NVIDIA_VISION_MODELS = (
     "mistralai/mistral-small-4-119b-2603",
     "microsoft/phi-4-multimodal-instruct",
@@ -46,6 +53,14 @@ DEFAULT_NVIDIA_VISION_MODELS = (
     "meta/llama-4-maverick-17b-128e-instruct",
     "meta/llama-3.2-90b-vision-instruct",
     "qwen/qwen3.5-397b-a17b",
+)
+DEFAULT_NVIDIA_STRONG_VISION_MODELS = (
+    "qwen/qwen3.5-397b-a17b",
+    "mistralai/mistral-small-4-119b-2603",
+    "meta/llama-4-maverick-17b-128e-instruct",
+    "meta/llama-3.2-90b-vision-instruct",
+    "google/gemma-4-31b-it",
+    "microsoft/phi-4-multimodal-instruct",
 )
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_CHAT_URL = f"{DEFAULT_OPENROUTER_BASE_URL}/chat/completions"
@@ -148,26 +163,8 @@ def get_openrouter_models(purpose: str = "text") -> list[str]:
     _refresh_dotenv()
     purpose_key = (purpose or "text").strip().upper()
 
-    if purpose_key in {"VISION", "JARVIS", "SCREEN", "LOCATOR", "BROWSER"}:
-        env_order_by_purpose = {
-            "VISION": ["OPENROUTER_VISION_MODEL", "OPENROUTER_JARVIS_MODEL"],
-            "JARVIS": ["OPENROUTER_JARVIS_MODEL", "OPENROUTER_VISION_MODEL"],
-            "SCREEN": [
-                "OPENROUTER_SCREEN_MODEL",
-                "OPENROUTER_VISION_MODEL",
-                "OPENROUTER_JARVIS_MODEL",
-            ],
-            "LOCATOR": [
-                "OPENROUTER_LOCATOR_MODEL",
-                "OPENROUTER_VISION_MODEL",
-                "OPENROUTER_JARVIS_MODEL",
-            ],
-            "BROWSER": [
-                "OPENROUTER_BROWSER_MODEL",
-                "OPENROUTER_VISION_MODEL",
-                "OPENROUTER_JARVIS_MODEL",
-            ],
-        }
+    env_order_by_purpose = _openrouter_vision_env_order()
+    if purpose_key in env_order_by_purpose:
         models: list[str] = []
         env_names = [
             f"OPENROUTER_{purpose_key}_MODEL",
@@ -180,7 +177,12 @@ def get_openrouter_models(purpose: str = "text") -> list[str]:
             for model in _split_model_list(os.getenv(env_name) or ""):
                 if model not in models:
                     models.append(model)
-        for model in DEFAULT_OPENROUTER_VISION_MODELS:
+        defaults = (
+            DEFAULT_OPENROUTER_STRONG_VISION_MODELS
+            if purpose_key.endswith("_STRONG")
+            else DEFAULT_OPENROUTER_VISION_MODELS
+        )
+        for model in defaults:
             if model not in models:
                 models.append(model)
         return models
@@ -200,30 +202,141 @@ def get_openrouter_models(purpose: str = "text") -> list[str]:
 def get_nvidia_models(purpose: str = "vision") -> list[str]:
     _refresh_dotenv()
     purpose_key = (purpose or "vision").strip().upper()
-    env_order_by_purpose = {
-        "VISION": ["NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
-        "JARVIS": ["NVIDIA_JARVIS_MODEL", "NVIDIA_VISION_MODEL"],
-        "SCREEN": ["NVIDIA_SCREEN_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
-        "LOCATOR": ["NVIDIA_LOCATOR_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
-        "BROWSER": ["NVIDIA_BROWSER_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
-    }
+    env_order_by_purpose = _nvidia_vision_env_order()
     models: list[str] = []
     env_names = [
         f"NVIDIA_{purpose_key}_MODEL",
         *env_order_by_purpose.get(purpose_key, []),
     ]
-    if purpose_key not in {"VISION", "JARVIS", "SCREEN", "LOCATOR", "BROWSER"}:
+    if purpose_key not in env_order_by_purpose:
         env_names.extend(["NVIDIA_MODEL", "NVIDIA_FALLBACK_MODEL"])
 
     for env_name in env_names:
         for model in _split_model_list(os.getenv(env_name) or ""):
             if model not in models:
                 models.append(model)
-    if purpose_key in {"VISION", "JARVIS", "SCREEN", "LOCATOR", "BROWSER"}:
-        for model in DEFAULT_NVIDIA_VISION_MODELS:
+    if purpose_key in env_order_by_purpose:
+        defaults = (
+            DEFAULT_NVIDIA_STRONG_VISION_MODELS
+            if purpose_key.endswith("_STRONG")
+            else DEFAULT_NVIDIA_VISION_MODELS
+        )
+        for model in defaults:
             if model not in models:
                 models.append(model)
     return models
+
+
+def _openrouter_vision_env_order() -> dict[str, list[str]]:
+    return {
+        "VISION": ["OPENROUTER_VISION_MODEL", "OPENROUTER_JARVIS_MODEL"],
+        "JARVIS": ["OPENROUTER_JARVIS_MODEL", "OPENROUTER_VISION_MODEL"],
+        "SCREEN": [
+            "OPENROUTER_SCREEN_MODEL",
+            "OPENROUTER_VISION_MODEL",
+            "OPENROUTER_JARVIS_MODEL",
+        ],
+        "LOCATOR": [
+            "OPENROUTER_LOCATOR_MODEL",
+            "OPENROUTER_VISION_MODEL",
+            "OPENROUTER_JARVIS_MODEL",
+        ],
+        "BROWSER": [
+            "OPENROUTER_BROWSER_MODEL",
+            "OPENROUTER_VISION_MODEL",
+            "OPENROUTER_JARVIS_MODEL",
+        ],
+        "VISION_LOW": ["OPENROUTER_VISION_LOW_MODEL", "OPENROUTER_VISION_MODEL"],
+        "VISION_STRONG": ["OPENROUTER_VISION_STRONG_MODEL", "OPENROUTER_VISION_MODEL"],
+        "CUA_PLANNER_LOW": [
+            "OPENROUTER_CUA_PLANNER_LOW_MODEL",
+            "OPENROUTER_CUA_LOW_MODEL",
+            "OPENROUTER_VISION_LOW_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+        "CUA_PLANNER_STRONG": [
+            "OPENROUTER_CUA_PLANNER_STRONG_MODEL",
+            "OPENROUTER_CUA_STRONG_MODEL",
+            "OPENROUTER_VISION_STRONG_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+        "CUA_GROUNDER_LOW": [
+            "OPENROUTER_CUA_GROUNDER_LOW_MODEL",
+            "OPENROUTER_CUA_LOW_MODEL",
+            "OPENROUTER_VISION_LOW_MODEL",
+            "OPENROUTER_LOCATOR_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+        "CUA_GROUNDER_STRONG": [
+            "OPENROUTER_CUA_GROUNDER_STRONG_MODEL",
+            "OPENROUTER_CUA_STRONG_MODEL",
+            "OPENROUTER_VISION_STRONG_MODEL",
+            "OPENROUTER_LOCATOR_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+        "CUA_CRITIC_LOW": [
+            "OPENROUTER_CUA_CRITIC_LOW_MODEL",
+            "OPENROUTER_CUA_LOW_MODEL",
+            "OPENROUTER_VISION_LOW_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+        "CUA_CRITIC_STRONG": [
+            "OPENROUTER_CUA_CRITIC_STRONG_MODEL",
+            "OPENROUTER_CUA_STRONG_MODEL",
+            "OPENROUTER_VISION_STRONG_MODEL",
+            "OPENROUTER_VISION_MODEL",
+        ],
+    }
+
+
+def _nvidia_vision_env_order() -> dict[str, list[str]]:
+    return {
+        "VISION": ["NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
+        "JARVIS": ["NVIDIA_JARVIS_MODEL", "NVIDIA_VISION_MODEL"],
+        "SCREEN": ["NVIDIA_SCREEN_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
+        "LOCATOR": ["NVIDIA_LOCATOR_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
+        "BROWSER": ["NVIDIA_BROWSER_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_JARVIS_MODEL"],
+        "VISION_LOW": ["NVIDIA_VISION_LOW_MODEL", "NVIDIA_VISION_MODEL"],
+        "VISION_STRONG": ["NVIDIA_VISION_STRONG_MODEL", "NVIDIA_VISION_MODEL"],
+        "CUA_PLANNER_LOW": [
+            "NVIDIA_CUA_PLANNER_LOW_MODEL",
+            "NVIDIA_CUA_LOW_MODEL",
+            "NVIDIA_VISION_LOW_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+        "CUA_PLANNER_STRONG": [
+            "NVIDIA_CUA_PLANNER_STRONG_MODEL",
+            "NVIDIA_CUA_STRONG_MODEL",
+            "NVIDIA_VISION_STRONG_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+        "CUA_GROUNDER_LOW": [
+            "NVIDIA_CUA_GROUNDER_LOW_MODEL",
+            "NVIDIA_CUA_LOW_MODEL",
+            "NVIDIA_VISION_LOW_MODEL",
+            "NVIDIA_LOCATOR_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+        "CUA_GROUNDER_STRONG": [
+            "NVIDIA_CUA_GROUNDER_STRONG_MODEL",
+            "NVIDIA_CUA_STRONG_MODEL",
+            "NVIDIA_VISION_STRONG_MODEL",
+            "NVIDIA_LOCATOR_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+        "CUA_CRITIC_LOW": [
+            "NVIDIA_CUA_CRITIC_LOW_MODEL",
+            "NVIDIA_CUA_LOW_MODEL",
+            "NVIDIA_VISION_LOW_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+        "CUA_CRITIC_STRONG": [
+            "NVIDIA_CUA_CRITIC_STRONG_MODEL",
+            "NVIDIA_CUA_STRONG_MODEL",
+            "NVIDIA_VISION_STRONG_MODEL",
+            "NVIDIA_VISION_MODEL",
+        ],
+    }
 
 
 def _split_model_list(raw: str) -> list[str]:

@@ -247,6 +247,48 @@ def run_checks() -> None:
     assert "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning" not in nvidia_models, nvidia_models
     assert default_nvidia_models[0] == "mistralai/mistral-small-4-119b-2603", default_nvidia_models
 
+    cua_env_keys = [
+        "OPENROUTER_CUA_PLANNER_LOW_MODEL",
+        "OPENROUTER_CUA_PLANNER_STRONG_MODEL",
+        "OPENROUTER_CUA_LOW_MODEL",
+        "OPENROUTER_CUA_STRONG_MODEL",
+        "OPENROUTER_VISION_LOW_MODEL",
+        "OPENROUTER_VISION_STRONG_MODEL",
+        "OPENROUTER_VISION_MODEL",
+        "NVIDIA_CUA_PLANNER_LOW_MODEL",
+        "NVIDIA_CUA_PLANNER_STRONG_MODEL",
+        "NVIDIA_CUA_LOW_MODEL",
+        "NVIDIA_CUA_STRONG_MODEL",
+        "NVIDIA_VISION_LOW_MODEL",
+        "NVIDIA_VISION_STRONG_MODEL",
+        "NVIDIA_VISION_MODEL",
+    ]
+    saved_env = {key: os.environ.get(key) for key in cua_env_keys}
+    try:
+        for key in cua_env_keys:
+            os.environ[key] = ""
+        os.environ["OPENROUTER_CUA_PLANNER_LOW_MODEL"] = "openrouter-low-cua"
+        os.environ["OPENROUTER_CUA_PLANNER_STRONG_MODEL"] = "openrouter-strong-cua"
+        os.environ["NVIDIA_CUA_PLANNER_LOW_MODEL"] = "nvidia-low-cua"
+        os.environ["NVIDIA_CUA_PLANNER_STRONG_MODEL"] = "nvidia-strong-cua"
+
+        openrouter_low = openrouter_fallback_module.get_openrouter_models("cua_planner_low")
+        openrouter_strong = openrouter_fallback_module.get_openrouter_models("cua_planner_strong")
+        nvidia_low = openrouter_fallback_module.get_nvidia_models("cua_planner_low")
+        nvidia_strong = openrouter_fallback_module.get_nvidia_models("cua_planner_strong")
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    assert openrouter_low[0] == "openrouter-low-cua", openrouter_low
+    assert openrouter_strong[0] == "openrouter-strong-cua", openrouter_strong
+    assert nvidia_low[0] == "nvidia-low-cua", nvidia_low
+    assert nvidia_strong[0] == "nvidia-strong-cua", nvidia_strong
+    assert openrouter_strong[1] == "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", openrouter_strong
+
     captured_ollama_get: dict[str, Any] = {}
     original_get = backend_module.requests.get
 

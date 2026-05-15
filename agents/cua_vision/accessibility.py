@@ -5,7 +5,8 @@ Optional accessibility capability provider for CUA Vision.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterable, Mapping
+import math
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -80,18 +81,18 @@ class WindowsAccessibilityProvider:
                 capabilities={"accessibility": "unavailable", "reason": str(exc)},
             )
 
-        elements = tuple(
-            _normalize_element(index, element)
-            for index, element in enumerate(raw_elements)
-        )
+        elements, normalization_errors = _normalize_elements(raw_elements)
+        capabilities = {
+            "accessibility": "available",
+            "provider": "windows_uia",
+            "element_count": len(elements),
+        }
+        if normalization_errors:
+            capabilities["normalization_errors"] = normalization_errors
         return AccessibilitySnapshot(
             tree=_build_tree(elements),
             elements=elements,
-            capabilities={
-                "accessibility": "available",
-                "provider": "windows_uia",
-                "element_count": len(elements),
-            },
+            capabilities=capabilities,
         )
 
 
@@ -116,7 +117,7 @@ def _normalize_element(index: int, element: Mapping[str, Any] | object) -> dict[
     )
     name = str(data.get("name") or data.get("title") or "").strip()
     role = str(data.get("role") or data.get("control_type") or "unknown").strip()
-    bounds = data.get("bounds")
+    bounds = _normalize_bounds(data.get("bounds"))
     actions = data.get("actions") or data.get("patterns") or ()
     if isinstance(actions, str):
         actions = (actions,)
@@ -126,8 +127,80 @@ def _normalize_element(index: int, element: Mapping[str, Any] | object) -> dict[
         "role": role,
         "bounds": bounds,
         "actions": tuple(str(action) for action in actions),
-        "confidence": float(data.get("confidence", 0.9)),
+        "confidence": _finite_confidence(data.get("confidence", 0.9)),
     }
+
+
+def _normalize_elements(raw_elements: list[Mapping[str, Any] | object]) -> tuple[tuple[dict[str, Any], ...], list[str]]:
+    elements: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for index, element in enumerate(raw_elements):
+        try:
+            elements.append(_normalize_element(index, element))
+        except (TypeError, ValueError) as exc:
+            errors.append(f"element {index}: {exc}")
+    return tuple(elements), errors
+
+
+def _finite_confidence(value: object) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("confidence must be numeric") from None
+    if not math.isfinite(confidence) or confidence < 0.0 or confidence > 1.0:
+        raise ValueError("confidence must be finite and between 0 and 1")
+    return confidence
+
+
+def _normalize_bounds(value: object) -> dict[str, float] | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        if {"left", "top", "right", "bottom"}.issubset(value):
+            left, top, right, bottom = (
+                _finite_bound(value["left"], "left"),
+                _finite_bound(value["top"], "top"),
+                _finite_bound(value["right"], "right"),
+                _finite_bound(value["bottom"], "bottom"),
+            )
+        elif {"x", "y", "width", "height"}.issubset(value):
+            left = _finite_bound(value["x"], "x")
+            top = _finite_bound(value["y"], "y")
+            width = _finite_bound(value["width"], "width")
+            height = _finite_bound(value["height"], "height")
+            if width <= 0.0 or height <= 0.0:
+                raise ValueError("bounds width and height must be positive")
+            right = left + width
+            bottom = top + height
+        else:
+            raise ValueError(
+                "bounds mapping must contain left/top/right/bottom or x/y/width/height"
+            )
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if len(value) != 4:
+            raise ValueError("bounds sequence must contain four values")
+        left, top, right, bottom = (
+            _finite_bound(value[0], "left"),
+            _finite_bound(value[1], "top"),
+            _finite_bound(value[2], "right"),
+            _finite_bound(value[3], "bottom"),
+        )
+    else:
+        raise ValueError("bounds must be a mapping, a four-value sequence, or null")
+
+    if right <= left or bottom <= top:
+        raise ValueError("bounds must have positive width and height")
+    return {"left": left, "top": top, "right": right, "bottom": bottom}
+
+
+def _finite_bound(value: object, name: str) -> float:
+    try:
+        bound = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"bounds {name} must be numeric") from None
+    if not math.isfinite(bound):
+        raise ValueError(f"bounds {name} must be finite")
+    return bound
 
 
 def _object_to_dict(value: object) -> dict[str, Any]:

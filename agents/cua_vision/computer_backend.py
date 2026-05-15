@@ -59,10 +59,18 @@ class PyAutoGuiComputerBackend:
         elements = ()
         capabilities: dict = {}
         if self.accessibility_provider is not None:
-            snapshot = self.accessibility_provider.snapshot()
-            accessibility_tree = snapshot.tree
-            elements = snapshot.elements
-            capabilities.update(snapshot.capabilities)
+            try:
+                snapshot = self.accessibility_provider.snapshot()
+                accessibility_tree = snapshot.tree
+                elements = snapshot.elements
+                capabilities.update(snapshot.capabilities)
+            except Exception as exc:
+                capabilities.update(
+                    {
+                        "accessibility": "unavailable",
+                        "reason": str(exc),
+                    }
+                )
         return ScreenObservation(
             screenshot_png_base64=_image_to_png_base64(frame.image),
             active_window_title=get_active_window_title(),
@@ -73,11 +81,18 @@ class PyAutoGuiComputerBackend:
         )
 
     def execute(self, action: ComputerAction) -> ActionResult:
-        before = self.observe()
+        before, observe_error = self._safe_observe()
+        if observe_error:
+            return ActionResult(
+                executed=False,
+                message=f"Failed to observe before action: {observe_error}",
+                before=None,
+                after=None,
+            )
         try:
             self._execute_action(action)
         except Exception as exc:
-            after, observe_error = self._safe_observe_after_error()
+            after, observe_error = self._safe_observe()
             message = str(exc)
             if observe_error:
                 message = f"{message}; failed to observe after action: {observe_error}"
@@ -88,11 +103,15 @@ class PyAutoGuiComputerBackend:
                 after=after,
             )
 
+        after, observe_error = self._safe_observe()
+        message = f"Executed {action.action_type.value}"
+        if observe_error:
+            message = f"{message}; failed to observe after action: {observe_error}"
         return ActionResult(
             executed=True,
-            message=f"Executed {action.action_type.value}",
+            message=message,
             before=before,
-            after=self.observe(),
+            after=after,
         )
 
     def get_active_window(self) -> str | None:
@@ -101,7 +120,7 @@ class PyAutoGuiComputerBackend:
     def close(self) -> None:
         return None
 
-    def _safe_observe_after_error(self) -> tuple[ScreenObservation | None, str | None]:
+    def _safe_observe(self) -> tuple[ScreenObservation | None, str | None]:
         try:
             return self.observe(), None
         except Exception as exc:
@@ -117,9 +136,14 @@ class PyAutoGuiComputerBackend:
         }:
             self._execute_click(action)
         elif action.action_type == ActionType.TYPE_TEXT:
+            text_args = {
+                key: value
+                for key, value in dict(action.raw_args or {}).items()
+                if key != "string"
+            }
             execute_tool_call(
                 "type_string",
-                {"string": action.text or "", **action.raw_args},
+                {**text_args, "string": action.text or ""},
             )
         elif action.action_type == ActionType.HOTKEY:
             self._execute_hotkey(action)

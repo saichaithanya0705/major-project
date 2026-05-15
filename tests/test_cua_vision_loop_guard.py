@@ -387,6 +387,62 @@ async def test_step_response_uses_openrouter_after_nvidia_failure() -> None:
     assert parts[0].function_call.name == "task_is_complete"
 
 
+async def test_rejected_completion_uses_strong_planner_model_purpose() -> None:
+    purposes_seen: list[str] = []
+    calls: list[str] = []
+    original_capture_active_window = single_call_module.capture_active_window
+    original_get_active_window_title = single_call_module.get_active_window_title
+    original_get_memory = single_call_module.get_memory
+    original_get_nvidia_api_key = single_call_module.get_nvidia_api_key
+    original_get_nvidia_models = single_call_module.get_nvidia_models
+    original_get_nvidia_chat_url = single_call_module.get_nvidia_chat_url
+    original_get_openrouter_api_key = single_call_module.get_openrouter_api_key
+    original_call_openrouter_tool_sync = single_call_module.call_openrouter_tool_sync
+
+    def _fake_get_nvidia_models(purpose: str):
+        purposes_seen.append(purpose)
+        if purpose == "cua_planner_strong":
+            return ["strong-cua-model"]
+        return ["low-cua-model"]
+
+    def _fake_call_openrouter_tool_sync(**kwargs):
+        calls.append(kwargs["model_name"])
+        return {
+            "text": "",
+            "tool_calls": [{"name": "task_is_complete", "arguments": {}}],
+        }
+
+    single_call_module.capture_active_window = lambda: Image.new("RGB", (4, 4), color="white")
+    single_call_module.get_active_window_title = lambda: "Test window"
+    single_call_module.get_memory = lambda: ("", None)
+    single_call_module.get_nvidia_api_key = lambda: "nvidia-key"
+    single_call_module.get_nvidia_models = _fake_get_nvidia_models
+    single_call_module.get_nvidia_chat_url = (
+        lambda: "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
+    single_call_module.get_openrouter_api_key = lambda: ""
+    single_call_module.call_openrouter_tool_sync = _fake_call_openrouter_tool_sync
+    try:
+        engine = SingleCallVisionEngine(_DummyAgent())
+        engine._set_status = _noop_status  # type: ignore[method-assign]
+        engine._rejected_completion_count = 1
+        response = await engine._generate_step_response("Save the document")
+    finally:
+        single_call_module.capture_active_window = original_capture_active_window
+        single_call_module.get_active_window_title = original_get_active_window_title
+        single_call_module.get_memory = original_get_memory
+        single_call_module.get_nvidia_api_key = original_get_nvidia_api_key
+        single_call_module.get_nvidia_models = original_get_nvidia_models
+        single_call_module.get_nvidia_chat_url = original_get_nvidia_chat_url
+        single_call_module.get_openrouter_api_key = original_get_openrouter_api_key
+        single_call_module.call_openrouter_tool_sync = original_call_openrouter_tool_sync
+
+    assert purposes_seen == ["cua_planner_strong"], purposes_seen
+    assert calls == ["strong-cua-model"], calls
+    parts = response.candidates[0].content.parts
+    assert parts[0].function_call.name == "task_is_complete"
+
+
 async def test_openrouter_fallback_error_does_not_retry_backup_gemini() -> None:
     calls: list[str] = []
     original_reset_state = vision_agent_module.reset_state
@@ -612,6 +668,85 @@ async def test_repeated_visual_noop_keyboard_repeat_task_is_allowed() -> None:
     assert any("after 2 attempts" in item for item in engine._runtime_observations), engine._runtime_observations
 
 
+async def test_completion_claim_requires_verified_visual_evidence() -> None:
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._set_status = _noop_status  # type: ignore[method-assign]
+    engine._executed_action_count = 1
+    engine._last_action_had_visible_effect = None
+
+    accepted = await engine._should_accept_model_completion(
+        "Save the current document",
+        {"text": "Done."},
+    )
+
+    assert accepted is False
+    assert engine._last_completion_verdict is not None
+    assert "without independent" in engine._last_completion_verdict.reason
+
+
+async def test_completion_claim_rejects_visual_change_without_goal_evidence() -> None:
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._set_status = _noop_status  # type: ignore[method-assign]
+    engine._executed_action_count = 1
+    engine._last_action_had_visible_effect = True
+
+    accepted = await engine._should_accept_model_completion(
+        "Save the current document",
+        {"text": "Done."},
+    )
+
+    assert accepted is False
+    assert engine._last_completion_verdict is not None
+    assert engine._last_completion_verdict.complete is False
+    assert "goal evidence" in engine._last_completion_verdict.reason
+
+
+async def test_tts_speak_does_not_complete_or_count_as_desktop_action() -> None:
+    original_execute_tool_call = single_call_module.execute_tool_call
+    executed_tools: list[tuple[str, dict]] = []
+
+    def _fake_execute_tool_call(name: str, args: dict):
+        executed_tools.append((name, dict(args or {})))
+
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._set_status = _noop_status  # type: ignore[method-assign]
+    single_call_module.execute_tool_call = _fake_execute_tool_call
+    try:
+        done = await engine._handle_function_call(
+            "Tell me the current screen title",
+            SimpleNamespace(name="tts_speak", args={"text": "Working on it."}),
+        )
+    finally:
+        single_call_module.execute_tool_call = original_execute_tool_call
+
+    assert done is False
+    assert executed_tools == [("tts_speak", {"text": "Working on it."})]
+    assert engine._executed_action_count == 0
+    assert engine._last_completion_verdict is None
+
+
+async def test_inconclusive_visual_verification_does_not_count_as_effect() -> None:
+    engine = SingleCallVisionEngine(_DummyAgent())
+    engine._visual_similarity_metrics = (  # type: ignore[method-assign]
+        lambda **_kwargs: {"global_similarity": None, "target_similarity": None}
+    )
+
+    await engine._handle_post_action_visual_feedback(
+        task="Save the current document",
+        name="click_left_click",
+        args={"target_description": "Save"},
+        signature=("click_left_click", (("target_description", "Save"),)),
+        click_type="left click",
+        pre_action_frame=None,
+        pre_action_context=None,
+        post_action_frame=None,
+        post_action_context=None,
+    )
+
+    assert engine._last_action_had_visible_effect is None
+    assert any("inconclusive" in item for item in engine._runtime_observations)
+
+
 def test_target_region_similarity_detects_local_change() -> None:
     engine = SingleCallVisionEngine(_DummyAgent())
     engine._last_position_bbox_args = {
@@ -667,11 +802,16 @@ if __name__ == "__main__":
     asyncio.run(test_quota_error_uses_direct_nvidia_fallback())
     asyncio.run(test_step_response_uses_nvidia_first_without_gemini())
     asyncio.run(test_step_response_uses_openrouter_after_nvidia_failure())
+    asyncio.run(test_rejected_completion_uses_strong_planner_model_purpose())
     asyncio.run(test_openrouter_fallback_error_does_not_retry_backup_gemini())
     asyncio.run(test_wait_for_ui_settle_polls_until_stable())
     test_build_model_prompt_includes_runtime_observations()
     asyncio.run(test_repeated_visual_noop_click_uses_fallback())
     asyncio.run(test_repeated_visual_noop_keyboard_launcher_action_stops_early())
     asyncio.run(test_repeated_visual_noop_keyboard_repeat_task_is_allowed())
+    asyncio.run(test_completion_claim_requires_verified_visual_evidence())
+    asyncio.run(test_completion_claim_rejects_visual_change_without_goal_evidence())
+    asyncio.run(test_tts_speak_does_not_complete_or_count_as_desktop_action())
+    asyncio.run(test_inconclusive_visual_verification_does_not_count_as_effect())
     test_target_region_similarity_detects_local_change()
     print("[test_cua_vision_loop_guard] All checks passed.")

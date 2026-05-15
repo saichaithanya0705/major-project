@@ -1,5 +1,235 @@
 # AI Slop Audit
 
+## 2026-05-15 Hook Pass - CUA Slop Recheck
+
+Scope: current uncommitted CUA implementation plus directly connected model-policy, provider-selection, criticizer, backend/controller, and routed-completion tests. This pass did not expand into unrelated repo-wide browser/tooling hotspots because source evidence did not connect them to the current CUA root cause.
+
+**Verdict**
+
+Score after this recheck: 6/100, Minimal slop risk for the scoped CUA implementation.
+
+Confidence: High for the scoped implementation. Graphify remains dated 2026-04-27 and misses the newest CUA files, but it still identified the relevant CUA action/capture island (`Community 32`) and routed-agent bridge (`Community 6`). Current source, diffs, and tests were inspected directly after the required Graphify triage.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown` once for this hook pass.
+- Graph-only triage score: 51/100, Moderate.
+- Source-augmented triage score: 96/100, Severe.
+- The severe source-augmented result remains repo-wide and is dominated by old/vendor/browser/tooling surfaces. This pass used it only as triage for the CUA slice and direct provider/routing boundaries.
+
+**Findings**
+
+No new confirmed AI-slop finding was found in the scoped CUA implementation during this pass.
+
+| Area | Evidence Checked | Result |
+|---|---|---|
+| Strong/weak model path | `agents/cua_vision/model_policy.py` validates `CUA_VISION_*_REASONING` env values and emits provider purposes such as `cua_planner_low` and `cua_planner_strong`; `agents/cua_vision/single_call.py` calls `self._model_policy.provider_purpose(...)`; `models/openrouter_fallback.py` resolves role/strength-specific NVIDIA/OpenRouter env keys. | Accepted. The policy is live in the provider path instead of being detached configuration. |
+| Completion correctness | `agents/cua_vision/criticizer.py` requires semantic, accessibility, structural, or visible goal-state evidence; `agents/cua_vision/single_call.py` treats inconclusive visual checks as unknown and counts rejected completion claims for escalation. | Accepted. A low-reasoning planner cannot complete solely from a pixel change or self-claim. |
+| Boundary exception handling | `agents/cua_vision/accessibility.py`, `agents/cua_vision/computer_backend.py`, and `agents/cua_vision/controller.py` convert external/UI failures into explicit unavailable snapshots or incomplete `ActionResult`/run results. | Accepted. Broad catches are at integration boundaries and preserve typed failure state. |
+| Provider env indirection | `models/openrouter_fallback.py` centralizes OpenRouter/NVIDIA CUA env order maps and defaults at the provider boundary. | Accepted. This removes caller duplication and is covered by provider-selection tests. |
+
+**No Repair Applied In This Pass**
+
+The prior confirmed issue, "reasoning policy config existed but the live provider path ignored it," remains fixed: the live step-response path now routes through `CuaModelPolicy.provider_purpose()`, and focused tests prove rejected completion uses the strong CUA planner purpose. Because no new confirmed root-cause defect was found, this pass updated the audit report only.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_cua_vision_model_policy.py tests/test_cua_vision_loop_guard.py tests/test_router_backends_boundary.py -q` -> 26 passed.
+- Passed: `$files = Get-ChildItem -Path tests -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }; .\\.venv\\Scripts\\python.exe -m pytest @files tests/test_agent_step_runner_cua_completion.py tests/test_router_chaining.py tests/test_router_backends_boundary.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py -q` -> 132 passed.
+- Passed: `.\\.venv\\Scripts\\python.exe -m compileall -q agents\\cua_vision models\\openrouter_fallback.py models\\agent_step_runner.py`.
+- Passed: `git diff --check` with CRLF normalization warnings only.
+
+**Residual Risk**
+
+- Live desktop validation was not run because it would manipulate the user's active Windows session.
+- Repo-wide scanner risk outside CUA remains high and should be handled as a separate broad repository audit.
+- Existing `cmd`/`node` processes were observed before finishing, but they were pre-existing desktop/Codex activity rather than foreground validation processes created by this pass.
+
+---
+
+## 2026-05-15 Hook Pass - Current CUA Implementation Full Check
+
+Scope: all current uncommitted CUA implementation work plus directly connected model-provider and router boundaries. Inspected `agents/cua_vision/*`, `models/openrouter_fallback.py`, `models/agent_step_runner.py`, focused CUA tests, and provider-selection tests.
+
+**Verdict**
+
+Score after this repair: 7/100, Minimal slop risk for the scoped CUA implementation.
+
+Confidence: High for the scoped implementation. Graphify is dated 2026-04-27 and does not include the newest CUA files, but it still points to the relevant CUA action/capture cluster (`Community 32`) and routed-agent bridge (`Community 6`). Current source and tests were inspected directly after Graphify triage.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Graph-only triage score: 51/100, Moderate.
+- Source-augmented triage score: 96/100, Severe.
+- The severe scanner result remains repo-wide and is dominated by old/vendor/browser/tooling surfaces. This pass only used it as triage for the scoped CUA implementation and directly connected provider/routing code.
+
+**Confirmed Finding Fixed**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Permanent Fix |
+|---|---|---|---|---|
+| Reasoning policy config existed but the live provider path ignored it. | Community 32 covers CUA action/capture behavior and Community 6 covers routed-agent execution, so model-selection policy must connect to those boundaries rather than sit as an isolated helper. | `agents/cua_vision/model_policy.py` exposed `CuaModelPolicy.from_env()`, but `agents/cua_vision/single_call.py` still called `get_nvidia_models("vision")` and `get_openrouter_models("vision")` for every step. The audit report even listed provider wiring as residual risk. | Confirmed slop signal: apparently complete configuration without runtime effect. | `CuaModelPolicy` now owns provider purposes such as `cua_planner_low` and `cua_planner_strong`; `SingleCallVisionEngine` uses policy context to select the provider purpose; `models/openrouter_fallback.py` resolves role/strength-specific NVIDIA/OpenRouter env model lists with safe vision defaults. |
+
+**Additional Source Checks**
+
+- Completion remains gated by explicit goal evidence rather than pixel change.
+- `tts_speak` remains non-terminal feedback.
+- Inconclusive visual comparison remains unknown, not success.
+- Accessibility provider validation rejects non-finite confidence and malformed bounds.
+- Backend/controller failure paths return honest incomplete results instead of escaping typed boundaries.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_cua_vision_model_policy.py tests/test_cua_vision_loop_guard.py tests/test_router_backends_boundary.py -q` -> 26 passed.
+- Passed: `$files = Get-ChildItem -Path tests -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }; .\\.venv\\Scripts\\python.exe -m pytest @files tests/test_agent_step_runner_cua_completion.py tests/test_router_chaining.py tests/test_router_backends_boundary.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py -q` -> 132 passed.
+- Passed: `.\\.venv\\Scripts\\python.exe -m compileall -q agents\\cua_vision models\\openrouter_fallback.py`.
+
+**Residual Risk**
+
+- Live desktop validation was not run because it would manipulate the user's active Windows session.
+- Repo-wide scanner risk outside CUA remains high and should be handled as a separate broad repository audit.
+
+---
+
+## 2026-05-15 Hook Pass - CUA Reasoning Policy Env Configuration
+
+Scope: the user's proposed CUA reasoning-strength configuration plus directly connected `agents/cua_vision/model_policy.py` and `tests/test_cua_vision_model_policy.py`.
+
+**Verdict**
+
+Score after this repair: 9/100, Minimal slop risk for the scoped reasoning-policy configuration boundary.
+
+Confidence: High for the scoped code. Graphify remains stale for the latest CUA files, but it still identifies CUA capture/action (`Community 32`) and routed-agent (`Community 6`) as relevant review areas. Source inspection confirmed the current reasoning policy was cohesive but hard-coded.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Graph-only triage score: 51/100, Moderate.
+- Source-augmented triage score: 96/100, Severe.
+- The severe scanner score is repo-wide and dominated by old/vendor/browser/tooling surfaces; this pass stayed scoped to the CUA reasoning-policy question.
+
+**Confirmed Finding Fixed**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Permanent Fix |
+|---|---|---|---|---|
+| Reasoning strength was policy-owned but not configurable. | Community 32 and Community 6 make CUA action/completion and router boundaries the relevant places to avoid path duplication. | `agents/cua_vision/model_policy.py` had a clean `CuaModelPolicy`, but defaults were hard-coded. Adding ad hoc env checks in callers would duplicate model-strength decisions across planner, grounder, and critic paths. | Confirmed slop-prevention signal. | Added `CuaModelPolicy.from_env()` with validated env variables for planner, grounder, critic, and low-confidence threshold. Invalid or non-finite values now fail loudly instead of silently selecting the wrong path. |
+
+**Design Decision**
+
+- Environment config is appropriate, but it should select role strength through one policy boundary, not fork the CUA into separate strong/weak pipelines.
+- Strong reasoning can be the default for critic/completion and escalation cases; weak/low reasoning can remain valid for simple planner steps when action normalization, grounding, and completion criticism still enforce correctness.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_cua_vision_model_policy.py -q` -> 6 passed.
+- Passed: `$files = Get-ChildItem -Path tests -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }; .\\.venv\\Scripts\\python.exe -m pytest @files tests/test_agent_step_runner_cua_completion.py tests/test_router_chaining.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py -q` -> 131 passed.
+- Passed: `.\\.venv\\Scripts\\python.exe -m compileall -q agents\\cua_vision\\model_policy.py`.
+- Passed: `git diff --check` with CRLF normalization warnings only.
+
+**Residual Risk**
+
+- Superseded by the 2026-05-15 full implementation check above, which wires provider/model-call selection through `CuaModelPolicy`.
+
+---
+
+## 2026-05-15 Subagent Critique - CUA Completion and Validation Hardening
+
+Scope: current CUA implementation changed in this prompt plus directly connected architecture. A read-only explorer subagent (`Ohm`, status `returned`) criticized `agents/cua_vision/agent.py`, `agents/cua_vision/single_call.py`, `agents/cua_vision/criticizer.py`, `agents/cua_vision/accessibility.py`, `models/agent_step_runner.py`, and focused CUA tests. The main agent reviewed and integrated the confirmed findings.
+
+**Verdict**
+
+Score after this repair: 8/100, Minimal slop risk for the scoped CUA completion and validation boundary.
+
+Confidence: High for the scoped code. Graphify is still stale for the new CUA files, but the required report and scanner were used first, then source and tests confirmed the actual defects.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown` once before repair.
+- Graph-only triage score: 51/100, Moderate.
+- Source-augmented triage score: 96/100, Severe.
+- The scanner was not rerun after repairs, per the hook completion gate. The severe source-augmented result remains repo-wide and is not evidence that the scoped CUA files are still slop-heavy.
+
+**Confirmed Findings Fixed**
+
+| Signal | Source Evidence | Classification | Permanent Fix |
+|---|---|---|---|
+| `VisionAgent` discarded the real `CuaRunResult`. | `_call_interaction_loop()` and `_interact_with_screen()` awaited the interaction engine without returning it, so a false/incomplete result could fall through to `complete=True`. | Confirmed slop signal. | Both boundaries now return the awaited result. `tests/test_cua_vision_agent_boundary.py` covers the real engine path, not only a mocked `_call_interaction_loop()`. |
+| Pixel change was treated as goal completion evidence. | `single_call.py` used visible change as `completion_evidence`; `criticizer.py` accepted generic `completion_evidence=True`. A low-reasoning model could click the wrong thing, see pixels change, then claim success. | Confirmed slop signal. | Visual change is now only telemetry (`visual_change_since_last_action`). The criticizer accepts completion only from explicit goal-state evidence (`visible_goal_satisfied`, `accessibility_goal_satisfied`, `semantic_goal_satisfied`) or a sourced compatibility metric. A configured semantic judge can make the completion decision directly. |
+| Inconclusive visual comparison counted as visible effect. | `global_similarity is None` made `globally_unchanged=False`, which set `_last_action_had_visible_effect=True`. | Confirmed slop signal. | Inconclusive visual verification now records an observation and leaves the effect state unknown, which cannot satisfy completion. |
+| `tts_speak` was terminal like `task_is_complete`. | `_handle_function_call()` grouped `tts_speak` with `task_is_complete`, so speech/status feedback could end a run. | Confirmed slop signal. | `tts_speak` now executes as non-terminal feedback and does not increment desktop action evidence. |
+| Accessibility payloads accepted non-finite confidence and malformed bounds. | `float(math.nan)` bypassed range checks, and bounds were passed through unvalidated to grounding consumers. | Confirmed slop signal. | `WindowsAccessibilityProvider` now normalizes bounds to finite positive rectangles, rejects non-finite confidence/bounds, skips invalid elements, and reports normalization errors. |
+
+**Also Preserved From This Hook Repair**
+
+- `PyAutoGuiComputerBackend.execute()` now returns explicit failed `ActionResult` on pre-observation failure instead of escaping the typed backend contract.
+- `type_string` execution now prevents stale raw arguments from overriding the normalized text payload.
+- `CuaController` now replaces immutable result values when adding unexpected-window metrics and returns honest incomplete results when post-action re-observation fails.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_cua_vision_agent_boundary.py tests/test_cua_vision_loop_guard.py tests/test_cua_vision_criticizer.py tests/test_cua_vision_accessibility_provider.py tests/test_cua_vision_controller.py tests/test_cua_vision_end_to_end_fake_backend.py tests/test_agent_step_runner_cua_completion.py -q` -> 40 passed.
+- Passed: `$files = Get-ChildItem -Path tests -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }; .\\.venv\\Scripts\\python.exe -m pytest @files tests/test_agent_step_runner_cua_completion.py tests/test_router_chaining.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py -q` -> 129 passed.
+- Passed: `.\\.venv\\Scripts\\python.exe -m compileall -q agents\\cua_vision models\\agent_step_runner.py`.
+- Passed: `git diff --check` with CRLF normalization warnings only.
+
+**Residual Risk**
+
+- Live desktop validation was not run because it would manipulate the user's active Windows session.
+- Strong reasoning can improve judgment only when wired as an independent critic/semantic judge over the observed state. A stronger planner alone does not fix completion correctness if the runtime still accepts unsourced completion claims; this repair makes that boundary explicit.
+- Repo-wide scanner risk remains outside this scoped pass, mainly old/vendor/browser/tooling surfaces.
+
+---
+
+## 2026-05-14 Hook Pass - Current CUA Implementation Re-Audit
+
+Scope: current merged `main` CUA runtime implementation plus directly connected routing/completion boundaries. Inspected source included `agents/cua_vision/single_call.py`, `agents/cua_vision/computer_backend.py`, `agents/cua_vision/controller.py`, `agents/cua_vision/criticizer.py`, `agents/cua_vision/action_normalizer.py`, `agents/cua_vision/grounding.py`, `agents/cua_vision/accessibility.py`, `agents/cua_vision/session_state.py`, `agents/cua_vision/trajectory.py`, `agents/cua_vision/agent.py`, `models/agent_step_runner.py`, and the focused CUA/router tests.
+
+**Verdict**
+
+Score after this repair: 11/100, Minimal slop risk for the scoped current CUA implementation.
+
+Confidence: Medium-high. Graphify is dated 2026-04-27 and does not include the new CUA files, but it still identified the relevant older CUA community (`Community 32`) and routed-agent bridge (`Community 6`). Current source and tests were inspected directly.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Inventoried Graphify outputs with `rg --files graphify-out`.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Graph-only triage score: 51/100, Moderate.
+- Source-augmented triage score: 96/100, Severe.
+- Repo-wide scanner severity remains dominated by old/vendor/browser/tooling surfaces. This pass did not expand into those unrelated hotspots because source evidence did not connect them to the CUA implementation changed in this prompt.
+
+**Confirmed Findings Fixed**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Permanent Fix |
+|---|---|---|---|---|
+| Legacy completion evidence accepted unknown visual effect. | Community 32 centers CUA capture/visual helpers and completion-sensitive action loops. | `agents/cua_vision/single_call.py` treated `_last_action_had_visible_effect is None` as enough evidence after any executed action. That could let a low-reasoning model claim completion after an unverified action. | Confirmed slop signal. | Completion claims now require `_last_action_had_visible_effect is True` or equivalent explicit evidence before `CuaCriticizer` accepts them. Added `tests/test_cua_vision_loop_guard.py` coverage for unknown vs verified visual evidence. |
+| Backend could escape the typed `ActionResult` boundary before action execution. | Community 32 includes active-window capture and action execution helpers. | `PyAutoGuiComputerBackend.execute()` called `observe()` before its try/return boundary. A capture failure could raise instead of returning an explicit failed `ActionResult`, contradicting the backend contract. | Confirmed slop signal. | Backend now uses one `_safe_observe()` path for before/after observations; pre-observation failure returns `executed=False` without performing the action. Added `tests/test_cua_vision_pyautogui_backend.py` coverage. |
+| Frozen result contract was being mutated through a nested metrics dict. | Graphify is stale for `controller.py`, but Community 6/32 routing/action bridge made controller state mutation a direct review target. | `CuaController.run()` mutated `result.metrics["unexpected_window_change"]` after `ActionResult` creation. | Confirmed slop signal. | Controller now uses `dataclasses.replace()` to create a new `ActionResult` with merged metrics, keeping result handling value-oriented. Existing controller and trajectory tests cover behavior. |
+
+**Healthy Signals**
+
+- New CUA modules are narrow contract boundaries rather than reference-shaped packages: normalization, backend, session state, grounding, accessibility, criticizer, controller, trajectory, and model policy each own one decision boundary.
+- Low-reasoning model output is normalized and policy-checked before execution.
+- Completion semantics are now explicit: `success` means the agent ran; `complete` means the user goal has evidence-backed completion.
+- Tests include failure paths: false completion, low-confidence grounding, blocked hotkeys, pre-observation capture failure, invalid actions, and incomplete routed CUA steps.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_cua_vision_loop_guard.py tests/test_cua_vision_pyautogui_backend.py tests/test_cua_vision_controller.py tests/test_cua_vision_criticizer.py -q` -> 35 passed.
+- Passed: `$files = Get-ChildItem -Path tests -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }; .\\.venv\\Scripts\\python.exe -m pytest @files tests/test_agent_step_runner_cua_completion.py tests/test_router_chaining.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py -q` -> 121 passed.
+
+**Residual Risk**
+
+- Live desktop validation was not run in this hook pass because it would manipulate the user's active Windows session.
+- Repo-wide Graphify/source-scan risk remains high outside this scoped CUA pass, especially vendored `browser_use`, lockfiles, and broad non-CUA agent/tooling surfaces.
+
+---
+
 ## 2026-05-14 Hook Pass - CUA Runtime Implementation
 
 Scope: code written in this prompt for the CUA runtime implementation plus directly connected CUA/router boundaries. Inspected paths include `agents/cua_vision/contracts.py`, `agents/cua_vision/action_normalizer.py`, `agents/cua_vision/computer_backend.py`, `agents/cua_vision/session_state.py`, `agents/cua_vision/grounding.py`, `agents/cua_vision/accessibility.py`, `agents/cua_vision/criticizer.py`, `agents/cua_vision/controller.py`, `agents/cua_vision/model_policy.py`, `agents/cua_vision/trajectory.py`, `agents/cua_vision/single_call.py`, `agents/cua_vision/agent.py`, `models/agent_step_runner.py`, and the new focused CUA regression tests.

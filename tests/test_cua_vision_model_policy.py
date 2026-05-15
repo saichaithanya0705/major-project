@@ -40,6 +40,13 @@ def test_completion_claim_requires_strong_model() -> None:
     )
 
     assert strength == ModelStrength.STRONG
+    assert (
+        policy.provider_purpose(
+            ModelRole.PLANNER,
+            ModelPolicyContext(completion_claim=True),
+        )
+        == "cua_planner_strong"
+    )
 
 
 def test_low_grounding_confidence_requires_strong_grounder() -> None:
@@ -57,11 +64,45 @@ def test_critic_defaults_to_strong_reasoning() -> None:
     assert CuaModelPolicy().choose_strength(ModelRole.CRITIC) == ModelStrength.STRONG
 
 
+def test_model_policy_reads_reasoning_strength_from_env_mapping() -> None:
+    policy = CuaModelPolicy.from_env(
+        {
+            "CUA_VISION_PLANNER_REASONING": "strong",
+            "CUA_VISION_GROUNDER_REASONING": "weak",
+            "CUA_VISION_CRITIC_REASONING": "high",
+            "CUA_VISION_LOW_CONFIDENCE_THRESHOLD": "0.75",
+        }
+    )
+
+    assert policy.choose_strength(ModelRole.PLANNER) == ModelStrength.STRONG
+    assert policy.choose_strength(ModelRole.GROUNDER) == ModelStrength.LOW
+    assert policy.choose_strength(ModelRole.CRITIC) == ModelStrength.STRONG
+    assert policy.low_confidence_threshold == 0.75
+
+
+def test_model_policy_rejects_invalid_env_values() -> None:
+    try:
+        CuaModelPolicy.from_env({"CUA_VISION_PLANNER_REASONING": "medium"})
+    except ValueError as exc:
+        assert "CUA_VISION_PLANNER_REASONING" in str(exc)
+    else:
+        raise AssertionError("Expected invalid reasoning strength to be rejected")
+
+    try:
+        CuaModelPolicy.from_env({"CUA_VISION_LOW_CONFIDENCE_THRESHOLD": "NaN"})
+    except ValueError as exc:
+        assert "CUA_VISION_LOW_CONFIDENCE_THRESHOLD" in str(exc)
+    else:
+        raise AssertionError("Expected non-finite confidence threshold to be rejected")
+
+
 def run_checks() -> None:
     test_low_reasoning_planner_allowed_for_simple_action()
     test_completion_claim_requires_strong_model()
     test_low_grounding_confidence_requires_strong_grounder()
     test_critic_defaults_to_strong_reasoning()
+    test_model_policy_reads_reasoning_strength_from_env_mapping()
+    test_model_policy_rejects_invalid_env_values()
 
 
 if __name__ == "__main__":
