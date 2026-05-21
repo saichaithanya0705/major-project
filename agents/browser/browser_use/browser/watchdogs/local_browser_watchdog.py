@@ -13,6 +13,7 @@ import psutil
 from bubus import BaseEvent
 from pydantic import PrivateAttr
 
+from core.async_process_lifecycle import await_subprocess_operation
 from browser_use.browser.events import (
 	BrowserKillEvent,
 	BrowserLaunchEvent,
@@ -340,23 +341,23 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		)
 
 		try:
-			stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60.0)
+			install_outcome = await await_subprocess_operation(
+				process=process,
+				timeout=60.0,
+				operation=process.communicate(),
+				terminate=process.kill,
+				terminate_on_error=True,
+			)
+			if install_outcome.timed_out:
+				raise RuntimeError('Timeout getting browser path from playwright')
+			stdout, stderr = install_outcome.value or (b'', b'')
 			self.logger.debug(f'[LocalBrowserWatchdog] 📦 Playwright install output: {stdout}')
 			browser_path = self._find_installed_browser_path()
 			if browser_path:
 				return browser_path
 			self.logger.error(f'[LocalBrowserWatchdog] ❌ Playwright local browser installation error: \n{stdout}\n{stderr}')
 			raise RuntimeError('No local browser path found after: uvx playwright install chrome')
-		except TimeoutError:
-			# Kill the subprocess if it times out
-			process.kill()
-			await process.wait()
-			raise RuntimeError('Timeout getting browser path from playwright')
 		except Exception as e:
-			# Make sure subprocess is terminated
-			if process.returncode is None:
-				process.kill()
-				await process.wait()
 			raise RuntimeError(f'Error getting browser path: {e}')
 
 	@staticmethod

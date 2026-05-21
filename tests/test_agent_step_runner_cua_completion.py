@@ -71,8 +71,59 @@ def test_cua_step_propagates_incomplete_success() -> None:
     assert captured_finish["success"] is False
 
 
+def test_cua_step_returns_failure_when_screenshot_prepare_fails() -> None:
+    original_start = runner_module._start_non_rapid_status
+    original_finish = runner_module._finish_non_rapid_status
+    original_log = runner_module.log_assistant_event
+    captured_finish = {}
+    logged_events = []
+
+    async def _fake_start(text: str, source: str):
+        return None
+
+    async def _fake_finish(message: str, success: bool, source: str):
+        captured_finish.update({"message": message, "success": success, "source": source})
+
+    async def _fail_prepare_screenshot(*, keep_chat_hidden: bool = False):
+        raise TimeoutError("screenshot capture timed out after 0.1s")
+
+    def _fake_log(event_type: str, **kwargs):
+        logged_events.append({"event_type": event_type, **kwargs})
+
+    runner_module._start_non_rapid_status = _fake_start
+    runner_module._finish_non_rapid_status = _fake_finish
+    runner_module.log_assistant_event = _fake_log
+    try:
+        result = asyncio.run(
+            runner_module.run_routed_agent_step(
+                model=object(),
+                routing_result={"agent": "cua_vision", "task": "Save file"},
+                jarvis_model="jarvis",
+                request_id="req-cua",
+                get_stored_screenshot=lambda: None,
+                prepare_vision_screenshot=_fail_prepare_screenshot,
+            )
+        )
+    finally:
+        runner_module._start_non_rapid_status = original_start
+        runner_module._finish_non_rapid_status = original_finish
+        runner_module.log_assistant_event = original_log
+
+    assert result["success"] is False
+    assert result["complete"] is False
+    assert "screenshot capture timed out" in result["message"].lower()
+    assert captured_finish["success"] is False
+    assert [event["event_type"] for event in logged_events] == [
+        "agent_step_started",
+        "agent_step_failed",
+    ]
+    assert logged_events[1]["agent"] == "cua_vision"
+    assert "screenshot capture timed out" in logged_events[1]["error"].lower()
+
+
 def run_checks() -> None:
     test_cua_step_propagates_incomplete_success()
+    test_cua_step_returns_failure_when_screenshot_prepare_fails()
 
 
 if __name__ == "__main__":

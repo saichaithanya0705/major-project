@@ -5,7 +5,9 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from agents.web_qa.mcp_client import TavilyMcpClient
-from models.routing_policy import _format_direct_response_text
+from models.text_normalization import (
+    format_direct_response_text as _format_direct_response_text,
+)
 
 SourceList = list[dict[str, str]]
 Synthesizer = Callable[..., Awaitable[str]]

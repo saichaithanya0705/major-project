@@ -10,16 +10,31 @@ from __future__ import annotations
 import asyncio
 import time
 import traceback
-from typing import Any, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Protocol, cast
 
 from agents.cua_cli.agent import CLIAgent
 from agents.jarvis.artifact import build_jarvis_visual_artifact
 from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
 from agents.web_qa.agent import WebQAAgent
 from core.assistant_logging import log_assistant_event
+from models.agent_step_execution_runtime import (
+    AgentExecutionOutcome,
+    _coerce_agent_payload,
+    capture_async_operation,
+    execute_cli_agent,
+    execute_task_agent,
+    execute_vision_agent,
+)
 from models.contracts import RoutedStepResult
 from models.output_file_artifacts import extract_output_file_path_from_tool_calls
-from models.routing_policy import _clean_text, _format_direct_response_text, _routing_task_text
+from models.rapid_orchestrator_contracts import RapidAgentStepResult, RapidRouteResult
+from models.rapid_step_payloads import RapidToolCallRecord
+from models.routing_step_identity import routing_task_text as _routing_task_text
+from models.text_normalization import clean_text as _clean_text
+from models.text_normalization import (
+    format_direct_response_text as _format_direct_response_text,
+)
 from ui.visualization_api.chat_artifact import send_chat_vision_artifact
 from ui.visualization_api.chat_visibility import send_vision_chat_restore
 from ui.visualization_api.status_bubble import (
@@ -29,13 +44,21 @@ from ui.visualization_api.status_bubble import (
 )
 
 
-def _extract_browser_message(history: Any) -> str | None:
+class JarvisStepModel(Protocol):
+    async def generate_jarvis_response(
+        self,
+        prompt: str,
+        screenshot: object,
+    ) -> Mapping[str, object]: ...
+
+
+def _extract_browser_message(history: object) -> str | None:
     if history is None:
         return None
 
-    def _page_context_text(container: dict[str, Any]) -> str | None:
+    def _page_context_text(container: Mapping[str, object]) -> str | None:
         page_context = container.get("page_context")
-        if isinstance(page_context, dict):
+        if isinstance(page_context, Mapping):
             for key in ("summary", "content"):
                 value = page_context.get(key)
                 if isinstance(value, str) and value.strip():
@@ -43,7 +66,7 @@ def _extract_browser_message(history: Any) -> str | None:
                     return text if len(text) <= 1400 else f"{text[:1397]}..."
 
         result = container.get("result")
-        if isinstance(result, dict) and result is not container:
+        if isinstance(result, Mapping) and result is not container:
             return _page_context_text(result)
         return None
 
@@ -51,7 +74,7 @@ def _extract_browser_message(history: Any) -> str | None:
         cleaned = _clean_text(history, "")
         return cleaned if cleaned else None
 
-    if isinstance(history, dict):
+    if isinstance(history, Mapping):
         page_context_message = _page_context_text(history)
         if page_context_message:
             return page_context_message
@@ -78,48 +101,58 @@ def _extract_browser_message(history: Any) -> str | None:
     return None
 
 
-def _cli_completion_message(result: dict[str, Any]) -> str:
-    if not result.get("success"):
-        return _clean_text(result.get("error"), "CLI task failed.")
-    output = _clean_text(result.get("result"), "")
+def _as_execution_outcome(execution: AgentExecutionOutcome | Mapping[str, object]) -> AgentExecutionOutcome:
+    if isinstance(execution, AgentExecutionOutcome):
+        return execution
+    return AgentExecutionOutcome(payload=_coerce_agent_payload(execution))
+
+
+def _cli_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
+    execution = _as_execution_outcome(execution)
+    if not execution.success:
+        return _clean_text(execution.error, "CLI task failed.")
+    output = _clean_text(execution.result, "")
     if output:
         return output
-    output_file_path = extract_output_file_path_from_tool_calls(result.get("tool_calls"))
+    output_file_path = extract_output_file_path_from_tool_calls(execution.tool_calls)
     if output_file_path:
         return f"Created file: `{output_file_path}`."
     return "CLI task completed."
 
 
-def _browser_completion_message(result: dict[str, Any]) -> str:
-    if not result.get("success"):
-        return _clean_text(result.get("error"), "Browser task failed.")
+def _browser_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
+    execution = _as_execution_outcome(execution)
+    if not execution.success:
+        return _clean_text(execution.error, "Browser task failed.")
 
-    summary = _extract_browser_message(result.get("result"))
+    summary = _extract_browser_message(execution.result)
     if summary:
         return summary
     return "Browser task completed."
 
 
-def _web_qa_completion_message(result: dict[str, Any]) -> str:
-    if not result.get("success"):
-        return _clean_text(result.get("error"), "Web QA task failed.")
-    return _format_direct_response_text(result.get("result"), "Web QA task completed.")
+def _web_qa_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
+    execution = _as_execution_outcome(execution)
+    if not execution.success:
+        return _clean_text(execution.error, "Web QA task failed.")
+    return _format_direct_response_text(execution.result, "Web QA task completed.")
 
 
-def _vision_completion_message(result: dict[str, Any]) -> str:
-    if not result.get("success"):
-        return _clean_text(result.get("error"), "Computer task failed.")
-    if result.get("complete") is not True:
-        critic = result.get("critic")
-        if isinstance(critic, dict):
+def _vision_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
+    execution = _as_execution_outcome(execution)
+    if not execution.success:
+        return _clean_text(execution.error, "Computer task failed.")
+    if execution.complete is not True:
+        critic = execution.critic
+        if critic is not None:
             reason = _clean_text(critic.get("reason"), "", max_len=420)
             if reason:
                 return reason
-        return _clean_text(result.get("result"), "Computer task needs more work.")
-    return _clean_text(result.get("result"), "Computer task completed.")
+        return _clean_text(execution.result, "Computer task needs more work.")
+    return _clean_text(execution.result, "Computer task completed.")
 
 
-async def _safe_ui_call(coro, label: str):
+async def _safe_ui_call(coro: Awaitable[object], label: str) -> None:
     try:
         await coro
     except Exception as exc:
@@ -146,14 +179,67 @@ async def _finish_non_rapid_status(message: str, success: bool, source: str):
     )
 
 
+def _merge_failure_metadata(
+    *,
+    metadata: Mapping[str, object] | None,
+    execution: AgentExecutionOutcome,
+) -> dict[str, object] | None:
+    merged = dict(metadata) if metadata else {}
+    if execution.traceback_text:
+        merged["traceback"] = execution.traceback_text
+    return merged or None
+
+
+def _log_non_rapid_agent_result(
+    *,
+    request_id: str,
+    agent: str,
+    task_text: str,
+    message: str,
+    started: float,
+    execution: AgentExecutionOutcome,
+    failure_fallback: str,
+    success_metadata: Mapping[str, object] | None = None,
+    failure_metadata: Mapping[str, object] | None = None,
+) -> None:
+    duration_seconds = time.monotonic() - started
+    if execution.success:
+        log_assistant_event(
+            "agent_step_completed",
+            request_id=request_id,
+            agent=agent,
+            task=task_text,
+            message=message,
+            success=True,
+            duration_seconds=duration_seconds,
+            metadata=dict(success_metadata) if success_metadata else None,
+        )
+        return
+
+    log_assistant_event(
+        "agent_step_failed",
+        request_id=request_id,
+        agent=agent,
+        task=task_text,
+        message=message,
+        error=_clean_text(execution.error, failure_fallback, max_len=420),
+        success=False,
+        duration_seconds=duration_seconds,
+        metadata=_merge_failure_metadata(
+            metadata=failure_metadata,
+            execution=execution,
+        ),
+    )
+
+
 async def run_routed_agent_step(
-    model: Any,
-    routing_result: dict[str, Any],
+    model: object,
+    routing_result: RapidRouteResult,
     jarvis_model: str,
     request_id: str,
-    get_stored_screenshot: Callable[[], Any],
-    prepare_vision_screenshot: Callable[..., Any] | None = None,
-) -> dict[str, Any]:
+    get_stored_screenshot: Callable[[], object],
+    prepare_vision_screenshot: Callable[..., Awaitable[object]] | None = None,
+) -> RapidAgentStepResult:
     def _step(
         *,
         agent: str,
@@ -162,20 +248,17 @@ async def run_routed_agent_step(
         message: str,
         source: str,
         complete: bool | None = None,
-        tool_calls: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        payload = RoutedStepResult(
+        tool_calls: list[RapidToolCallRecord] | None = None,
+    ) -> RapidAgentStepResult:
+        return RoutedStepResult(
             agent=agent,
             task=task,
             success=success,
             message=message,
             source=source,
+            complete=complete,
+            tool_calls=tool_calls,
         ).as_dict()
-        if complete is not None:
-            payload["complete"] = complete
-        if tool_calls is not None:
-            payload["tool_calls"] = tool_calls
-        return payload
 
     agent_name = routing_result.get("agent")
     task_text = _routing_task_text(routing_result)
@@ -194,8 +277,19 @@ async def run_routed_agent_step(
         else:
             screenshot = get_stored_screenshot()
         jarvis_prompt = JARVIS_SYSTEM_PROMPT + f"\n# User's Request:\n{routing_result.get('query', '')}"
-        try:
-            jarvis_result = await model.generate_jarvis_response(jarvis_prompt, screenshot)
+        jarvis_execution = await capture_async_operation(
+            lambda: cast(JarvisStepModel, model).generate_jarvis_response(
+                jarvis_prompt,
+                screenshot,
+            )
+        )
+        if jarvis_execution.succeeded:
+            jarvis_result = jarvis_execution.value
+            if not isinstance(jarvis_result, Mapping):
+                jarvis_result = None
+        else:
+            jarvis_result = None
+        if jarvis_result is not None:
             function_calls = jarvis_result.get("function_calls") or []
             jarvis_summary = _clean_text(
                 jarvis_result.get("summary"),
@@ -257,155 +351,122 @@ async def run_routed_agent_step(
                 message=jarvis_summary,
                 source="jarvis",
             )
-        except Exception as exc:
-            await _safe_ui_call(
-                send_vision_chat_restore(),
-                "send_vision_chat_restore",
-            )
-            error_message = _clean_text(str(exc), "JARVIS task failed.", max_len=420)
-            log_assistant_event(
-                "agent_step_failed",
-                request_id=request_id,
-                agent="jarvis",
-                task=task_text,
-                message=error_message,
-                error=str(exc),
-                success=False,
-                duration_seconds=time.monotonic() - started,
-                metadata={"traceback": traceback.format_exc()},
-            )
-            await _finish_non_rapid_status(
-                error_message,
-                False,
-                source="jarvis",
-            )
-            return _step(
-                agent="jarvis",
-                task=_routing_task_text(routing_result),
-                success=False,
-                message=error_message,
-                source="jarvis",
-            )
+        await _safe_ui_call(
+            send_vision_chat_restore(),
+            "send_vision_chat_restore",
+        )
+        jarvis_error = (
+            "JARVIS returned an invalid result payload."
+            if jarvis_execution.succeeded
+            else str(jarvis_execution.error)
+        )
+        error_message = _clean_text(jarvis_error, "JARVIS task failed.", max_len=420)
+        failure_metadata = (
+            {"traceback": jarvis_execution.traceback_text}
+            if jarvis_execution.traceback_text
+            else None
+        )
+        log_assistant_event(
+            "agent_step_failed",
+            request_id=request_id,
+            agent="jarvis",
+            task=task_text,
+            message=error_message,
+            error=jarvis_error,
+            success=False,
+            duration_seconds=time.monotonic() - started,
+            metadata=failure_metadata,
+        )
+        await _finish_non_rapid_status(
+            error_message,
+            False,
+            source="jarvis",
+        )
+        return _step(
+            agent="jarvis",
+            task=_routing_task_text(routing_result),
+            success=False,
+            message=error_message,
+            source="jarvis",
+        )
 
     if agent_name == "browser":
         await _start_non_rapid_status("Running browser task...", source="browser_use")
         from agents.browser.agent import BrowserAgent
 
-        task = routing_result.get("task", "")
+        task = str(routing_result.get("task") or "")
         print(f"[Router] Browser Agent starting. Task: {task}")
-        browser_agent = BrowserAgent(model_name=jarvis_model)
         started = time.monotonic()
-        browser_traceback = None
-        try:
-            result = await browser_agent.execute(task)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            browser_traceback = traceback.format_exc()
-            result = {"success": False, "result": None, "error": str(exc)}
+        execution = await execute_task_agent(
+            task=task,
+            agent_factory=lambda: BrowserAgent(model_name=jarvis_model),
+        )
 
-        message = _browser_completion_message(result)
-        if result.get("success", False):
-            log_assistant_event(
-                "agent_step_completed",
-                request_id=request_id,
-                agent="browser",
-                task=task_text,
-                message=message,
-                success=True,
-                duration_seconds=time.monotonic() - started,
-            )
-        else:
-            metadata = {"result": result.get("result")}
-            if browser_traceback:
-                metadata["traceback"] = browser_traceback
-            log_assistant_event(
-                "agent_step_failed",
-                request_id=request_id,
-                agent="browser",
-                task=task_text,
-                message=message,
-                error=_clean_text(result.get("error"), "Browser task failed.", max_len=420),
-                success=False,
-                duration_seconds=time.monotonic() - started,
-                metadata=metadata,
-            )
+        message = _browser_completion_message(execution)
+        _log_non_rapid_agent_result(
+            request_id=request_id,
+            agent="browser",
+            task_text=task_text,
+            message=message,
+            started=started,
+            execution=execution,
+            failure_fallback="Browser task failed.",
+            failure_metadata={"result": execution.result_metadata},
+        )
         await _finish_non_rapid_status(
             message,
-            result.get("success", False),
+            execution.success,
             source="browser_use",
         )
         return _step(
             agent="browser",
             task=task,
-            success=bool(result.get("success", False)),
+            success=execution.success,
             message=message,
             source="browser_use",
-            complete=bool(result.get("complete", True)),
+            complete=execution.complete if execution.complete is not None else True,
         )
 
     if agent_name == "web_qa":
         await _start_non_rapid_status("Searching the web...", source="web_qa")
-        task = routing_result.get("task", "")
+        task = str(routing_result.get("task") or "")
         print(f"[Router] Web QA Agent answering: {task}")
-        web_qa_agent = WebQAAgent(model=model)
         started = time.monotonic()
-        web_qa_traceback = None
-        try:
-            result = await web_qa_agent.execute(task)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            web_qa_traceback = traceback.format_exc()
-            result = {"success": False, "result": None, "error": str(exc), "complete": True}
+        execution = await execute_task_agent(
+            task=task,
+            agent_factory=lambda: WebQAAgent(model=model),
+            failure_complete=True,
+        )
 
-        message = _web_qa_completion_message(result)
-        if result.get("success", False):
-            log_assistant_event(
-                "agent_step_completed",
-                request_id=request_id,
-                agent="web_qa",
-                task=task_text,
-                message=message,
-                success=True,
-                duration_seconds=time.monotonic() - started,
-            )
-        else:
-            metadata = {}
-            if web_qa_traceback:
-                metadata["traceback"] = web_qa_traceback
-            log_assistant_event(
-                "agent_step_failed",
-                request_id=request_id,
-                agent="web_qa",
-                task=task_text,
-                message=message,
-                error=_clean_text(result.get("error"), "Web QA task failed.", max_len=420),
-                success=False,
-                duration_seconds=time.monotonic() - started,
-                metadata=metadata or None,
-            )
+        message = _web_qa_completion_message(execution)
+        _log_non_rapid_agent_result(
+            request_id=request_id,
+            agent="web_qa",
+            task_text=task_text,
+            message=message,
+            started=started,
+            execution=execution,
+            failure_fallback="Web QA task failed.",
+        )
         await _finish_non_rapid_status(
             message,
-            result.get("success", False),
+            execution.success,
             source="web_qa",
         )
         return _step(
             agent="web_qa",
             task=task,
-            success=bool(result.get("success", False)),
+            success=execution.success,
             message=message,
             source="web_qa",
-            complete=bool(result.get("complete", True)),
+            complete=execution.complete if execution.complete is not None else True,
         )
 
     if agent_name == "cua_cli":
         await _start_non_rapid_status("Running CLI task...", source="cua_cli")
-        task = routing_result.get("task", "")
+        task = str(routing_result.get("task") or "")
         print(f"[Router] CLI Agent executing: {task}")
-        cli_agent = CLIAgent()
         started = time.monotonic()
-        cli_traceback = None
         last_cli_status_text = ""
         last_cli_status_ts = 0.0
 
@@ -426,119 +487,114 @@ async def run_routed_agent_step(
                 "update_status_bubble",
             )
 
-        try:
-            result = await cli_agent.execute(
-                task,
-                status_callback=_on_cli_status,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            cli_traceback = traceback.format_exc()
-            result = {"success": False, "result": None, "error": str(exc)}
-        if result.get("success"):
-            print(f"[CLI Agent] Success: {result.get('result')}")
+        execution = await execute_cli_agent(
+            task=task,
+            agent_factory=CLIAgent,
+            status_callback=_on_cli_status,
+        )
+        if execution.success:
+            print(f"[CLI Agent] Success: {execution.result}")
         else:
-            print(f"[CLI Agent] Error: {result.get('error')}")
-        message = _cli_completion_message(result)
-        if result.get("success", False):
-            log_assistant_event(
-                "agent_step_completed",
-                request_id=request_id,
-                agent="cua_cli",
-                task=task_text,
-                message=message,
-                success=True,
-                duration_seconds=time.monotonic() - started,
-                metadata={"tool_calls": result.get("tool_calls")},
-            )
-        else:
-            metadata = {"tool_calls": result.get("tool_calls")}
-            if cli_traceback:
-                metadata["traceback"] = cli_traceback
-            log_assistant_event(
-                "agent_step_failed",
-                request_id=request_id,
-                agent="cua_cli",
-                task=task_text,
-                message=message,
-                error=_clean_text(result.get("error"), "CLI task failed.", max_len=420),
-                success=False,
-                duration_seconds=time.monotonic() - started,
-                metadata=metadata,
-            )
+            print(f"[CLI Agent] Error: {execution.error}")
+        message = _cli_completion_message(execution)
+        _log_non_rapid_agent_result(
+            request_id=request_id,
+            agent="cua_cli",
+            task_text=task_text,
+            message=message,
+            started=started,
+            execution=execution,
+            failure_fallback="CLI task failed.",
+            success_metadata={"tool_calls": execution.tool_calls},
+            failure_metadata={"tool_calls": execution.tool_calls},
+        )
         await _finish_non_rapid_status(
             message,
-            result.get("success", False),
+            execution.success,
             source="cua_cli",
         )
         return _step(
             agent="cua_cli",
             task=task,
-            success=bool(result.get("success", False)),
+            success=execution.success,
             message=message,
             source="cua_cli",
-            tool_calls=result.get("tool_calls"),
+            tool_calls=execution.tool_calls,
         )
 
     if agent_name == "cua_vision":
         await _start_non_rapid_status("Running computer-use task...", source="cua_vision")
-        if prepare_vision_screenshot is not None:
-            screenshot = await prepare_vision_screenshot(keep_chat_hidden=False)
-        else:
-            screenshot = get_stored_screenshot()
-        from agents.cua_vision.agent import VisionAgent
-        vision_agent = VisionAgent(model_name=jarvis_model)
-        task = routing_result.get("task", "")
+        task = str(routing_result.get("task") or "")
         started = time.monotonic()
-        vision_traceback = None
         try:
-            result = await vision_agent.execute(task, screenshot)
-        except asyncio.CancelledError:
-            raise
+            if prepare_vision_screenshot is not None:
+                screenshot = await prepare_vision_screenshot(keep_chat_hidden=False)
+            else:
+                screenshot = get_stored_screenshot()
         except Exception as exc:
-            vision_traceback = traceback.format_exc()
-            result = {"success": False, "result": None, "error": str(exc)}
-        message = _vision_completion_message(result)
-        complete = bool(result.get("complete", False))
-        if result.get("success", False):
-            log_assistant_event(
-                "agent_step_completed",
-                request_id=request_id,
-                agent="cua_vision",
-                task=task_text,
-                message=message,
-                success=True,
-                duration_seconds=time.monotonic() - started,
-                metadata={
-                    "complete": complete,
-                    "critic": result.get("critic"),
+            execution = AgentExecutionOutcome(
+                payload={
+                    "success": False,
+                    "complete": False,
+                    "result": None,
+                    "error": f"Vision screenshot preparation failed: {exc}",
                 },
+                traceback_text=traceback.format_exc(),
             )
-        else:
-            metadata = {}
-            if vision_traceback:
-                metadata["traceback"] = vision_traceback
-            log_assistant_event(
-                "agent_step_failed",
+            message = _vision_completion_message(execution)
+            _log_non_rapid_agent_result(
                 request_id=request_id,
                 agent="cua_vision",
-                task=task_text,
+                task_text=task_text,
                 message=message,
-                error=_clean_text(result.get("error"), "Computer task failed.", max_len=420),
-                success=False,
-                duration_seconds=time.monotonic() - started,
-                metadata=metadata or None,
+                started=started,
+                execution=execution,
+                failure_fallback="Computer task failed.",
             )
+            await _finish_non_rapid_status(
+                message,
+                False,
+                source="cua_vision",
+            )
+            return _step(
+                agent="cua_vision",
+                task=task,
+                success=False,
+                message=message,
+                source="cua_vision",
+                complete=False,
+            )
+
+        from agents.cua_vision.agent import VisionAgent
+        execution = await execute_vision_agent(
+            task=task,
+            screenshot=screenshot,
+            agent_factory=lambda: VisionAgent(model_name=jarvis_model),
+        )
+        message = _vision_completion_message(execution)
+        complete = execution.complete if execution.complete is not None else False
+        _log_non_rapid_agent_result(
+            request_id=request_id,
+            agent="cua_vision",
+            task_text=task_text,
+            message=message,
+            started=started,
+            execution=execution,
+            failure_fallback="Computer task failed.",
+            success_metadata={
+                "complete": complete,
+                "critic": execution.critic,
+            },
+        )
         await _finish_non_rapid_status(
             message,
-            bool(result.get("success", False) and complete),
+            bool(execution.success and complete),
             source="cua_vision",
         )
         return _step(
             agent="cua_vision",
             task=task,
-            success=bool(result.get("success", False)),
+            success=execution.success,
             message=message,
             source="cua_vision",
             complete=complete,

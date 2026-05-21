@@ -8,6 +8,7 @@ Usage:
 import asyncio
 import os
 import sys
+import time
 from types import SimpleNamespace
 
 from PIL import Image
@@ -443,6 +444,91 @@ async def test_rejected_completion_uses_strong_planner_model_purpose() -> None:
     assert parts[0].function_call.name == "task_is_complete"
 
 
+async def test_provider_attempt_timeout_is_capped_by_remaining_run_budget() -> None:
+    captured: dict[str, object] = {}
+    original_get_nvidia_api_key = single_call_module.get_nvidia_api_key
+    original_get_openrouter_api_key = single_call_module.get_openrouter_api_key
+    original_get_nvidia_models = single_call_module.get_nvidia_models
+    original_get_nvidia_chat_url = single_call_module.get_nvidia_chat_url
+    original_get_nvidia_timeout_seconds = single_call_module.get_nvidia_timeout_seconds
+    original_call_openrouter_tool_sync = single_call_module.call_openrouter_tool_sync
+
+    def _fake_call_openrouter_tool_sync(**kwargs):
+        captured["timeout"] = kwargs["openrouter_timeout_seconds"]
+        return {
+            "text": "",
+            "tool_calls": [{"name": "task_is_complete", "arguments": {}}],
+        }
+
+    single_call_module.get_nvidia_api_key = lambda: "nvidia-key"
+    single_call_module.get_openrouter_api_key = lambda: ""
+    single_call_module.get_nvidia_models = lambda _purpose: ["vision-model"]
+    single_call_module.get_nvidia_chat_url = (
+        lambda: "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
+    single_call_module.get_nvidia_timeout_seconds = lambda: 45
+    single_call_module.call_openrouter_tool_sync = _fake_call_openrouter_tool_sync
+    try:
+        engine = SingleCallVisionEngine(_DummyAgent())
+        engine._set_status = _noop_status  # type: ignore[method-assign]
+        engine._run_deadline_monotonic = time.monotonic() + 2.0
+        await engine._generate_provider_step_response(
+            "look",
+            Image.new("RGB", (4, 4), color="white"),
+        )
+    finally:
+        single_call_module.get_nvidia_api_key = original_get_nvidia_api_key
+        single_call_module.get_openrouter_api_key = original_get_openrouter_api_key
+        single_call_module.get_nvidia_models = original_get_nvidia_models
+        single_call_module.get_nvidia_chat_url = original_get_nvidia_chat_url
+        single_call_module.get_nvidia_timeout_seconds = original_get_nvidia_timeout_seconds
+        single_call_module.call_openrouter_tool_sync = original_call_openrouter_tool_sync
+
+    assert float(captured["timeout"]) <= 2.0, captured
+
+
+async def test_expired_run_budget_stops_before_provider_attempt() -> None:
+    original_get_nvidia_api_key = single_call_module.get_nvidia_api_key
+    original_get_openrouter_api_key = single_call_module.get_openrouter_api_key
+    original_get_nvidia_models = single_call_module.get_nvidia_models
+    original_get_nvidia_chat_url = single_call_module.get_nvidia_chat_url
+    original_get_nvidia_timeout_seconds = single_call_module.get_nvidia_timeout_seconds
+    original_call_openrouter_tool_sync = single_call_module.call_openrouter_tool_sync
+
+    def _unexpected_provider_call(**_kwargs):
+        raise AssertionError("provider call should not run after run budget expires")
+
+    single_call_module.get_nvidia_api_key = lambda: "nvidia-key"
+    single_call_module.get_openrouter_api_key = lambda: ""
+    single_call_module.get_nvidia_models = lambda _purpose: ["vision-model"]
+    single_call_module.get_nvidia_chat_url = (
+        lambda: "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
+    single_call_module.get_nvidia_timeout_seconds = lambda: 45
+    single_call_module.call_openrouter_tool_sync = _unexpected_provider_call
+    try:
+        engine = SingleCallVisionEngine(_DummyAgent())
+        engine._set_status = _noop_status  # type: ignore[method-assign]
+        engine._run_deadline_monotonic = time.monotonic() - 0.01
+        try:
+            await engine._generate_provider_step_response(
+                "look",
+                Image.new("RGB", (4, 4), color="white"),
+            )
+        except RuntimeError as exc:
+            assert "time budget exceeded" in str(exc).lower()
+        else:
+            raise AssertionError("expired run budget should stop provider fallback")
+        assert engine._provider_call_count == 0
+    finally:
+        single_call_module.get_nvidia_api_key = original_get_nvidia_api_key
+        single_call_module.get_openrouter_api_key = original_get_openrouter_api_key
+        single_call_module.get_nvidia_models = original_get_nvidia_models
+        single_call_module.get_nvidia_chat_url = original_get_nvidia_chat_url
+        single_call_module.get_nvidia_timeout_seconds = original_get_nvidia_timeout_seconds
+        single_call_module.call_openrouter_tool_sync = original_call_openrouter_tool_sync
+
+
 async def test_openrouter_fallback_error_does_not_retry_backup_gemini() -> None:
     calls: list[str] = []
     original_reset_state = vision_agent_module.reset_state
@@ -803,6 +889,8 @@ if __name__ == "__main__":
     asyncio.run(test_step_response_uses_nvidia_first_without_gemini())
     asyncio.run(test_step_response_uses_openrouter_after_nvidia_failure())
     asyncio.run(test_rejected_completion_uses_strong_planner_model_purpose())
+    asyncio.run(test_provider_attempt_timeout_is_capped_by_remaining_run_budget())
+    asyncio.run(test_expired_run_budget_stops_before_provider_attempt())
     asyncio.run(test_openrouter_fallback_error_does_not_retry_backup_gemini())
     asyncio.run(test_wait_for_ui_settle_polls_until_stable())
     test_build_model_prompt_includes_runtime_observations()

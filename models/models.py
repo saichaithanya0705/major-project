@@ -7,64 +7,58 @@ This module handles:
 - Gemini/OpenRouter model configuration for screen tasks
 """
 import asyncio
-import json
 import os
-import time
 import traceback
 from typing import Any, Optional
 
-from PIL import Image
 from dotenv import load_dotenv
 
 from core.assistant_logging import log_assistant_event, new_assistant_request_id
-from models.agent_step_runner import run_routed_agent_step
-from models.function_calls import ROUTER_TOOL_MAP, TOOL_CONFIG
-from models.prompts import RAPID_RESPONSE_SYSTEM_PROMPT, OLLAMA_ROUTER_SYSTEM_PROMPT
+from models.function_calls import ROUTER_TOOL_MAP
+from models.jarvis_response_runtime import generate_jarvis_response
+from models.direct_answer_runtime import (
+    answer_direct_request,
+    answer_web_qa_request,
+)
+from models.model_initialization import initialize_gemini_model_runtime
+from models.rapid_orchestrator import run_rapid_request
+from models.rapid_orchestrator_deps import build_rapid_orchestrator_deps
 from models.rapid_state import RAPID_SESSION_STATE
-from models.rapid_orchestrator import RapidOrchestratorDeps, run_rapid_request
-from models.router_backends import (
-    call_ollama_router_sync,
-    call_nvidia_router_sync,
-    call_openrouter_router_sync,
-    call_openrouter_text_sync,
-    call_openrouter_tool_sync,
-    validate_ollama_router_model_sync,
+import models.request_agent_step_runtime as request_agent_step_runtime
+from models.request_entrypoint import run_gemini_request
+from models.router_runtime import route_request
+from models.screen_context_runtime import generate_screen_context
+from models.openrouter_runtime import (
+    call_openrouter_text_sync as _call_openrouter_text_sync,
+    call_openrouter_tool_sync as _call_openrouter_tool_sync,
+    openrouter_enabled as _openrouter_enabled,
+    openrouter_model_enabled as _openrouter_model_enabled,
+    try_openrouter_text_fallback as _try_openrouter_text_fallback,
+    try_openrouter_tool_fallback as _try_openrouter_tool_fallback,
 )
-from models.openrouter_fallback import (
-    get_openrouter_models,
-    image_to_data_url,
-    openrouter_tool_result_to_genai_response,
+from models.router_preflight import (
+    preflight_router_configuration,
 )
-from models.runtime_config import build_model_runtime_config
-from models.routing_policy import (
-    _apply_routing_guardrails,
-    _choose_actionable_agent,
-    _clean_text,
-    _extract_latest_request,
-    _finalize_direct_response_text,
-    _format_direct_response_text,
-    _format_chain_state_for_prompt,
-    _is_execution_request,
-    _is_direct_qa_request,
-    _is_visual_explanation_request,
-    _normalize_router_decision_payload,
-    _normalize_screen_context_payload,
-    _parse_json_object_from_text,
-    _router_provider_order,
-    _routing_signature,
-    _routing_task_text,
-    _screen_context_message,
-    _user_requested_repeat,
+from models.router_provider_calls import (
+    call_ollama_router_sync as _call_ollama_router_sync,
+    call_nvidia_router_sync as _call_nvidia_router_sync,
+    call_openrouter_router_sync as _call_openrouter_router_sync,
+)
+from models.routing_decision_policy import (
+    normalize_router_decision_payload as _normalize_router_decision_payload,
+)
+from models.routing_prompt_parser import (
+    extract_latest_request_from_router_prompt as _extract_latest_request,
+)
+from models.text_normalization import clean_text as _clean_text
+from models.screenshot_store import (
+    get_stored_screenshot,
+    prepare_vision_screenshot,
+    store_screenshot,
 )
 
 # Import JARVIS agent components
-from agents.jarvis.tools import JARVIS_TOOLS, JARVIS_TOOL_MAP, set_model_name
-from agents.jarvis.tool_declarations import JARVIS_FUNCTION_DECLARATIONS
-from agents.jarvis.policy import validate_jarvis_function_calls
-from ui.visualization_api.chat_visibility import (
-    send_vision_capture_started,
-    send_vision_chat_restore,
-)
+from agents.jarvis.tools import set_model_name
 
 # Attempt to import Gemini libraries
 try:
@@ -77,171 +71,22 @@ except ImportError:
 
 load_dotenv()
 
+__all__ = [
+    "GeminiModel",
+    "call_gemini",
+    "preflight_router_configuration",
+    "store_screenshot",
+    "get_stored_screenshot",
+    "prepare_vision_screenshot",
+]
+
 
 # ================================================================================
-# SCREENSHOT STORAGE (captured before overlay appears)
+# RUNTIME BRIDGE STATE
 # ================================================================================
 
-_RAPID_CONVERSATION_HISTORY = RAPID_SESSION_STATE.history
 _MAX_ROUTER_CHAIN_STEPS = 6
 _REPEATED_STEP_LIMIT = 3
-_DEFAULT_OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-_DEFAULT_OPENROUTER_FALLBACK_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
-_DEFAULT_NVIDIA_ROUTER_MODEL = "qwen/qwen3.5-397b-a17b"
-
-
-def _looks_like_openrouter_model_name(model_name: str) -> bool:
-    cleaned = (model_name or "").strip().lower()
-    if not cleaned:
-        return False
-    if cleaned.startswith("openrouter:"):
-        return True
-    return "/" in cleaned or cleaned.endswith(":free")
-
-
-def _extract_openrouter_model_name(model_name: str) -> str:
-    cleaned = (model_name or "").strip()
-    if cleaned.lower().startswith("openrouter:"):
-        return cleaned.split(":", 1)[1].strip()
-    return cleaned
-
-
-def preflight_router_configuration(rapid_response_model: str) -> Optional[str]:
-    runtime_config = build_model_runtime_config(
-        rapid_response_model,
-        default_openrouter_router_model=_DEFAULT_OPENROUTER_ROUTER_MODEL,
-        default_openrouter_fallback_model=_DEFAULT_OPENROUTER_FALLBACK_MODEL,
-        default_nvidia_router_model=_DEFAULT_NVIDIA_ROUTER_MODEL,
-        looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
-        extract_openrouter_model_name=_extract_openrouter_model_name,
-    )
-    provider_order = _router_provider_order(
-        router_provider=runtime_config.router_provider,
-        nvidia_enabled=bool(runtime_config.nvidia_api_key and runtime_config.nvidia_router_model),
-        openrouter_enabled=bool(runtime_config.openrouter_api_key and runtime_config.openrouter_router_model),
-        ollama_enabled=bool(runtime_config.ollama_router_model and runtime_config.ollama_base_url),
-    )
-    if not provider_order:
-        return (
-            "Router provider is not configured. Set NVIDIA_API_KEY for NVIDIA, OPENROUTER_API_KEY for OpenRouter, "
-            "or configure an Ollama router model."
-        )
-    if provider_order[0] == "ollama":
-        return validate_ollama_router_model_sync(
-            ollama_base_url=runtime_config.ollama_base_url,
-            ollama_router_model=runtime_config.ollama_router_model,
-            timeout_seconds=min(runtime_config.ollama_router_timeout_seconds, 3),
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
-        )
-    if provider_order[0] == "openrouter" and not runtime_config.openrouter_api_key:
-        return "OpenRouter router provider is selected but OPENROUTER_API_KEY is not set."
-    if provider_order[0] == "nvidia" and not runtime_config.nvidia_api_key:
-        return "NVIDIA router provider is selected but NVIDIA_API_KEY is not set."
-    return None
-
-
-def _resume_interrupted_agent_route(user_prompt: str) -> Optional[dict[str, str]]:
-    try:
-        from agents.browser.agent import BrowserAgent
-    except Exception:
-        return None
-
-    browser_task = BrowserAgent.resolve_resume_task(user_prompt)
-    if browser_task:
-        return {
-            "agent": "browser",
-            "task": browser_task,
-        }
-    return None
-
-def store_screenshot():
-    """Capture and store a screenshot (called before overlay appears)."""
-    screenshot = RAPID_SESSION_STATE.capture_screenshot()
-    print("Screenshot captured (before overlay)")
-    return screenshot
-
-
-def get_stored_screenshot():
-    """Get the stored screenshot and clear it, or capture a new one if none stored."""
-    return RAPID_SESSION_STATE.consume_or_capture_screenshot()
-
-
-async def prepare_vision_screenshot(*, keep_chat_hidden: bool = False):
-    """Hide the chat window before taking a fresh screenshot for vision agents."""
-    try:
-        await send_vision_capture_started()
-    except Exception as exc:
-        print(f"[VisionCapture] Chat hide request skipped: {exc}")
-
-    await asyncio.sleep(0.25)
-    screenshot = RAPID_SESSION_STATE.capture_fresh_screenshot()
-
-    if not keep_chat_hidden:
-        try:
-            await send_vision_chat_restore()
-        except Exception as exc:
-            print(f"[VisionCapture] Chat restore request skipped: {exc}")
-
-    return screenshot
-
-
-def _append_rapid_history(
-    role: str,
-    text: str,
-    source: str,
-    session_id: str | None = None,
-) -> None:
-    RAPID_SESSION_STATE.append_history(
-        role=role,
-        text=text,
-        source=source,
-        cleaner=lambda value: _clean_text(value, "", max_len=600),
-        session_id=session_id,
-    )
-
-
-def _format_rapid_history_for_prompt(session_id: str | None = None) -> str:
-    return RAPID_SESSION_STATE.format_history_for_prompt(session_id=session_id)
-
-
-def _enrich_routing_result_for_session(
-    routing_result: dict[str, Any],
-    user_prompt: str,
-    session_id: str | None = None,
-) -> dict[str, Any]:
-    return RAPID_SESSION_STATE.enrich_routing_result(
-        routing_result,
-        user_prompt=user_prompt,
-        session_id=session_id,
-    )
-
-
-def _record_step_context_for_session(
-    step_result: dict[str, Any],
-    session_id: str | None = None,
-) -> None:
-    RAPID_SESSION_STATE.record_step_context(step_result, session_id=session_id)
-
-
-async def _run_routed_agent_step(
-    model: "GeminiModel",
-    routing_result: dict[str, Any],
-    jarvis_model: str,
-    request_id: str,
-    prepare_vision_screenshot=None,
-) -> dict[str, Any]:
-    return await run_routed_agent_step(
-        model=model,
-        routing_result=routing_result,
-        jarvis_model=jarvis_model,
-        request_id=request_id,
-        get_stored_screenshot=get_stored_screenshot,
-        prepare_vision_screenshot=prepare_vision_screenshot or globals()["prepare_vision_screenshot"],
-    )
 
 
 # ================================================================================
@@ -254,87 +99,29 @@ async def call_gemini(
     jarvis_model: str,
     session_id: str | None = None,
 ):
-    """
-    Main entry point - uses two-tier model system:
-    1. Rapid response model (router) decides how to handle the request
-    2. Routes to appropriate agent: JARVIS, Browser, or Desktop
-    """
-    request_id = new_assistant_request_id()
-    rapid_session_id = RAPID_SESSION_STATE.normalize_session_id(session_id)
-    log_assistant_event(
-        "request_started",
-        request_id=request_id,
-        task=_clean_text(user_prompt, "", max_len=1200),
-        metadata={
-            "rapid_response_model": rapid_response_model,
-            "jarvis_model": jarvis_model,
-            "session_id": rapid_session_id,
-        },
-    )
-
     try:
-        def append_session_history(role: str, text: str, source: str) -> None:
-            _append_rapid_history(role, text, source, session_id=rapid_session_id)
-
-        def format_session_history_for_prompt() -> str:
-            return _format_rapid_history_for_prompt(session_id=rapid_session_id)
-
-        def enrich_session_routing_result(
-            routing_result: dict[str, Any],
-            user_prompt_text: str,
-        ) -> dict[str, Any]:
-            return _enrich_routing_result_for_session(
-                routing_result,
-                user_prompt_text,
-                session_id=rapid_session_id,
-            )
-
-        def record_session_step_context(step_result: dict[str, Any]) -> None:
-            _record_step_context_for_session(
-                step_result,
-                session_id=rapid_session_id,
-            )
-
-        deps = RapidOrchestratorDeps(
-            model_factory=GeminiModel,
-            append_rapid_history=append_session_history,
-            format_rapid_history_for_prompt=format_session_history_for_prompt,
-            run_routed_agent_step=_run_routed_agent_step,
-            enrich_routing_result=enrich_session_routing_result,
-            record_step_context=record_session_step_context,
-            get_stored_screenshot=get_stored_screenshot,
-            prepare_vision_screenshot=prepare_vision_screenshot,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
-            format_chain_state_for_prompt=_format_chain_state_for_prompt,
-            apply_routing_guardrails=_apply_routing_guardrails,
-            routing_task_text=_routing_task_text,
-            routing_signature=_routing_signature,
-            user_requested_repeat=_user_requested_repeat,
-            finalize_direct_response_text=_finalize_direct_response_text,
-            is_direct_qa_request=_is_direct_qa_request,
-            answer_direct_request=_answer_direct_request,
-            screen_context_message=_screen_context_message,
-            router_tool_map=ROUTER_TOOL_MAP,
-            log_assistant_event=log_assistant_event,
-            rapid_response_system_prompt=RAPID_RESPONSE_SYSTEM_PROMPT,
-            max_router_chain_steps=_MAX_ROUTER_CHAIN_STEPS,
-            repeated_step_limit=_REPEATED_STEP_LIMIT,
-        )
-        await run_rapid_request(
+        request_id, _rapid_session_id = await run_gemini_request(
             user_prompt=user_prompt,
             rapid_response_model=rapid_response_model,
             jarvis_model=jarvis_model,
-            request_id=request_id,
-            deps=deps,
+            session_id=session_id,
+            new_request_id=new_assistant_request_id,
+            log_assistant_event=log_assistant_event,
+            clean_text=_clean_text,
+            rapid_session_state=RAPID_SESSION_STATE,
+            build_rapid_orchestrator_deps=build_rapid_orchestrator_deps,
+            run_rapid_request=run_rapid_request,
+            model_factory=GeminiModel,
+            run_routed_agent_step=request_agent_step_runtime.run_request_agent_step,
+            get_stored_screenshot=get_stored_screenshot,
+            prepare_vision_screenshot=prepare_vision_screenshot,
+            max_router_chain_steps=_MAX_ROUTER_CHAIN_STEPS,
+            repeated_step_limit=_REPEATED_STEP_LIMIT,
         )
     except Exception as exc:
         log_assistant_event(
             "request_crashed",
-            request_id=request_id,
+            request_id=locals().get("request_id", "unknown"),
             task=_clean_text(user_prompt, "", max_len=420),
             message=_clean_text(str(exc), "Assistant request crashed.", max_len=420),
             error=str(exc),
@@ -342,18 +129,6 @@ async def call_gemini(
             metadata={"traceback": traceback.format_exc()},
         )
         raise
-
-
-async def _answer_direct_request(
-    *,
-    model: "GeminiModel",
-    user_prompt: str,
-    history_block: str = "",
-) -> str:
-    return await model.answer_direct_request(
-        user_prompt=user_prompt,
-        history_block=history_block,
-    )
 
 
 # ================================================================================
@@ -380,66 +155,10 @@ class GeminiModel:
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         self.jarvis_model = jarvis_model
         self.rapid_response_model = rapid_response_model
-        self.screen_judge_model = "gemini-3-flash-preview"
-        runtime_config = build_model_runtime_config(
-            self.rapid_response_model,
-            default_openrouter_router_model=_DEFAULT_OPENROUTER_ROUTER_MODEL,
-            default_openrouter_fallback_model=_DEFAULT_OPENROUTER_FALLBACK_MODEL,
-            default_nvidia_router_model=_DEFAULT_NVIDIA_ROUTER_MODEL,
-            looks_like_openrouter_model_name=_looks_like_openrouter_model_name,
-            extract_openrouter_model_name=_extract_openrouter_model_name,
-        )
-        self.jarvis_thinking_budget = runtime_config.jarvis_thinking_budget
-        self.nvidia_api_key = runtime_config.nvidia_api_key
-        self.nvidia_router_model = runtime_config.nvidia_router_model
-        self.nvidia_url = runtime_config.nvidia_url
-        self.nvidia_timeout_seconds = runtime_config.nvidia_timeout_seconds
-        self.openrouter_api_key = runtime_config.openrouter_api_key
-        self.openrouter_model = runtime_config.openrouter_model
-        self.openrouter_vision_model = runtime_config.openrouter_vision_model
-        self.openrouter_router_model = runtime_config.openrouter_router_model
-        self.openrouter_url = runtime_config.openrouter_url
-        self.openrouter_site_url = runtime_config.openrouter_site_url
-        self.openrouter_site_name = runtime_config.openrouter_site_name
-        self.openrouter_timeout_seconds = runtime_config.openrouter_timeout_seconds
-        self.router_provider = runtime_config.router_provider
-        self.ollama_router_model = runtime_config.ollama_router_model
-        self.ollama_base_url = runtime_config.ollama_base_url
-        self.ollama_keep_alive = runtime_config.ollama_keep_alive
-        self.ollama_router_timeout_seconds = runtime_config.ollama_router_timeout_seconds
-        self.ollama_router_num_ctx = runtime_config.ollama_router_num_ctx
-        self.ollama_router_num_predict = runtime_config.ollama_router_num_predict
-        self.nvidia_router_max_tokens = runtime_config.nvidia_router_max_tokens
-        self.openrouter_router_max_tokens = runtime_config.openrouter_router_max_tokens
-        self.router_wall_timeout_grace_seconds = 5.0
-        self.ollama_router_think = runtime_config.ollama_router_think
-        self.gemini_backup_model = runtime_config.gemini_backup_model
-
-        # Config for JARVIS model (full capabilities)
-        self.jarvis_config = types.GenerateContentConfig(
-            temperature=1.2,
-            top_p=0.95,
-            top_k=64,
-            max_output_tokens=3000,
-            thinking_config=types.ThinkingConfig(thinking_budget=self.jarvis_thinking_budget),
-            tools=JARVIS_TOOLS,
-            tool_config=TOOL_CONFIG,
-        )
-
-        # Config for one-shot screen context extraction (no tools, strict JSON response).
-        self.screen_judge_config = types.GenerateContentConfig(
-            temperature=0.2,
-            top_p=0.9,
-            top_k=40,
-            max_output_tokens=1200,
-            response_mime_type="application/json",
-        )
-
-        self.direct_answer_config = types.GenerateContentConfig(
-            temperature=0.4,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=1800,
+        initialize_gemini_model_runtime(
+            self,
+            rapid_response_model=self.rapid_response_model,
+            types_module=types,
         )
 
     @staticmethod
@@ -472,17 +191,8 @@ class GeminiModel:
     def _extract_latest_request(prompt: str) -> str:
         return _extract_latest_request(prompt)
 
-    def _openrouter_model_enabled(self, model_name: str) -> bool:
-        return bool(self.openrouter_api_key and model_name and self.openrouter_url)
-
-    def _openrouter_enabled(self) -> bool:
-        return self._openrouter_model_enabled(self.openrouter_model)
-
-    def _openrouter_router_enabled(self) -> bool:
-        return self._openrouter_model_enabled(self.openrouter_router_model)
-
-    def _nvidia_router_enabled(self) -> bool:
-        return bool(self.nvidia_api_key and self.nvidia_router_model and self.nvidia_url)
+    _openrouter_model_enabled = _openrouter_model_enabled
+    _openrouter_enabled = _openrouter_enabled
 
     def _call_openrouter_text_sync(
         self,
@@ -495,25 +205,13 @@ class GeminiModel:
         response_format: Optional[dict[str, Any]] = None,
         image_data_url: Optional[str] = None,
     ) -> str:
-        model_name = (model or self.openrouter_model or "").strip()
-        if not self._openrouter_model_enabled(model_name):
-            raise RuntimeError("OpenRouter fallback is not configured.")
-        return call_openrouter_text_sync(
-            openrouter_api_key=self.openrouter_api_key,
-            openrouter_url=self.openrouter_url,
-            openrouter_site_url=self.openrouter_site_url,
-            openrouter_site_name=self.openrouter_site_name,
-            openrouter_timeout_seconds=self.openrouter_timeout_seconds,
-            model_name=model_name,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
+        return _call_openrouter_text_sync(
+            self,
+            system_prompt,
+            user_prompt,
+            temperature,
+            max_tokens,
+            model_name=model,
             response_format=response_format,
             image_data_url=image_data_url,
         )
@@ -529,335 +227,27 @@ class GeminiModel:
         model: Optional[str] = None,
         image_data_url: Optional[str] = None,
     ) -> dict[str, Any]:
-        model_name = (model or self.openrouter_vision_model or self.openrouter_model or "").strip()
-        if not self._openrouter_model_enabled(model_name):
-            raise RuntimeError("OpenRouter tool fallback is not configured.")
-        return call_openrouter_tool_sync(
-            openrouter_api_key=self.openrouter_api_key,
-            openrouter_url=self.openrouter_url,
-            openrouter_site_url=self.openrouter_site_url,
-            openrouter_site_name=self.openrouter_site_name,
-            openrouter_timeout_seconds=self.openrouter_timeout_seconds,
-            model_name=model_name,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            function_declarations=function_declarations,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
+        return _call_openrouter_tool_sync(
+            self,
+            system_prompt,
+            user_prompt,
+            function_declarations,
+            temperature,
+            max_tokens,
+            model_name=model,
             image_data_url=image_data_url,
         )
 
-    def _call_openrouter_router_sync(self, prompt: str) -> dict[str, Any]:
-        return call_openrouter_router_sync(
-            openrouter_api_key=self.openrouter_api_key,
-            openrouter_url=self.openrouter_url,
-            openrouter_site_url=self.openrouter_site_url,
-            openrouter_site_name=self.openrouter_site_name,
-            openrouter_timeout_seconds=self.openrouter_timeout_seconds,
-            openrouter_router_model=self.openrouter_router_model,
-            openrouter_router_max_tokens=self.openrouter_router_max_tokens,
-            router_system_prompt=OLLAMA_ROUTER_SYSTEM_PROMPT,
-            prompt=prompt,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
-            parse_json_object_from_text=_parse_json_object_from_text,
-        )
+    _call_openrouter_router_sync = _call_openrouter_router_sync
+    _call_nvidia_router_sync = _call_nvidia_router_sync
 
-    def _call_nvidia_router_sync(self, prompt: str) -> dict[str, Any]:
-        return call_nvidia_router_sync(
-            nvidia_api_key=self.nvidia_api_key,
-            nvidia_url=self.nvidia_url,
-            nvidia_timeout_seconds=self.nvidia_timeout_seconds,
-            nvidia_router_model=self.nvidia_router_model,
-            nvidia_router_max_tokens=self.nvidia_router_max_tokens,
-            router_system_prompt=OLLAMA_ROUTER_SYSTEM_PROMPT,
-            prompt=prompt,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
-            parse_json_object_from_text=_parse_json_object_from_text,
-        )
+    _try_openrouter_text_fallback = _try_openrouter_text_fallback
+    _try_openrouter_tool_fallback = _try_openrouter_tool_fallback
 
-    async def _try_openrouter_text_fallback(
-        self,
-        *,
-        label: str,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float = 0.2,
-        max_tokens: int = 700,
-        purpose: str = "text",
-        image: Any = None,
-        response_format: Optional[dict[str, Any]] = None,
-    ) -> Optional[str]:
-        if not self._openrouter_enabled():
-            print(f"[{label}] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
-            return None
+    _call_ollama_router_sync = _call_ollama_router_sync
 
-        image_data_url = image_to_data_url(image)
-        models_to_try = get_openrouter_models(purpose)
-        if purpose == "text" and self.openrouter_model not in models_to_try:
-            models_to_try.insert(0, self.openrouter_model)
-        elif purpose != "text" and self.openrouter_vision_model not in models_to_try:
-            models_to_try.insert(0, self.openrouter_vision_model)
-
-        for model_name in [model for model in models_to_try if model]:
-            try:
-                await set_model_name(f"{model_name} (OpenRouter)")
-            except Exception as exc:
-                print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
-
-            try:
-                text = await asyncio.to_thread(
-                    self._call_openrouter_text_sync,
-                    system_prompt,
-                    user_prompt,
-                    temperature,
-                    max_tokens,
-                    model=model_name,
-                    response_format=response_format,
-                    image_data_url=image_data_url,
-                )
-                print(f"[{label}] OpenRouter fallback succeeded with model {model_name}")
-                return text
-            except Exception as fallback_exc:
-                print(f"[{label}] OpenRouter fallback failed with {model_name}: {fallback_exc}")
-        return None
-
-    async def _try_openrouter_tool_fallback(
-        self,
-        *,
-        label: str,
-        system_prompt: str,
-        user_prompt: str,
-        function_declarations: list[dict[str, Any]],
-        image: Any = None,
-        temperature: float = 0.2,
-        max_tokens: int = 1200,
-        purpose: str = "vision",
-    ):
-        if not self._openrouter_enabled():
-            print(f"[{label}] Gemini quota hit but OPENROUTER_API_KEY is not configured.")
-            return None
-
-        image_data_url = image_to_data_url(image)
-        models_to_try = get_openrouter_models(purpose)
-        if self.openrouter_vision_model and self.openrouter_vision_model not in models_to_try:
-            models_to_try.insert(0, self.openrouter_vision_model)
-
-        for model_name in [model for model in models_to_try if model]:
-            try:
-                await set_model_name(f"{model_name} (OpenRouter)")
-            except Exception as exc:
-                print(f"[{label}] Failed to update model label for OpenRouter fallback: {exc}")
-
-            try:
-                result = await asyncio.to_thread(
-                    self._call_openrouter_tool_sync,
-                    system_prompt,
-                    user_prompt,
-                    function_declarations,
-                    temperature,
-                    max_tokens,
-                    model=model_name,
-                    image_data_url=image_data_url,
-                )
-                print(f"[{label}] OpenRouter tool fallback succeeded with model {model_name}")
-                return openrouter_tool_result_to_genai_response(result)
-            except Exception as fallback_exc:
-                print(f"[{label}] OpenRouter tool fallback failed with {model_name}: {fallback_exc}")
-        return None
-
-    def _call_ollama_router_sync(self, prompt: str) -> dict[str, Any]:
-        return call_ollama_router_sync(
-            ollama_base_url=self.ollama_base_url,
-            ollama_router_model=self.ollama_router_model,
-            ollama_router_num_predict=self.ollama_router_num_predict,
-            ollama_router_num_ctx=self.ollama_router_num_ctx,
-            ollama_router_think=self.ollama_router_think,
-            ollama_keep_alive=self.ollama_keep_alive,
-            ollama_router_timeout_seconds=self.ollama_router_timeout_seconds,
-            router_system_prompt=OLLAMA_ROUTER_SYSTEM_PROMPT,
-            prompt=prompt,
-            clean_text=lambda value, fallback, max_len: _clean_text(
-                value,
-                fallback,
-                max_len=max_len,
-            ),
-            parse_json_object_from_text=_parse_json_object_from_text,
-        )
-
-    async def answer_direct_request(
-        self,
-        *,
-        user_prompt: str,
-        history_block: str = "",
-    ) -> str:
-        """Answer general Q&A directly without screen capture or agent routing."""
-        direct_prompt = (
-            "You are JARVIS in direct Q&A mode. Answer the user's factual or conversational "
-            "question directly in clean Markdown for chat. Use headings, bullets, or tables when "
-            "they make the answer easier to scan. Do not inspect the screen, use browser automation, "
-            "or claim to have live/current data unless the user provided it. Keep the answer useful "
-            "and structured, but avoid unnecessary length. Do not use raw HTML.\n"
-            f"{history_block}\n"
-            f"# User's Latest Request:\n{user_prompt}"
-        )
-
-        try:
-            try:
-                await set_model_name(f"{self.jarvis_model} (Direct)")
-            except Exception as ui_exc:
-                print(f"[DirectQA] Model label update skipped: {ui_exc}")
-
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=self.jarvis_model,
-                    contents=[direct_prompt],
-                    config=self.direct_answer_config,
-                ),
-                timeout=45,
-            )
-            text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
-            if text:
-                return text
-            raise RuntimeError("Direct answer model returned empty text.")
-        except Exception as exc:
-            if (
-                self._is_gemini_temporary_error(exc)
-                and self.gemini_backup_model
-                and self.gemini_backup_model != self.jarvis_model
-            ):
-                try:
-                    print(
-                        f"[DirectQA] Primary model unavailable; retrying with backup "
-                        f"{self.gemini_backup_model}"
-                    )
-                    response = await asyncio.wait_for(
-                        self.client.aio.models.generate_content(
-                            model=self.gemini_backup_model,
-                            contents=[direct_prompt],
-                            config=self.direct_answer_config,
-                        ),
-                        timeout=45,
-                    )
-                    text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
-                    if text:
-                        return text
-                except Exception as backup_exc:
-                    print(f"[DirectQA] Gemini backup failed: {backup_exc}")
-
-            fallback_text = await self._try_openrouter_text_fallback(
-                label="DirectQA",
-                system_prompt=(
-                    "You are JARVIS in direct Q&A mode. Answer factual or conversational "
-                    "questions directly in plain text. Do not use screen context."
-                ),
-                user_prompt=user_prompt,
-                temperature=0.4,
-                max_tokens=1400,
-                purpose="text",
-            )
-            if fallback_text:
-                return _format_direct_response_text(fallback_text, "", max_len=None)
-            raise
-
-    async def answer_web_qa_request(
-        self,
-        *,
-        user_prompt: str,
-        sources: list[dict[str, str]],
-    ) -> str:
-        """Synthesize a source-grounded web answer from Tavily search results."""
-        source_lines = []
-        for index, source in enumerate(sources[:8], start=1):
-            title = _clean_text(source.get("title"), f"Source {index}", max_len=160)
-            url = _clean_text(source.get("url"), "", max_len=260)
-            content = _format_direct_response_text(source.get("content"), "", max_len=1000)
-            source_lines.append(
-                f"[{index}] {title}\nURL: {url}\nSnippet: {content or 'No snippet provided.'}"
-            )
-
-        if not source_lines:
-            return "I could not find useful web sources for that question."
-
-        web_prompt = (
-            "You are JARVIS in source-grounded web Q&A mode. Answer the user's question "
-            "using only the provided Tavily web search sources. If the sources disagree or "
-            "do not contain enough evidence, say that clearly. Keep the answer concise, "
-            "use clean Markdown, and do not invent facts beyond the sources.\n\n"
-            f"# User's Question\n{user_prompt}\n\n"
-            "# Tavily Sources\n"
-            + "\n\n".join(source_lines)
-        )
-
-        try:
-            try:
-                await set_model_name(f"{self.jarvis_model} (Web QA)")
-            except Exception as ui_exc:
-                print(f"[WebQA] Model label update skipped: {ui_exc}")
-
-            response = await asyncio.wait_for(
-                self.client.aio.models.generate_content(
-                    model=self.jarvis_model,
-                    contents=[web_prompt],
-                    config=self.direct_answer_config,
-                ),
-                timeout=45,
-            )
-            text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
-            if text:
-                return text
-            raise RuntimeError("Web QA model returned empty text.")
-        except Exception as exc:
-            if (
-                self._is_gemini_temporary_error(exc)
-                and self.gemini_backup_model
-                and self.gemini_backup_model != self.jarvis_model
-            ):
-                try:
-                    print(
-                        f"[WebQA] Primary model unavailable; retrying with backup "
-                        f"{self.gemini_backup_model}"
-                    )
-                    response = await asyncio.wait_for(
-                        self.client.aio.models.generate_content(
-                            model=self.gemini_backup_model,
-                            contents=[web_prompt],
-                            config=self.direct_answer_config,
-                        ),
-                        timeout=45,
-                    )
-                    text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
-                    if text:
-                        return text
-                except Exception as backup_exc:
-                    print(f"[WebQA] Gemini backup failed: {backup_exc}")
-
-            fallback_text = await self._try_openrouter_text_fallback(
-                label="WebQA",
-                system_prompt=(
-                    "You are JARVIS in source-grounded web Q&A mode. Answer using only "
-                    "the provided search source snippets. Use clean Markdown."
-                ),
-                user_prompt=web_prompt,
-                temperature=0.2,
-                max_tokens=1400,
-                purpose="text",
-            )
-            if fallback_text:
-                return _format_direct_response_text(fallback_text, "", max_len=None)
-            raise
+    answer_direct_request = answer_direct_request
+    answer_web_qa_request = answer_web_qa_request
 
     def _normalize_router_decision(
         self,
@@ -872,348 +262,8 @@ class GeminiModel:
             provider_name=provider_name,
         )
 
-    def _router_provider_order(self) -> list[str]:
-        return _router_provider_order(
-            router_provider=self.router_provider,
-            nvidia_enabled=self._nvidia_router_enabled(),
-            openrouter_enabled=self._openrouter_router_enabled(),
-            ollama_enabled=bool(self.ollama_router_model and self.ollama_base_url),
-        )
+    route_request = route_request
 
-    def _router_wall_timeout_seconds(self, provider: str) -> float:
-        if provider == "nvidia":
-            provider_timeout = getattr(self, "nvidia_timeout_seconds", 45)
-        elif provider == "openrouter":
-            provider_timeout = getattr(self, "openrouter_timeout_seconds", 45)
-        else:
-            provider_timeout = getattr(self, "ollama_router_timeout_seconds", 90)
-        grace_seconds = getattr(self, "router_wall_timeout_grace_seconds", 5.0)
-        return max(0.001, float(provider_timeout) + float(grace_seconds))
+    generate_screen_context = generate_screen_context
 
-    async def _call_router_provider_with_wall_timeout(
-        self,
-        provider: str,
-        call,
-        prompt: str,
-    ) -> dict[str, Any]:
-        timeout_seconds = self._router_wall_timeout_seconds(provider)
-        return await asyncio.wait_for(
-            asyncio.to_thread(call, prompt),
-            timeout=timeout_seconds,
-        )
-
-    async def route_request(self, prompt: str) -> dict:
-        """
-        Use the router model to decide how to handle the request.
-
-        Returns:
-            dict with keys:
-                - agent: "direct" | "jarvis" | "browser" | "cua_cli" | "cua_vision" | "screen_context"
-                - query/task: The query or task to pass to the agent
-                - response_text: direct response text when agent == "direct"
-                - Additional agent-specific params
-        """
-        print(f"[Router] Processing via {self.router_provider}...")
-        started = time.monotonic()
-
-        provider_order = _router_provider_order(
-            router_provider=self.router_provider,
-            nvidia_enabled=self._nvidia_router_enabled(),
-            openrouter_enabled=self._openrouter_router_enabled(),
-            ollama_enabled=bool(self.ollama_router_model and self.ollama_base_url),
-        )
-        if not provider_order:
-            raise RuntimeError(
-                "Router provider is not configured. Set NVIDIA_API_KEY for NVIDIA routing, "
-                "OPENROUTER_API_KEY for OpenRouter routing, or configure an Ollama router model."
-            )
-
-        last_error = ""
-        for provider in provider_order:
-            try:
-                if provider == "nvidia":
-                    try:
-                        await set_model_name(f"{self.nvidia_router_model} (NVIDIA)")
-                    except Exception as ui_exc:
-                        print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await self._call_router_provider_with_wall_timeout(
-                        "nvidia",
-                        self._call_nvidia_router_sync,
-                        prompt,
-                    )
-                    routed = _normalize_router_decision_payload(
-                        payload,
-                        prompt,
-                        provider_name="NVIDIA",
-                    )
-                elif provider == "openrouter":
-                    try:
-                        await set_model_name(f"{self.openrouter_router_model} (OpenRouter)")
-                    except Exception as ui_exc:
-                        print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await self._call_router_provider_with_wall_timeout(
-                        "openrouter",
-                        self._call_openrouter_router_sync,
-                        prompt,
-                    )
-                    routed = _normalize_router_decision_payload(
-                        payload,
-                        prompt,
-                        provider_name="OpenRouter",
-                    )
-                else:
-                    try:
-                        await set_model_name(f"{self.ollama_router_model} (Ollama)")
-                    except Exception as ui_exc:
-                        print(f"[Router] Model label update skipped: {ui_exc}")
-                    payload = await self._call_router_provider_with_wall_timeout(
-                        "ollama",
-                        self._call_ollama_router_sync,
-                        prompt,
-                    )
-                    routed = _normalize_router_decision_payload(
-                        payload,
-                        prompt,
-                        provider_name="Ollama",
-                    )
-                elapsed = time.monotonic() - started
-                print(
-                    f"[Router] Completed in {elapsed:.2f}s via {provider} "
-                    f"with agent={routed.get('agent')}"
-                )
-                return routed
-            except Exception as exc:
-                if isinstance(exc, asyncio.TimeoutError):
-                    error = (
-                        f"{provider} router timed out after "
-                        f"{self._router_wall_timeout_seconds(provider):.1f}s."
-                    )
-                else:
-                    error = _clean_text(str(exc), "Router generation failed.", max_len=420)
-                print(f"[Router] {provider} routing failed: {error}")
-                last_error = error
-
-        raise RuntimeError(f"Router failed using configured provider(s): {last_error or 'unknown error'}")
-
-    async def generate_screen_context(
-        self,
-        user_request: str,
-        image: Image = None,
-        focus: str = "",
-    ) -> dict[str, Any]:
-        """
-        Run one multimodal pass to extract concrete screen context for routing.
-        """
-        print("[ScreenJudge] Capturing context from screenshot...")
-        started = time.monotonic()
-        focus_text = _clean_text(focus, "", max_len=200)
-        judge_prompt = (
-            "You are Screen Judge for a computer-use orchestrator.\n"
-            "Analyze the screenshot and extract only high-signal routing context.\n"
-            "Return JSON ONLY, no markdown.\n\n"
-            "Required JSON schema:\n"
-            "{\n"
-            '  "summary": "short factual summary",\n'
-            '  "repo_url": "github/git url if visible else empty string",\n'
-            '  "local_url": "localhost/127.0.0.1 URL if visible else empty string",\n'
-            '  "recommended_agent": "cua_cli|cua_vision|browser|jarvis|direct",\n'
-            '  "recommended_task": "single concrete next step task",\n'
-            '  "hints": "short extra details useful for routing"\n'
-            "}\n\n"
-            f"User request: {user_request}\n"
-            f"Extraction focus: {focus_text if focus_text else 'general execution context'}\n"
-            "Do not invent URLs. If uncertain, leave fields empty."
-        )
-
-        contents = [judge_prompt]
-        if image is not None:
-            contents.append(image)
-
-        try:
-            response = await self.client.aio.models.generate_content(
-                model=self.screen_judge_model,
-                contents=contents,
-                config=self.screen_judge_config,
-            )
-        except Exception as exc:
-            if (
-                self._is_gemini_temporary_error(exc)
-                and self.gemini_backup_model
-                and self.gemini_backup_model != self.screen_judge_model
-            ):
-                print(
-                    f"[ScreenJudge] Primary model unavailable; retrying with backup "
-                    f"{self.gemini_backup_model}"
-                )
-                response = await self.client.aio.models.generate_content(
-                    model=self.gemini_backup_model,
-                    contents=contents,
-                    config=self.screen_judge_config,
-                )
-                self.screen_judge_model = self.gemini_backup_model
-            elif self._is_gemini_quota_error(exc):
-                fallback_text = await self._try_openrouter_text_fallback(
-                    label="ScreenJudge",
-                    system_prompt=(
-                        "You are Screen Judge for a computer-use orchestrator.\n"
-                        "Analyze the screenshot when one is attached.\n"
-                        "Return JSON only with fields: summary, repo_url, local_url,"
-                        " recommended_agent, recommended_task, hints.\n"
-                        "If you are uncertain, keep fields empty and explain uncertainty in"
-                        " summary."
-                    ),
-                    user_prompt=(
-                        f"User request: {user_request}\n"
-                        f"Focus: {focus_text if focus_text else 'general execution context'}\n"
-                        "Extract only high-signal routing context."
-                    ),
-                    temperature=0.1,
-                    max_tokens=420,
-                    purpose="screen",
-                    image=image,
-                    response_format={"type": "json_object"},
-                )
-                if fallback_text:
-                    parsed = _parse_json_object_from_text(fallback_text)
-                    normalized = _normalize_screen_context_payload(parsed, user_request=user_request)
-                    if not normalized.get("summary"):
-                        normalized["summary"] = _clean_text(
-                            fallback_text,
-                            "Gemini screen context hit quota. Used text-only fallback.",
-                            max_len=420,
-                        )
-                    normalized["model"] = f"{self.openrouter_model} (openrouter_fallback)"
-                    return normalized
-            else:
-                raise
-        elapsed = time.monotonic() - started
-        print(f"[ScreenJudge] Completed in {elapsed:.2f}s")
-
-        raw_text = ""
-        if hasattr(response, "text") and response.text:
-            raw_text = str(response.text)
-        else:
-            try:
-                raw_text = json.dumps(response.to_dict())
-            except Exception:
-                raw_text = ""
-
-        parsed = _parse_json_object_from_text(raw_text)
-        normalized = _normalize_screen_context_payload(parsed, user_request=user_request)
-        if not normalized.get("summary"):
-            normalized["summary"] = _clean_text(raw_text, "Screen context captured.", max_len=420)
-        normalized["model"] = self.screen_judge_model
-        return normalized
-
-    async def generate_jarvis_response(self, prompt: str, image: Image = None) -> dict[str, Any]:
-        """
-        Call the JARVIS model with full screen annotation capabilities.
-        """
-        print("[JARVIS] Processing with screenshot...")
-        started = time.monotonic()
-        try:
-            await set_model_name(self.jarvis_model)
-        except Exception as ui_exc:
-            print(f"[JARVIS] Model label update skipped: {ui_exc}")
-
-        contents = [prompt]
-        if image:
-            contents.append(image)
-
-        try:
-            response = await self.client.aio.models.generate_content(
-                model=self.jarvis_model,
-                contents=contents,
-                config=self.jarvis_config
-            )
-        except Exception as exc:
-            if (
-                self._is_gemini_temporary_error(exc)
-                and self.gemini_backup_model
-                and self.gemini_backup_model != self.jarvis_model
-            ):
-                print(
-                    f"[JARVIS] Primary model unavailable; retrying with backup "
-                    f"{self.gemini_backup_model}"
-                )
-                response = await self.client.aio.models.generate_content(
-                    model=self.gemini_backup_model,
-                    contents=contents,
-                    config=self.jarvis_config
-                )
-                self.jarvis_model = self.gemini_backup_model
-            elif self._is_gemini_quota_error(exc):
-                fallback_response = await self._try_openrouter_tool_fallback(
-                    label="JARVIS",
-                    system_prompt=(
-                        "You are JARVIS, a screen annotation assistant. "
-                        "Use the available tools when annotation or direct response is needed."
-                    ),
-                    user_prompt=prompt,
-                    function_declarations=JARVIS_FUNCTION_DECLARATIONS,
-                    image=image,
-                    temperature=0.2,
-                    max_tokens=1800,
-                    purpose="jarvis",
-                )
-                if fallback_response is not None:
-                    response = fallback_response
-                else:
-                    fallback_text = await self._try_openrouter_text_fallback(
-                        label="JARVIS",
-                        system_prompt=(
-                            "You are JARVIS fallback. Give a concise response to the user request."
-                        ),
-                        user_prompt=_extract_latest_request(prompt),
-                        temperature=0.2,
-                        max_tokens=700,
-                        purpose="jarvis",
-                        image=image,
-                    )
-                    if fallback_text:
-                        return {
-                            "response": None,
-                            "summary": _clean_text(
-                                f"Gemini quota reached. {fallback_text}",
-                                "Gemini quota reached. Please retry shortly.",
-                                max_len=420,
-                            ),
-                        }
-            else:
-                raise
-        elapsed = time.monotonic() - started
-        print(
-            f"[JARVIS] Model call completed in {elapsed:.2f}s "
-            f"(thinking_budget={self.jarvis_thinking_budget})"
-        )
-
-        parts = response.candidates[0].content.parts
-        function_calls = [part.function_call for part in parts if part.function_call]
-        summary_text = None
-        validated_calls = []
-
-        if function_calls:
-            validated_calls = validate_jarvis_function_calls(function_calls, JARVIS_TOOL_MAP)
-            for tool_name, args in validated_calls:
-                print(f"\n[JARVIS] Function: {tool_name}")
-                print(f"[JARVIS] Arguments: {args}")
-
-                if tool_name == "direct_response":
-                    summary_text = args.get("text") or summary_text
-
-                tool = JARVIS_TOOL_MAP.get(tool_name)
-                if tool:
-                    tool(**args)
-                else:
-                    raise Exception(f"[JARVIS] Invalid tool: {tool_name}")
-        else:
-            print("[JARVIS] No function call in response")
-            if response.text:
-                print(response.text)
-                summary_text = response.text
-
-        return {
-            "response": response,
-            "summary": _clean_text(summary_text, "", max_len=420),
-            "function_calls": validated_calls,
-        }
+    generate_jarvis_response = generate_jarvis_response

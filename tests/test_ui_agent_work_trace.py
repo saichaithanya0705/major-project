@@ -127,3 +127,56 @@ def test_agent_trace_is_thread_width_not_nested_inside_assistant_bubble() -> Non
     assert "align-self: stretch;" in agent_trace_block
     assert "width: 100%;" in agent_trace_block
     assert "max-width: 100%;" in agent_trace_block
+
+
+def test_orchestrator_plan_snapshot_normalizes_to_ui_trace_rows() -> None:
+    result = _run_agent_trace_eval(
+        (
+            "const trace = traceModule.createAgentWorkTraceState();\n"
+            "const state = trace.applyEvent({ command: 'orchestrator_plan_snapshot', plan: {\n"
+            "  tasks: [\n"
+            "    { id: 'research', agent: 'web_qa', task: 'Find sources', status: 'completed' },\n"
+            "    { id: 'patch', agent: 'cua_cli', task: 'Patch files', status: 'running', depends_on: ['research'] }\n"
+            "  ]\n"
+            "} });\n"
+            "process.stdout.write(JSON.stringify(state));"
+        ),
+    )
+
+    assert result["isOpen"] is True
+    assert result["status"] == "running"
+    assert result["entries"] == [
+        {
+            "id": 1,
+            "source": "web_qa",
+            "label": "Web QA",
+            "status": "completed",
+            "text": "research · Find sources",
+            "taskId": "research",
+            "dependsOn": [],
+        },
+        {
+            "id": 2,
+            "source": "cua_cli",
+            "label": "CLI",
+            "status": "running",
+            "text": "patch · Patch files",
+            "taskId": "patch",
+            "dependsOn": ["research"],
+        },
+    ]
+
+
+def test_orchestrator_plan_snapshot_treats_pending_tasks_as_waiting() -> None:
+    result = _run_agent_trace_eval(
+        (
+            "const snapshot = traceModule.normalizeOrchestratorPlanSnapshot({ tasks: [\n"
+            "  { id: 'queued', agent: 'browser', task: 'Open docs', status: 'pending' }\n"
+            "] });\n"
+            "process.stdout.write(JSON.stringify(snapshot));"
+        ),
+    )
+
+    assert result["isOpen"] is True
+    assert result["status"] == "running"
+    assert result["entries"][0]["status"] == "waiting"

@@ -1,7 +1,7 @@
 const ROUTER_REPLY_SOURCE = 'rapid_response';
 const MAX_TRACE_ENTRIES = 24;
 const MAX_TRACE_TEXT_CHARS = 1400;
-const VALID_TRACE_STATUSES = new Set(['idle', 'running', 'completed', 'failed']);
+const VALID_TRACE_STATUSES = new Set(['idle', 'waiting', 'running', 'completed', 'failed', 'skipped']);
 
 const SOURCE_LABELS = new Map([
   ['jarvis', 'JARVIS'],
@@ -33,6 +33,19 @@ function cloneState(state) {
     summary: state.summary,
     entries: state.entries.map(cloneEntry),
   };
+}
+
+function normalizePlanTaskStatus(value) {
+  const rawStatus = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (['pending', 'queued', 'waiting'].includes(rawStatus)) return 'waiting';
+  return normalizeAgentTraceStatus(value);
+}
+
+function normalizeDependsOn(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : String(item || '').trim()))
+    .filter(Boolean);
 }
 
 export function normalizeAgentTraceSource(value) {
@@ -95,6 +108,45 @@ export function normalizeAgentTraceSnapshot(trace) {
   };
 }
 
+export function normalizeOrchestratorPlanSnapshot(plan) {
+  if (!plan || typeof plan !== 'object' || !Array.isArray(plan.tasks)) return null;
+
+  const entries = plan.tasks
+    .map((task, index) => {
+      if (!task || typeof task !== 'object') return null;
+      const source = normalizeAgentTraceSource(task.agent);
+      if (!isAgentTraceSource(source)) return null;
+      const taskId = truncateText(task.id || `step-${index + 1}`, 80);
+      const taskText = truncateText(task.task || task.query || task.message || '', 420);
+      const text = taskText ? `${taskId} · ${taskText}` : taskId;
+      const status = normalizePlanTaskStatus(task.status || task.event_type);
+      return {
+        id: index + 1,
+        source,
+        label: getAgentTraceSourceLabel(source),
+        status,
+        text,
+        taskId,
+        dependsOn: normalizeDependsOn(task.depends_on || task.dependsOn),
+      };
+    })
+    .filter(Boolean)
+    .slice(-MAX_TRACE_ENTRIES);
+
+  if (entries.length === 0) return null;
+
+  const hasFailed = entries.some((entry) => entry.status === 'failed');
+  const hasOpen = entries.some((entry) => ['running', 'waiting'].includes(entry.status));
+  const status = hasFailed ? 'failed' : hasOpen ? 'running' : 'completed';
+
+  return {
+    isOpen: status !== 'completed',
+    status,
+    summary: entries[entries.length - 1].text,
+    entries,
+  };
+}
+
 export function inferAgentTraceStatus(payload = {}) {
   const command = typeof payload.command === 'string' ? payload.command : '';
   const statusText = truncateText(`${payload.doneText || ''} ${payload.responseText || ''} ${payload.text || ''}`, 400)
@@ -144,6 +196,19 @@ export function createAgentWorkTraceState() {
   }
 
   function applyEvent(payload = {}) {
+    if (payload.command === 'orchestrator_plan_snapshot') {
+      const snapshot = normalizeOrchestratorPlanSnapshot(payload.plan || payload);
+      if (!snapshot) {
+        return cloneState(state);
+      }
+      state.isOpen = snapshot.isOpen;
+      state.status = snapshot.status;
+      state.summary = snapshot.summary;
+      state.entries = snapshot.entries.map(cloneEntry);
+      nextId = state.entries.length + 1;
+      return cloneState(state);
+    }
+
     if (!isAgentTraceSource(payload.source)) {
       return snapshot();
     }

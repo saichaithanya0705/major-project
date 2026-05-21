@@ -8,11 +8,14 @@ Usage:
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
+import agents.browser.agent as browser_agent_module
 from agents.browser.agent import BrowserAgent
+from agents.browser.browser_use_boundary import BrowserUseSessionPolicy, BrowserUseToolPolicy
 from agents.browser.page_context import PageContext
 
 
@@ -86,6 +89,51 @@ class _FakePlaywrightMcpClient:
 
     def close(self) -> None:
         self.close_calls += 1
+
+
+class _FakeBrowserUseAgent:
+    def __init__(self):
+        self.state = SimpleNamespace(stopped=False)
+
+    async def run(self):
+        return {"summary": "browser-use completed"}
+
+
+class _FakeBrowserUseBoundary:
+    def __init__(self):
+        self.create_session_calls = 0
+        self.cleanup_calls: list[tuple[object, str | None]] = []
+        self.keep_session_alive_calls = 0
+        self.created_session = object()
+        self.session_policies: list[BrowserUseSessionPolicy] = []
+        self.tool_policies: list[BrowserUseToolPolicy] = []
+
+    def import_google_llm_class(self):
+        class _FakeChatGoogle:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        return _FakeChatGoogle
+
+    def create_session(self, **kwargs):
+        self.create_session_calls += 1
+        self.session_policies.append(kwargs["session_policy"])
+        return SimpleNamespace(
+            session=self.created_session,
+            user_data_dir=r"C:\Temp\jarvis-browser-use-session",
+        )
+
+    def keep_session_alive(self, session):
+        self.keep_session_alive_calls += 1
+        assert session is self.created_session
+
+    async def cleanup_session(self, session, *, user_data_dir=None, expected_prefix="jarvis-browser-use-"):
+        del expected_prefix
+        self.cleanup_calls.append((session, user_data_dir))
+
+    def create_agent(self, **kwargs):
+        self.tool_policies.append(kwargs["tool_policy"])
+        return _FakeBrowserUseAgent()
 
 
 async def _run_backend_reuse_check() -> None:
@@ -330,6 +378,60 @@ async def _run_playwright_controller_error_falls_back_check() -> None:
         cls._shared_playwright_controller = original_controller
         agent._execute_with_browser_use = original_execute_browser_use
         agent._execute_with_playwright = original_execute_playwright
+
+
+async def _run_controller_summary_failure_is_not_swallowed_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_backend = cls._shared_backend
+    original_controller = getattr(cls, "_shared_playwright_controller", None)
+    original_execute_browser_use = agent._execute_with_browser_use
+    original_execute_playwright = agent._execute_with_playwright
+    original_formatter = browser_agent_module.format_page_context_response
+
+    controller = _FakePlaywrightController()
+
+    async def _unexpected_browser_use(task: str, close_when_done: bool):
+        del task, close_when_done
+        return {
+            "success": True,
+            "result": {"summary": "browser_use fallback should not run here."},
+            "error": None,
+            "complete": True,
+        }
+
+    async def _fail_playwright(
+        task: str,
+        bootstrap_error: str,
+        close_when_done: bool,
+        pre_extracted_url: str | None = None,
+    ):
+        del task, bootstrap_error, close_when_done, pre_extracted_url
+        raise AssertionError("legacy Playwright fallback should not run for formatter failures")
+
+    def _broken_formatter(task: str, context: PageContext) -> str:
+        del task, context
+        raise RuntimeError("controller summary formatting failed")
+
+    cls._shared_backend = None
+    cls._shared_playwright_controller = controller
+    agent._execute_with_browser_use = _unexpected_browser_use
+    agent._execute_with_playwright = _fail_playwright
+    browser_agent_module.format_page_context_response = _broken_formatter
+    try:
+        try:
+            await agent.execute("summarize https://example.com/docs")
+            raise AssertionError("Expected formatter failure to surface past BrowserAgent shell.")
+        except RuntimeError as exc:
+            assert str(exc) == "controller summary formatting failed", exc
+        assert controller.navigate_calls == ["https://example.com/docs"], controller.navigate_calls
+    finally:
+        cls._shared_backend = original_backend
+        cls._shared_playwright_controller = original_controller
+        agent._execute_with_browser_use = original_execute_browser_use
+        agent._execute_with_playwright = original_execute_playwright
+        browser_agent_module.format_page_context_response = original_formatter
 
 
 async def _run_controller_current_page_does_not_override_active_backend_check() -> None:
@@ -789,6 +891,206 @@ async def _run_playwright_page_summary_check() -> None:
         agent._open_first_duckduckgo_result = original_open_result
 
 
+async def _run_dependency_error_uses_shared_playwright_fallback_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_backend = cls._shared_backend
+    original_execute_browser_use = agent._execute_with_browser_use
+    original_execute_playwright = agent._execute_with_playwright
+    calls: list[str] = []
+
+    async def _fail_browser_use(task: str, close_when_done: bool):
+        del task, close_when_done
+        raise ModuleNotFoundError("No module named 'browser_use'")
+
+    async def _fake_playwright(
+        task: str,
+        bootstrap_error: str,
+        close_when_done: bool,
+        pre_extracted_url: str | None = None,
+    ):
+        del close_when_done
+        calls.append(f"playwright:{task}")
+        calls.append(f"bootstrap:{bootstrap_error}")
+        calls.append(f"url:{pre_extracted_url}")
+        return {
+            "success": True,
+            "result": {"summary": "Playwright fallback recovered the task."},
+            "error": None,
+            "complete": True,
+        }
+
+    cls._shared_backend = None
+    agent._execute_with_browser_use = _fail_browser_use
+    agent._execute_with_playwright = _fake_playwright
+    try:
+        result = await agent.execute("open https://example.com and submit the form")
+        assert result["success"], result
+        assert calls[0] == "playwright:open https://example.com and submit the form", calls
+        assert "No module named 'browser_use'" in calls[1], calls
+        assert calls[2] == "url:https://example.com", calls
+    finally:
+        cls._shared_backend = original_backend
+        agent._execute_with_browser_use = original_execute_browser_use
+        agent._execute_with_playwright = original_execute_playwright
+
+
+async def _run_browser_use_and_playwright_dual_failure_message_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_backend = cls._shared_backend
+    original_execute_browser_use = agent._execute_with_browser_use
+    original_execute_playwright = agent._execute_with_playwright
+
+    async def _fail_browser_use(task: str, close_when_done: bool):
+        del task, close_when_done
+        raise ImportError("Failed to import BrowserSession")
+
+    async def _fail_playwright(
+        task: str,
+        bootstrap_error: str,
+        close_when_done: bool,
+        pre_extracted_url: str | None = None,
+    ):
+        del task, bootstrap_error, close_when_done, pre_extracted_url
+        raise RuntimeError("playwright launch failed")
+
+    cls._shared_backend = None
+    agent._execute_with_browser_use = _fail_browser_use
+    agent._execute_with_playwright = _fail_playwright
+    try:
+        result = await agent.execute("open https://example.com and submit the form")
+        assert result["success"] is False, result
+        assert result["result"] is None, result
+        error = result["error"]
+        assert "Browser task failed in both browser_use and Playwright fallback." in error, error
+        assert "bootstrap_error=Failed to import BrowserSession" in error, error
+        assert "fallback_error=playwright launch failed" in error, error
+    finally:
+        cls._shared_backend = original_backend
+        agent._execute_with_browser_use = original_execute_browser_use
+        agent._execute_with_playwright = original_execute_playwright
+
+
+async def _run_browser_use_tool_policy_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_boundary = cls._browser_use_boundary
+    original_policy = cls._browser_use_tool_policy
+    original_resolution = cls._ensure_external_browser_use_resolution
+    original_get_session = agent._get_or_create_browser_use_session
+    original_close = cls._close_shared_resources
+
+    fake_boundary = _FakeBrowserUseBoundary()
+
+    async def _fake_get_session():
+        return object()
+
+    async def _fake_close_shared_resources(inner_cls):
+        del inner_cls
+        return None
+
+    cls._browser_use_boundary = fake_boundary
+    cls._browser_use_tool_policy = BrowserUseToolPolicy()
+    cls._ensure_external_browser_use_resolution = classmethod(lambda inner_cls: None)
+    agent._get_or_create_browser_use_session = _fake_get_session
+    cls._close_shared_resources = classmethod(_fake_close_shared_resources)
+    try:
+        result = await agent._execute_with_browser_use("open https://example.com", close_when_done=False)
+        assert result["success"], result
+        assert len(fake_boundary.tool_policies) == 1, fake_boundary.tool_policies
+        assert fake_boundary.tool_policies[0].excluded_actions == (
+            "write_file",
+            "replace_file",
+        ), fake_boundary.tool_policies[0]
+    finally:
+        cls._browser_use_boundary = original_boundary
+        cls._browser_use_tool_policy = original_policy
+        cls._ensure_external_browser_use_resolution = original_resolution
+        agent._get_or_create_browser_use_session = original_get_session
+        cls._close_shared_resources = original_close
+
+
+async def _run_browser_use_session_policy_check() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_boundary = cls._browser_use_boundary
+    original_policy = cls._browser_use_session_policy
+    original_resolution = cls._ensure_external_browser_use_resolution
+    original_backend = cls._shared_backend
+    original_session = cls._shared_browser_use_session
+    original_user_data_dir = cls._shared_browser_use_user_data_dir
+
+    fake_boundary = _FakeBrowserUseBoundary()
+
+    cls._browser_use_boundary = fake_boundary
+    cls._browser_use_session_policy = BrowserUseSessionPolicy(
+        headless=False,
+        keep_alive=True,
+        temp_prefix="jarvis-browser-use-test-",
+    )
+    cls._ensure_external_browser_use_resolution = classmethod(lambda inner_cls: None)
+    cls._shared_backend = None
+    cls._shared_browser_use_session = None
+    cls._shared_browser_use_user_data_dir = None
+    try:
+        session = await agent._get_or_create_browser_use_session()
+        reused_session = await agent._get_or_create_browser_use_session()
+        assert reused_session is session
+        assert session is cls._shared_browser_use_session
+        assert cls._browser_use_lifecycle.session is session
+        assert cls._browser_use_lifecycle.user_data_dir == r"C:\Temp\jarvis-browser-use-session"
+        assert fake_boundary.create_session_calls == 1, fake_boundary.create_session_calls
+        assert fake_boundary.keep_session_alive_calls == 1, fake_boundary.keep_session_alive_calls
+        assert len(fake_boundary.session_policies) == 1, fake_boundary.session_policies
+        assert fake_boundary.session_policies[0].temp_prefix == "jarvis-browser-use-test-"
+        assert fake_boundary.session_policies[0].keep_alive is True
+        assert fake_boundary.session_policies[0].headless is False
+    finally:
+        cls._browser_use_boundary = original_boundary
+        cls._browser_use_session_policy = original_policy
+        cls._ensure_external_browser_use_resolution = original_resolution
+        cls._shared_backend = original_backend
+        cls._shared_browser_use_session = original_session
+        cls._shared_browser_use_user_data_dir = original_user_data_dir
+
+
+async def _run_stop_skips_double_cleanup_for_shared_browser_use_session() -> None:
+    agent = BrowserAgent(model_name="test-model")
+    cls = BrowserAgent
+
+    original_boundary = cls._browser_use_boundary
+    original_close = cls._close_shared_resources
+    original_shared_session = cls._shared_browser_use_session
+
+    fake_boundary = _FakeBrowserUseBoundary()
+    shared_session = object()
+
+    async def _fake_close_shared_resources(inner_cls):
+        del inner_cls
+        await fake_boundary.cleanup_session(shared_session, user_data_dir=r"C:\Temp\jarvis-browser-use-session")
+        cls._shared_browser_use_session = None
+
+    cls._browser_use_boundary = fake_boundary
+    cls._close_shared_resources = classmethod(_fake_close_shared_resources)
+    cls._shared_browser_use_session = shared_session
+    agent._session = shared_session
+    try:
+        await agent.stop()
+        assert fake_boundary.cleanup_calls == [
+            (shared_session, r"C:\Temp\jarvis-browser-use-session")
+        ], fake_boundary.cleanup_calls
+        assert agent._session is None
+    finally:
+        cls._browser_use_boundary = original_boundary
+        cls._close_shared_resources = original_close
+        cls._shared_browser_use_session = original_shared_session
+
+
 def run_checks() -> None:
     assert BrowserAgent._extract_direct_url("Go to https://slac.stanford.edu please") == "https://slac.stanford.edu"
     assert BrowserAgent._extract_direct_url("open stanford.edu") == "https://stanford.edu"
@@ -846,6 +1148,7 @@ def run_checks() -> None:
     asyncio.run(_run_playwright_controller_direct_summary_check())
     asyncio.run(_run_playwright_controller_skips_query_summary_check())
     asyncio.run(_run_playwright_controller_error_falls_back_check())
+    asyncio.run(_run_controller_summary_failure_is_not_swallowed_check())
     asyncio.run(_run_controller_current_page_does_not_override_active_backend_check())
     asyncio.run(_run_controller_current_page_requires_open_page_check())
     asyncio.run(_run_playwright_mcp_snapshot_route_check())
@@ -855,6 +1158,11 @@ def run_checks() -> None:
     asyncio.run(_run_no_search_when_reusing_page_check())
     asyncio.run(_run_playwright_interaction_is_partial_check())
     asyncio.run(_run_playwright_page_summary_check())
+    asyncio.run(_run_dependency_error_uses_shared_playwright_fallback_check())
+    asyncio.run(_run_browser_use_and_playwright_dual_failure_message_check())
+    asyncio.run(_run_browser_use_session_policy_check())
+    asyncio.run(_run_stop_skips_double_cleanup_for_shared_browser_use_session())
+    asyncio.run(_run_browser_use_tool_policy_check())
 
 
 if __name__ == "__main__":

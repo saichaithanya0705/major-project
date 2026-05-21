@@ -12,8 +12,14 @@ import subprocess
 import tempfile
 import time
 import uuid
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, TypeVar
 
+from core.async_process_lifecycle import (
+    SubprocessOperationResult as ForegroundOperationResult,
+    await_subprocess_operation,
+)
+
+T = TypeVar("T")
 
 def register_foreground_process(
     *,
@@ -143,6 +149,23 @@ def terminate_process_tree_sync(metadata: dict[str, Any]) -> None:
             os.kill(pid, signal.SIGTERM)
     except Exception:
         pass
+
+
+async def await_foreground_process_operation(
+    *,
+    process: asyncio.subprocess.Process,
+    timeout: float,
+    operation: Awaitable[T],
+    cleanup: Callable[[], Awaitable[object]] | None = None,
+    terminate_process_tree: Callable[[dict[str, Any]], None] = terminate_process_tree_sync,
+) -> ForegroundOperationResult[T]:
+    return await await_subprocess_operation(
+        process=process,
+        timeout=timeout,
+        operation=operation,
+        cleanup=cleanup,
+        terminate=lambda: terminate_process_tree({"pid": process.pid}),
+    )
 
 
 async def start_background_process(

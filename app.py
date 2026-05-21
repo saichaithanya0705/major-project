@@ -1,15 +1,16 @@
 import os
 import asyncio
 import time
-import shutil
-import subprocess
 from pathlib import Path
-from PIL import ImageGrab
-from core.artifact_lifecycle import cleanup_runtime_artifacts
+from core import app_runtime_lifecycle
+from core.process_lifecycle import (
+    ManagedProcessHandle,
+    ProcessSupervisor,
+    summarize_stop_results,
+)
 from core.settings import (
     ensure_auth_token,
     get_model_configs,
-    get_screen_size,
     set_host_and_port,
     set_screen_size,
 )
@@ -26,67 +27,35 @@ from integrations.audio import transcribe_audio_bytes
 from ui.server import VisualizationServer
 
 
+_DEFAULT_PROCESS_SUPERVISOR = ProcessSupervisor()
+
+
 def run_runtime_cleanup(project_root: str | os.PathLike[str]) -> None:
-    try:
-        report = cleanup_runtime_artifacts(
-            project_root=Path(project_root),
-            active_background_logs=CLIAgent.active_background_log_paths(),
-        )
-    except Exception as exc:
-        print(f"[Cleanup] Skipped runtime cleanup: {type(exc).__name__}: {exc}")
-        return
-    if report.deleted or report.rotated:
-        print(
-            f"[Cleanup] Removed {len(report.deleted)} stale artifact(s); "
-            f"rotated {len(report.rotated)} log file(s)."
-        )
-    if report.errors:
-        print(f"[Cleanup] {len(report.errors)} cleanup error(s) skipped.")
-
-
-def maybe_launch_electron_ui(project_root: str):
-    auto_launch = os.getenv("JARVIS_AUTO_LAUNCH_ELECTRON", "1").strip().lower()
-    if auto_launch in {"0", "false", "no", "off"}:
-        return
-
-    ui_root = os.path.join(project_root, "ui")
-    if not os.path.isdir(ui_root):
-        print(f"Electron auto-launch skipped (missing UI directory): {ui_root}")
-        return
-
-    npm_command = "npm.cmd" if os.name == "nt" else "npm"
-    npm_path = shutil.which(npm_command) or shutil.which("npm")
-    if not npm_path:
-        print("Electron auto-launch skipped (npm not found on PATH).")
-        return
-
-    env = os.environ.copy()
-    electron_binary = os.path.join(
-        ui_root,
-        "node_modules",
-        "electron",
-        "dist",
-        "electron.exe" if os.name == "nt" else "electron",
+    outcome = app_runtime_lifecycle.run_runtime_cleanup(
+        project_root,
+        active_background_logs_provider=CLIAgent.active_background_log_paths,
     )
-    if os.path.exists(electron_binary):
-        env.setdefault("JARVIS_ELECTRON_BINARY", electron_binary)
+    for line in outcome.log_lines():
+        print(line)
 
-    try:
-        kwargs = {
-            "cwd": ui_root,
-            "env": env,
-        }
-        if os.name == "nt":
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
-        subprocess.Popen([npm_path, "run", "dev"], **kwargs)
-        print("Launching Electron UI...")
-    except Exception as exc:
-        print(f"Electron auto-launch failed: {type(exc).__name__}: {exc}")
+def maybe_launch_electron_ui(
+    project_root: str,
+    *,
+    supervisor: ProcessSupervisor | None = None,
+) -> ManagedProcessHandle | None:
+    outcome = app_runtime_lifecycle.launch_electron_ui(
+        project_root,
+        supervisor=supervisor or _DEFAULT_PROCESS_SUPERVISOR,
+    )
+    if outcome.message:
+        print(outcome.message)
+    return outcome.handle
 
 
 async def main():
     project_root = Path(__file__).resolve().parent
+    process_supervisor = ProcessSupervisor()
     run_runtime_cleanup(project_root)
 
     # Figure out open port and set it in settings.json
@@ -94,23 +63,16 @@ async def main():
     host, port = set_host_and_port(settings_path)
     auth_token = ensure_auth_token(settings_path)
 
-    # Figure out dimensions of the user's screen and set it in settings.json.
-    # Fallback to configured size if capture is unavailable at startup.
-    try:
-        screen_width, screen_height = await asyncio.wait_for(
-            asyncio.to_thread(lambda: ImageGrab.grab().size),
-            timeout=2.0,
-        )
-    except Exception as exc:
-        try:
-            screen_width, screen_height = get_screen_size(settings_path)
-        except Exception:
-            screen_width, screen_height = (1920, 1080)
-        print(
-            f"Screen capture unavailable at startup ({type(exc).__name__}: {exc}). "
-            f"Using configured size {screen_width}x{screen_height}."
-        )
-    set_screen_size(screen_width, screen_height)
+    startup_screen_size = await app_runtime_lifecycle.resolve_startup_screen_size(
+        settings_path,
+    )
+    if startup_screen_size.warning:
+        print(startup_screen_size.warning)
+    set_screen_size(
+        startup_screen_size.width,
+        startup_screen_size.height,
+        settings_path,
+    )
 
     # Retrieve model configs from settings
     rapid_response_model, jarvis_model = get_model_configs(settings_path)
@@ -144,11 +106,18 @@ async def main():
     async def _run_overlay_task(text: str, session_id: str | None = None):
         nonlocal current_task
         try:
-            await call_gemini(text, rapid_response_model, jarvis_model, session_id=session_id)
-        except asyncio.CancelledError:
-            print("Active task cancelled.")
-        except Exception as exc:
-            print(f"Active task failed: {exc}")
+            outcome = await app_runtime_lifecycle.execute_runtime_task(
+                lambda: call_gemini(
+                    text,
+                    rapid_response_model,
+                    jarvis_model,
+                    session_id=session_id,
+                )
+            )
+            if outcome.status == "cancelled":
+                print("Active task cancelled.")
+            elif outcome.status == "failed":
+                print(f"Active task failed: {outcome.error}")
         finally:
             async with task_lock:
                 if current_task is asyncio.current_task():
@@ -189,24 +158,28 @@ async def main():
             mime_type=mime_type,
         )
 
-    server = VisualizationServer(
-        host=host,
-        port=port,
-        auth_token=auth_token,
-        on_overlay_input=handle_overlay_input,
-        on_capture_screenshot=store_screenshot,
-        on_stop_all=stop_all,
-        on_clear_annotations=clear_annotation_actions,
-        on_transcribe_audio=handle_voice_transcription,
-    )
-    await server.start()
-    print(f"Visualization server listening at ws://{host}:{port}")
-    maybe_launch_electron_ui(str(project_root))
-    print("Waiting for overlay client connection...")
-    await server.wait_for_client()
-    print("Overlay client connected.")
+    try:
+        server = VisualizationServer(
+            host=host,
+            port=port,
+            auth_token=auth_token,
+            on_overlay_input=handle_overlay_input,
+            on_capture_screenshot=store_screenshot,
+            on_stop_all=stop_all,
+            on_clear_annotations=clear_annotation_actions,
+            on_transcribe_audio=handle_voice_transcription,
+        )
+        await server.start()
+        print(f"Visualization server listening at ws://{host}:{port}")
+        maybe_launch_electron_ui(str(project_root), supervisor=process_supervisor)
+        print("Waiting for overlay client connection...")
+        await server.wait_for_client()
+        print("Overlay client connected.")
 
-    await server.wait_forever()
+        await server.wait_forever()
+    finally:
+        for message in summarize_stop_results(process_supervisor.stop_all()):
+            print(f"[ProcessCleanup] {message}")
 
 
 if __name__ == '__main__':

@@ -220,6 +220,7 @@ class SingleCallVisionEngine:
             maximum=100,
         )
         self._provider_call_count = 0
+        self._run_deadline_monotonic: float | None = None
         self.debug_stop_after_first_goto = _is_truthy_env(
             os.getenv("CUA_VISION_DEBUG_STOP_AFTER_FIRST_GOTO", "0")
         )
@@ -227,6 +228,7 @@ class SingleCallVisionEngine:
     async def run(self, task: str, initial_screenshot=None):
         """Execute the task until completion or unrecoverable failure."""
         started_at = time.monotonic()
+        self._run_deadline_monotonic = started_at + self._max_duration_seconds
         step_count = 0
         next_step_screenshot = initial_screenshot
         try:
@@ -237,7 +239,7 @@ class SingleCallVisionEngine:
                     raise RuntimeError(
                         f"CUA Vision step budget exceeded ({self._max_steps} steps)."
                     )
-                if (time.monotonic() - started_at) > self._max_duration_seconds:
+                if not self._has_remaining_run_budget():
                     raise RuntimeError(
                         f"CUA Vision time budget exceeded ({self._max_duration_seconds:.1f}s)."
                     )
@@ -299,6 +301,7 @@ class SingleCallVisionEngine:
                 critic=verdict,
             )
         finally:
+            self._run_deadline_monotonic = None
             await self._hide_statuses(delay_ms=400)
 
     async def _generate_step_response(self, task: str, screenshot=None):
@@ -397,6 +400,9 @@ class SingleCallVisionEngine:
                 continue
             for model_name in provider["models"]:
                 self._raise_if_stopped()
+                provider_timeout = self._timeout_within_run_budget(
+                    float(provider["timeout"])
+                )
                 if self._provider_call_count >= self._max_provider_calls:
                     raise OpenRouterFallbackError(
                         f"Vision provider call budget exceeded ({self._max_provider_calls})."
@@ -414,7 +420,7 @@ class SingleCallVisionEngine:
                         openrouter_url=provider["url"],
                         openrouter_site_url=provider["site_url"],
                         openrouter_site_name=provider["site_name"],
-                        openrouter_timeout_seconds=provider["timeout"],
+                        openrouter_timeout_seconds=provider_timeout,
                         model_name=model_name,
                         system_prompt=system_prompt,
                         user_prompt=model_prompt,
@@ -444,6 +450,25 @@ class SingleCallVisionEngine:
                 f"{', '.join(attempts)}. Last fallback error: {errors[-1]}"
             )
         raise OpenRouterFallbackError("Vision provider fallback did not run.")
+
+    def _has_remaining_run_budget(self) -> bool:
+        deadline = self._run_deadline_monotonic
+        if deadline is None:
+            return True
+        return time.monotonic() < deadline
+
+    def _timeout_within_run_budget(self, configured_timeout_seconds: float) -> float:
+        timeout = max(0.001, float(configured_timeout_seconds))
+        deadline = self._run_deadline_monotonic
+        if deadline is None:
+            return timeout
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(
+                f"CUA Vision time budget exceeded ({self._max_duration_seconds:.1f}s)."
+            )
+        return max(0.001, min(timeout, remaining))
 
     async def _generate_openrouter_step_response(self, model_prompt: str, screenshot):
         """Backward-compatible wrapper for the provider-based vision call."""

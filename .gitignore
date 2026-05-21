@@ -11,3 +11,7 @@ ui/out/
 
 # Demo Suite
 demo/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

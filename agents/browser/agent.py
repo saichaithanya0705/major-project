@@ -8,19 +8,35 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import importlib.util
 import os
 import re
 import sys
 import tempfile
-import shutil
 from pathlib import Path
 from urllib.parse import quote_plus
 from typing import Any, Optional
 
 from agents.browser.controller import PlaywrightBrowserController
+from agents.browser.browser_use_boundary import (
+    BrowserUseBoundary,
+    BrowserUseCleanupError,
+    BrowserUseDependencyError,
+    BrowserUseLifecycle,
+    BrowserUseLifecycleError,
+    BrowserUseLifecycleFailure,
+    BrowserUseSessionPolicy,
+    BrowserUseToolPolicy,
+)
 from agents.browser.mcp_client import PlaywrightMcpClient
 from agents.browser.page_context import format_page_context_response
+from agents.browser.playwright_boundary import (
+    PlaywrightBoundary,
+    PlaywrightCleanupError,
+    PlaywrightMcpSnapshotError,
+    PlaywrightPageContextError,
+    PlaywrightLifecycleFailure,
+    PlaywrightRuntimeState,
+)
 from agents.browser.task_policy import (
     build_fallback_summary,
     extract_available_file_paths_from_task,
@@ -49,8 +65,6 @@ from models.openrouter_fallback import (
     is_gemini_quota_error,
 )
 
-_RETAINED_BROWSER_HANDLES: list[dict[str, Any]] = []
-
 
 class BrowserAgent:
     """
@@ -70,6 +84,17 @@ class BrowserAgent:
     _shared_playwright_controller: Any = None
     _shared_playwright_mcp_client: Any = None
     _cleanup_registered: bool = False
+    _browser_use_boundary: BrowserUseBoundary = BrowserUseBoundary()
+    _browser_use_session_policy: BrowserUseSessionPolicy = BrowserUseSessionPolicy()
+    _browser_use_tool_policy: BrowserUseToolPolicy = BrowserUseToolPolicy()
+    _browser_use_lifecycle: BrowserUseLifecycle = BrowserUseLifecycle()
+    _playwright_boundary: PlaywrightBoundary = PlaywrightBoundary()
+    _playwright_runtime: PlaywrightRuntimeState = PlaywrightRuntimeState()
+    _last_browser_use_stop_failures: tuple[BrowserUseLifecycleFailure, ...] = ()
+    _last_browser_use_cleanup_failures: tuple[BrowserUseLifecycleFailure, ...] = ()
+    _last_playwright_cleanup_failures: tuple[PlaywrightLifecycleFailure, ...] = ()
+    # Legacy mirrors kept for existing private callers/tests while lifecycle
+    # ownership lives in BrowserUseLifecycle.
     _browser_use_resolution_checked: bool = False
     _active_browser_use_agents: set[Any] = set()
     _browser_use_stop_requested: bool = False
@@ -90,22 +115,88 @@ class BrowserAgent:
         cls._cleanup_registered = True
 
     @classmethod
+    def _hydrate_browser_use_lifecycle_from_legacy_state(cls) -> BrowserUseLifecycle:
+        lifecycle = cls._browser_use_lifecycle
+        lifecycle.session = cls._shared_browser_use_session
+        lifecycle.user_data_dir = cls._shared_browser_use_user_data_dir
+        lifecycle.last_stop_failures = tuple(cls._last_browser_use_stop_failures)
+        lifecycle.last_cleanup_failures = tuple(cls._last_browser_use_cleanup_failures)
+        lifecycle.resolution_checked = bool(
+            lifecycle.resolution_checked or cls._browser_use_resolution_checked
+        )
+        return lifecycle
+
+    @classmethod
+    def _sync_browser_use_legacy_state(cls) -> None:
+        lifecycle = cls._browser_use_lifecycle
+        cls._shared_browser_use_session = lifecycle.session
+        cls._shared_browser_use_user_data_dir = lifecycle.user_data_dir
+        cls._last_browser_use_stop_failures = tuple(lifecycle.last_stop_failures)
+        cls._last_browser_use_cleanup_failures = tuple(lifecycle.last_cleanup_failures)
+        cls._browser_use_resolution_checked = bool(
+            lifecycle.resolution_checked or cls._browser_use_boundary.resolution_checked
+        )
+        cls._active_browser_use_agents = lifecycle.active_agents
+        cls._browser_use_stop_requested = lifecycle.stop_requested
+        interrupted = lifecycle.interrupted_work
+        cls._interrupted_browser_use_state = interrupted.state if interrupted else None
+        cls._interrupted_browser_use_task = interrupted.task if interrupted else ""
+        cls._interrupted_browser_use_summary = interrupted.summary if interrupted else ""
+
+    @classmethod
+    def _hydrate_playwright_runtime_from_legacy_state(cls) -> PlaywrightRuntimeState:
+        state = cls._playwright_runtime
+        state.controller = cls._shared_playwright_controller
+        state.mcp_client = cls._shared_playwright_mcp_client
+        state.playwright = cls._shared_playwright
+        state.browser = cls._shared_playwright_browser
+        state.context = cls._shared_playwright_context
+        state.page = cls._shared_playwright_page
+        state.user_data_dir = cls._shared_playwright_home
+        state.headless = cls._shared_playwright_headless
+        state.last_cleanup_failures = tuple(cls._last_playwright_cleanup_failures)
+        return state
+
+    @classmethod
+    def _sync_playwright_legacy_state(cls) -> None:
+        state = cls._playwright_runtime
+        cls._shared_playwright_controller = state.controller
+        cls._shared_playwright_mcp_client = state.mcp_client
+        cls._shared_playwright = state.playwright
+        cls._shared_playwright_browser = state.browser
+        cls._shared_playwright_context = state.context
+        cls._shared_playwright_page = state.page
+        cls._shared_playwright_home = state.user_data_dir
+        cls._shared_playwright_headless = state.headless
+        cls._last_playwright_cleanup_failures = tuple(state.last_cleanup_failures)
+
+    @classmethod
     def _cleanup_shared_temp_dirs_sync(cls) -> None:
-        temp_root = Path(tempfile.gettempdir()).resolve()
-        for attr_name, expected_prefix in (
-            ("_shared_browser_use_user_data_dir", "jarvis-browser-use-"),
-            ("_shared_playwright_home", "jarvis-playwright-home-"),
-        ):
-            raw_path = getattr(cls, attr_name, None)
-            if not raw_path:
-                continue
+        lifecycle = cls._hydrate_browser_use_lifecycle_from_legacy_state()
+        runtime = cls._hydrate_playwright_runtime_from_legacy_state()
+
+        if lifecycle.user_data_dir:
             try:
-                path = Path(raw_path).resolve()
-                if cls._is_subpath(path, temp_root) and path.name.startswith(expected_prefix):
-                    shutil.rmtree(path, ignore_errors=True)
+                cls._browser_use_boundary.cleanup_temp_dir(
+                    lifecycle.user_data_dir,
+                    expected_prefix="jarvis-browser-use-",
+                )
+            except BrowserUseCleanupError:
+                pass
+            lifecycle.user_data_dir = None
+
+        if runtime.user_data_dir:
+            try:
+                cls._playwright_boundary.cleanup_temp_dir(
+                    runtime.user_data_dir,
+                    expected_prefix="jarvis-playwright-home-",
+                )
             except Exception:
                 pass
-            setattr(cls, attr_name, None)
+            runtime.user_data_dir = None
+
+        cls._sync_browser_use_legacy_state()
+        cls._sync_playwright_legacy_state()
 
     @staticmethod
     def _is_subpath(path: Path, root: Path) -> bool:
@@ -117,94 +208,55 @@ class BrowserAgent:
 
     @classmethod
     def _ensure_external_browser_use_resolution(cls) -> None:
-        """
-        Ensure runtime imports resolve to the installed third-party browser_use
-        package and never to the vendored in-repo fork.
-        """
-        if cls._browser_use_resolution_checked:
-            return
-
-        spec = importlib.util.find_spec("browser_use")
-        if spec is None or not spec.origin:
-            raise RuntimeError(
-                "browser_use is not installed. Install dependencies so BrowserAgent "
-                "can use the canonical external browser_use package."
-            )
-
-        resolved_origin = Path(spec.origin).resolve()
-        vendored_root = (Path(__file__).resolve().parent / "browser_use").resolve()
-        if cls._is_subpath(resolved_origin, vendored_root):
-            raise RuntimeError(
-                "Refusing to import vendored browser_use from this repository. "
-                "Use the installed browser_use dependency instead."
-            )
-
-        cls._browser_use_resolution_checked = True
+        lifecycle = cls._hydrate_browser_use_lifecycle_from_legacy_state()
+        cls._browser_use_boundary.ensure_external_package()
+        lifecycle.remember_resolution(cls._browser_use_boundary.resolution_checked)
+        cls._sync_browser_use_legacy_state()
 
     @classmethod
     def clear_stop_request(cls) -> None:
-        cls._browser_use_stop_requested = False
+        cls._browser_use_lifecycle.clear_stop_request()
+        cls._browser_use_stop_requested = cls._browser_use_lifecycle.stop_requested
 
     @classmethod
     def _register_active_browser_use_agent(cls, agent: Any) -> None:
-        cls._active_browser_use_agents.add(agent)
+        cls._browser_use_lifecycle.register_active_agent(agent)
+        cls._active_browser_use_agents = cls._browser_use_lifecycle.active_agents
 
     @classmethod
     def _unregister_active_browser_use_agent(cls, agent: Any) -> None:
-        cls._active_browser_use_agents.discard(agent)
+        cls._browser_use_lifecycle.unregister_active_agent(agent)
+        cls._active_browser_use_agents = cls._browser_use_lifecycle.active_agents
 
     @classmethod
     def request_stop_all(cls) -> int:
-        cls._browser_use_stop_requested = True
-        stopped = 0
-        for agent in list(cls._active_browser_use_agents):
-            stop = getattr(agent, "stop", None)
-            if not callable(stop):
-                continue
-            try:
-                stop()
-                stopped += 1
-            except Exception:
-                pass
-        return stopped
+        result = cls._browser_use_lifecycle.request_stop_all()
+        cls._last_browser_use_stop_failures = result.failures
+        cls._active_browser_use_agents = cls._browser_use_lifecycle.active_agents
+        cls._browser_use_stop_requested = cls._browser_use_lifecycle.stop_requested
+        return result.stopped
 
     @classmethod
     async def _should_stop_browser_use_agent(cls) -> bool:
-        return cls._browser_use_stop_requested
+        should_stop = await cls._browser_use_lifecycle.should_stop_agent()
+        cls._browser_use_stop_requested = cls._browser_use_lifecycle.stop_requested
+        return should_stop
 
     @staticmethod
     def _normalize_resume_text(value: str) -> str:
-        return " ".join(str(value or "").split()).strip().lower()
+        return BrowserUseLifecycle.normalize_resume_text(value)
 
     @classmethod
     def _is_resume_request(cls, task: str) -> bool:
-        lowered = cls._normalize_resume_text(task)
-        if not lowered:
-            return False
-        return any(
-            marker in lowered
-            for marker in (
-                "continue",
-                "resume",
-                "keep going",
-                "carry on",
-                "pick up where",
-                "where you left off",
-                "from where you left",
-            )
-        )
+        return cls._browser_use_lifecycle.is_resume_request(task)
 
     @classmethod
     def has_interrupted_work(cls) -> bool:
-        return cls._interrupted_browser_use_state is not None and bool(
-            cls._interrupted_browser_use_task.strip()
-        )
+        return cls._browser_use_lifecycle.has_interrupted_work()
 
     @classmethod
     def resolve_resume_task(cls, user_prompt: str) -> str | None:
-        if not cls.has_interrupted_work() or not cls._is_resume_request(user_prompt):
-            return None
-        return cls._interrupted_browser_use_task
+        return cls._browser_use_lifecycle.resolve_resume_task(user_prompt)
 
     @classmethod
     def _remember_interrupted_browser_use_agent(
@@ -214,105 +266,84 @@ class BrowserAgent:
         task: str,
         summary: str = "",
     ) -> None:
-        state = getattr(agent, "state", None)
-        if state is None:
+        if not cls._browser_use_lifecycle.remember_interrupted_agent(
+            agent,
+            task=task,
+            summary=summary,
+        ):
             return
-        cls._interrupted_browser_use_state = state
-        cls._interrupted_browser_use_task = str(task or "").strip()
-        cls._interrupted_browser_use_summary = str(summary or "").strip()
+        interrupted = cls._browser_use_lifecycle.interrupted_work
+        cls._interrupted_browser_use_state = interrupted.state if interrupted else None
+        cls._interrupted_browser_use_task = interrupted.task if interrupted else ""
+        cls._interrupted_browser_use_summary = interrupted.summary if interrupted else ""
 
     @classmethod
     def _clear_interrupted_browser_use_agent(cls, task: str = "") -> None:
-        if task and cls._normalize_resume_text(task) != cls._normalize_resume_text(cls._interrupted_browser_use_task):
-            return
-        cls._interrupted_browser_use_state = None
-        cls._interrupted_browser_use_task = ""
-        cls._interrupted_browser_use_summary = ""
+        cls._browser_use_lifecycle.clear_interrupted_agent(task)
+        interrupted = cls._browser_use_lifecycle.interrupted_work
+        cls._interrupted_browser_use_state = interrupted.state if interrupted else None
+        cls._interrupted_browser_use_task = interrupted.task if interrupted else ""
+        cls._interrupted_browser_use_summary = interrupted.summary if interrupted else ""
 
     @classmethod
     def _consume_resume_state_for_task(cls, task: str) -> Any:
-        if not cls.has_interrupted_work():
-            return None
-
-        normalized_task = cls._normalize_resume_text(task)
-        normalized_interrupted = cls._normalize_resume_text(cls._interrupted_browser_use_task)
-        if normalized_task != normalized_interrupted and not cls._is_resume_request(task):
-            return None
-
-        state = cls._interrupted_browser_use_state
-        for attr, value in (
-            ("paused", False),
-            ("stopped", False),
-            ("follow_up_task", True),
-        ):
-            try:
-                setattr(state, attr, value)
-            except Exception:
-                pass
-        return state
+        return cls._browser_use_lifecycle.consume_resume_state_for_task(task)
 
     @classmethod
     async def _close_shared_resources(cls) -> None:
+        playwright_failures: list[PlaywrightLifecycleFailure] = []
+        browser_use_cleanup_error: BrowserUseCleanupError | None = None
+
         controller = cls._shared_playwright_controller
         cls._shared_playwright_controller = None
         if controller is not None:
-            try:
-                close_result = controller.close()
-                if hasattr(close_result, "__await__"):
-                    await close_result
-            except Exception:
-                pass
+            playwright_failures.extend(
+                await cls._playwright_boundary.close_resource(
+                    controller,
+                    operation="controller.close",
+                    method_name="close",
+                )
+            )
 
         mcp_client = cls._shared_playwright_mcp_client
         cls._shared_playwright_mcp_client = None
         if mcp_client is not None:
-            try:
-                close_result = mcp_client.close()
-                if hasattr(close_result, "__await__"):
-                    await close_result
-            except Exception:
-                pass
+            playwright_failures.extend(
+                await cls._playwright_boundary.close_resource(
+                    mcp_client,
+                    operation="mcp_client.close",
+                    method_name="close",
+                )
+            )
 
         if cls._shared_backend == "browser_use":
             session = cls._shared_browser_use_session
-            if session is not None:
-                try:
-                    await session.kill()
-                except Exception:
-                    pass
-            if cls._shared_browser_use_user_data_dir:
-                try:
-                    shutil.rmtree(cls._shared_browser_use_user_data_dir, ignore_errors=True)
-                except Exception:
-                    pass
+            user_data_dir = cls._shared_browser_use_user_data_dir
             cls._shared_browser_use_session = None
             cls._shared_browser_use_user_data_dir = None
+            try:
+                await cls._browser_use_boundary.cleanup_session(
+                    session,
+                    user_data_dir=user_data_dir,
+                )
+                cls._last_browser_use_cleanup_failures = ()
+            except BrowserUseCleanupError as exc:
+                cls._last_browser_use_cleanup_failures = exc.failures
+                browser_use_cleanup_error = exc
 
         elif cls._shared_backend == "playwright":
             context = cls._shared_playwright_context
             browser = cls._shared_playwright_browser
             playwright = cls._shared_playwright
-
-            if context is not None:
-                try:
-                    await context.close()
-                except Exception:
-                    pass
-            if browser is not None:
-                try:
-                    await browser.close()
-                except Exception:
-                    pass
-            if playwright is not None:
-                try:
-                    await playwright.stop()
-                except Exception:
-                    pass
-            if cls._shared_playwright_home:
-                try:
-                    shutil.rmtree(cls._shared_playwright_home, ignore_errors=True)
-                except Exception:
-                    pass
+            playwright_home = cls._shared_playwright_home
+            playwright_failures.extend(
+                await cls._playwright_boundary.cleanup_resources(
+                    context=context,
+                    browser=browser,
+                    playwright=playwright,
+                    user_data_dir=playwright_home,
+                )
+            )
 
             cls._shared_playwright = None
             cls._shared_playwright_browser = None
@@ -322,6 +353,12 @@ class BrowserAgent:
             cls._shared_playwright_headless = False
 
         cls._shared_backend = None
+        if playwright_failures:
+            cls._last_playwright_cleanup_failures = tuple(playwright_failures)
+            raise PlaywrightCleanupError(tuple(playwright_failures))
+        cls._last_playwright_cleanup_failures = ()
+        if browser_use_cleanup_error is not None:
+            raise browser_use_cleanup_error
 
     @classmethod
     def _get_or_create_playwright_controller(cls) -> Any:
@@ -360,30 +397,23 @@ class BrowserAgent:
 
     async def _get_or_create_browser_use_session(self):
         type(self)._ensure_external_browser_use_resolution()
-        from browser_use.browser import BrowserProfile, BrowserSession
 
         cls = type(self)
+        lifecycle = cls._hydrate_browser_use_lifecycle_from_legacy_state()
         if cls._shared_backend == "playwright":
             raise RuntimeError("Shared browser backend is already Playwright.")
 
-        if cls._shared_browser_use_session is not None:
-            # Ensure existing reused session always stays alive across tasks.
-            try:
-                cls._shared_browser_use_session.browser_profile.keep_alive = True
-            except Exception:
-                pass
-            return cls._shared_browser_use_session
+        existing_session = lifecycle.reuse_session(cls._browser_use_boundary)
+        if existing_session is not None:
+            cls._sync_browser_use_legacy_state()
+            return existing_session
 
-        user_data_dir = tempfile.mkdtemp(prefix="jarvis-browser-use-")
-        profile = BrowserProfile(
-            headless=False,
-            user_data_dir=user_data_dir,
-            keep_alive=True,
+        handle = cls._browser_use_boundary.create_session(
+            session_policy=cls._browser_use_session_policy,
         )
-        session = BrowserSession(browser_profile=profile)
         cls._shared_backend = "browser_use"
-        cls._shared_browser_use_session = session
-        cls._shared_browser_use_user_data_dir = user_data_dir
+        session = lifecycle.remember_session(handle)
+        cls._sync_browser_use_legacy_state()
         print("[Browser Agent] Created persistent browser-use session.")
         return session
 
@@ -459,7 +489,10 @@ class BrowserAgent:
         # Once a backend is chosen, keep using it so all browser actions stay in
         # the same persistent browser session.
         if cls._shared_backend == "browser_use":
-            return await self._execute_with_browser_use(task, close_when_done=close_when_done)
+            try:
+                return await self._execute_with_browser_use(task, close_when_done=close_when_done)
+            except (BrowserUseDependencyError, BrowserUseLifecycleError) as exc:
+                return {"success": False, "result": None, "error": str(exc)}
         if cls._shared_backend == "playwright":
             return await self._execute_with_playwright(
                 task,
@@ -481,28 +514,64 @@ class BrowserAgent:
         try:
             result = await self._execute_with_browser_use(task, close_when_done=close_when_done)
             return result
+        except BrowserUseDependencyError as exc:
+            return await self._execute_playwright_fallback_after_browser_use_failure(
+                task,
+                bootstrap_error=exc,
+                close_when_done=close_when_done,
+                pre_extracted_url=original_direct_url,
+                log_prefix="[Browser Agent][fallback] browser_use dependency unavailable",
+            )
+        except BrowserUseLifecycleError as exc:
+            return {"success": False, "result": None, "error": str(exc)}
         except Exception as exc:
             if not self._should_fallback_to_playwright(exc):
                 return {"success": False, "result": None, "error": str(exc)}
 
-            print(f"[Browser Agent][fallback] browser_use unavailable: {exc}")
-            try:
-                result = await self._execute_with_playwright(
-                    task,
-                    bootstrap_error=str(exc),
-                    close_when_done=close_when_done,
-                    pre_extracted_url=original_direct_url,
-                )
-                return result
-            except Exception as fallback_exc:
-                return {
-                    "success": False,
-                    "result": None,
-                    "error": (
-                        "Browser task failed in both browser_use and Playwright fallback. "
-                        f"bootstrap_error={exc}; fallback_error={fallback_exc}"
-                    ),
-                }
+            return await self._execute_playwright_fallback_after_browser_use_failure(
+                task,
+                bootstrap_error=exc,
+                close_when_done=close_when_done,
+                pre_extracted_url=original_direct_url,
+                log_prefix="[Browser Agent][fallback] browser_use unavailable",
+            )
+
+    @staticmethod
+    def _dual_backend_failure_message(
+        bootstrap_error: Exception,
+        fallback_error: Exception,
+    ) -> str:
+        return (
+            "Browser task failed in both browser_use and Playwright fallback. "
+            f"bootstrap_error={bootstrap_error}; fallback_error={fallback_error}"
+        )
+
+    async def _execute_playwright_fallback_after_browser_use_failure(
+        self,
+        task: str,
+        *,
+        bootstrap_error: Exception,
+        close_when_done: bool,
+        pre_extracted_url: str | None,
+        log_prefix: str,
+    ) -> dict[str, Any]:
+        print(f"{log_prefix}: {bootstrap_error}")
+        try:
+            return await self._execute_with_playwright(
+                task,
+                bootstrap_error=str(bootstrap_error),
+                close_when_done=close_when_done,
+                pre_extracted_url=pre_extracted_url,
+            )
+        except Exception as fallback_exc:
+            return {
+                "success": False,
+                "result": None,
+                "error": self._dual_backend_failure_message(
+                    bootstrap_error,
+                    fallback_exc,
+                ),
+            }
 
     async def _execute_with_controller_page_context(
         self,
@@ -569,8 +638,8 @@ class BrowserAgent:
 
     async def _execute_with_browser_use(self, task: str, close_when_done: bool) -> dict[str, Any]:
         type(self)._ensure_external_browser_use_resolution()
-        from browser_use import Agent
-        from browser_use.llm.google.chat import ChatGoogle
+        boundary = type(self)._browser_use_boundary
+        ChatGoogle = boundary.import_google_llm_class()
 
         session = await self._get_or_create_browser_use_session()
         self._session = session
@@ -584,22 +653,21 @@ class BrowserAgent:
             print(f"[Browser Agent] available_file_paths: {available_file_paths}")
 
         async def run_with_llm(llm):
-            agent = Agent(
+            agent = boundary.create_agent(
                 task=agent_task,
                 llm=llm,
                 browser_session=session,
                 available_file_paths=available_file_paths,
                 register_should_stop_callback=type(self)._should_stop_browser_use_agent,
                 injected_agent_state=resume_state,
+                tool_policy=type(self)._browser_use_tool_policy,
             )
             type(self)._register_active_browser_use_agent(agent)
             try:
                 history = await agent.run()
             except asyncio.CancelledError:
-                try:
-                    agent.stop()
-                except Exception:
-                    pass
+                stop_result = type(self)._browser_use_lifecycle.stop_agent(agent)
+                type(self)._last_browser_use_stop_failures = stop_result.failures
                 type(self)._remember_interrupted_browser_use_agent(
                     agent,
                     task=agent_task,
@@ -609,7 +677,7 @@ class BrowserAgent:
             finally:
                 type(self)._unregister_active_browser_use_agent(agent)
 
-            if type(self)._browser_use_stop_requested or getattr(agent.state, "stopped", False):
+            if type(self)._browser_use_lifecycle.stop_requested or getattr(agent.state, "stopped", False):
                 type(self)._remember_interrupted_browser_use_agent(
                     agent,
                     task=agent_task,
@@ -633,13 +701,15 @@ class BrowserAgent:
             return await run_with_llm(llm)
         except asyncio.CancelledError:
             raise
+        except (BrowserUseDependencyError, BrowserUseLifecycleError):
+            raise
         except Exception as exc:
             if not is_gemini_quota_error(exc):
                 return {"success": False, "result": None, "error": str(exc)}
             fallback_error = str(exc)
             for model_name in get_openrouter_models("browser"):
                 try:
-                    from browser_use.llm.openrouter.chat import ChatOpenRouter
+                    ChatOpenRouter = boundary.import_openrouter_llm_class()
 
                     print(f"[Browser Agent] Gemini quota hit; retrying via OpenRouter model {model_name}.")
                     llm = ChatOpenRouter(
@@ -652,6 +722,8 @@ class BrowserAgent:
                     )
                     return await run_with_llm(llm)
                 except asyncio.CancelledError:
+                    raise
+                except (BrowserUseDependencyError, BrowserUseLifecycleError):
                     raise
                 except Exception as fallback_exc:
                     fallback_error = str(fallback_exc)
@@ -1110,36 +1182,18 @@ class BrowserAgent:
         )
 
     async def stop(self):
+        shared_browser_use_session = type(self)._shared_browser_use_session
         await type(self)._close_shared_resources()
 
-        for handle in list(_RETAINED_BROWSER_HANDLES):
-            kind = handle.get("kind")
-            try:
-                if kind == "browser_use":
-                    session = handle.get("session")
-                    if session is not None:
-                        await session.kill()
-                elif kind == "playwright":
-                    browser = handle.get("browser")
-                    playwright = handle.get("playwright")
-                    if browser is not None:
-                        await browser.close()
-                    if playwright is not None:
-                        await playwright.stop()
-            except Exception:
-                pass
-
-            user_data_dir = handle.get("user_data_dir")
-            if user_data_dir:
-                try:
-                    shutil.rmtree(user_data_dir, ignore_errors=True)
-                except Exception:
-                    pass
-            _RETAINED_BROWSER_HANDLES.remove(handle)
+        if self._session is shared_browser_use_session:
+            self._session = None
 
         if self._session is None:
             return
         try:
-            await self._session.kill()
+            await type(self)._browser_use_boundary.cleanup_session(
+                self._session,
+                user_data_dir=None,
+            )
         finally:
             self._session = None

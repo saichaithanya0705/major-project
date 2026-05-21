@@ -16,6 +16,7 @@ from models.output_file_artifacts import (
     extract_path_from_text,
     looks_like_file_status,
 )
+from models.rapid_orchestrator_contracts import RapidAgentStepResult
 
 
 Cleaner = Callable[[str], str]
@@ -209,7 +210,7 @@ class RapidSessionState:
 
     def record_step_context(
         self,
-        step_result: dict[str, object],
+        step_result: RapidAgentStepResult,
         session_id: str | None = None,
     ) -> None:
         if not step_result.get("success"):

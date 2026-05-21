@@ -1675,6 +1675,8 @@ function appendSystemNotice(text, options = {}) {
 
 function getAgentWorkTraceStatusLabel(status) {
   if (status === 'failed') return 'Needs attention';
+  if (status === 'skipped') return 'Skipped';
+  if (status === 'waiting') return 'Waiting';
   if (status === 'completed') return 'Done';
   if (status === 'running') return 'Running';
   return 'Idle';
@@ -1900,7 +1902,7 @@ function renderAgentWorkTrace(state) {
 }
 
 function applyAgentWorkTraceEvent(payload) {
-  if (!isAgentTraceSource(payload?.source)) {
+  if (payload?.command !== 'orchestrator_plan_snapshot' && !isAgentTraceSource(payload?.source)) {
     return false;
   }
   const state = agentWorkTrace.applyEvent(payload);
@@ -3170,6 +3172,11 @@ async function connectSocket() {
       if (shouldDisplayReplyInChat(payload)) {
         updatePendingAssistantStatus(snapshot.text);
       }
+      return;
+    }
+
+    if (payload.command === 'orchestrator_plan_snapshot') {
+      applyAgentWorkTraceEvent(payload);
       return;
     }
 

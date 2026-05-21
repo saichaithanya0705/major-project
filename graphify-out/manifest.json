@@ -1,0 +1,3006 @@
+{
+  "D:\\projects\\major\\project\\app.py": {
+    "mtime": 1778865351.4355805,
+    "hash": "db2246716c5673ebb62b195ea1913503"
+  },
+  "D:\\projects\\major\\project\\setup.ps1": {
+    "mtime": 1778336623.8659196,
+    "hash": "708c826daf45cefc0bb9629fff1a84c0"
+  },
+  "D:\\projects\\major\\project\\agents\\__init__.py": {
+    "mtime": 1772738832.0989137,
+    "hash": "fe7c6be767c8e6e59ff05f81b3c14ce5"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\agent.py": {
+    "mtime": 1778867237.448817,
+    "hash": "d8ac1a6443bdc86f1bcd7c17ff8c88d8"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use_boundary.py": {
+    "mtime": 1778865605.073591,
+    "hash": "5fc3312cd4bc2619fc49d7946999abb1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\controller.py": {
+    "mtime": 1778142459.2426455,
+    "hash": "944b6696f1fa1e463969068a4ba8fd2d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\mcp_client.py": {
+    "mtime": 1778086427.1034255,
+    "hash": "930222c11fdddaa7039112413bcc55d1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\page_context.py": {
+    "mtime": 1778070792.3730552,
+    "hash": "4ac3ec2318326fa76660e79f93c7cefb"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\playwright_boundary.py": {
+    "mtime": 1778867138.426829,
+    "hash": "81a241ed05ba0382e0182cb5a3595211"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\task_policy.py": {
+    "mtime": 1778142475.446934,
+    "hash": "7a80c1e28ee0b501fd72a5c82f77a82b"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\__init__.py": {
+    "mtime": 1771741349.8743405,
+    "hash": "bc7e424af96d12a5d91cbd625184da27"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\config.py": {
+    "mtime": 1771741349.9041142,
+    "hash": "fb7daf1fadb335319a0761ba9a96e811"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\exceptions.py": {
+    "mtime": 1771741349.9121144,
+    "hash": "a4447a044ecd4576203b3e41fd1197c2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\logging_config.py": {
+    "mtime": 1771741349.9400396,
+    "hash": "1eda9bf1e279c81759713d796e2f150e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\observability.py": {
+    "mtime": 1771741349.9400396,
+    "hash": "bc1c4ea31327fbdcb629fcc7b7b0ca08"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\utils.py": {
+    "mtime": 1771741349.9507072,
+    "hash": "ac9197e8db634a13ae4924ea4f21d745"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\__init__.py": {
+    "mtime": 1771741349.8753405,
+    "hash": "1e8debcf96ef959d2673da996f2926e9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\element.py": {
+    "mtime": 1771741349.8773415,
+    "hash": "34fb7f0e12c45bdfa1aae26c7551a3e4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\mouse.py": {
+    "mtime": 1771741349.8773415,
+    "hash": "f234cec0d9fe270be75df382751303ac"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\page.py": {
+    "mtime": 1771741349.878341,
+    "hash": "8ff5c80799494891f432df986250e71c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\utils.py": {
+    "mtime": 1771741349.8803403,
+    "hash": "7fb4b3f8752fdf852dfc326a5bfe4483"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\__init__.py": {
+    "mtime": 1771741349.876341,
+    "hash": "45945b3868c41ed275d122a25f222ede"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\playground\\flights.py": {
+    "mtime": 1771741349.878341,
+    "hash": "ffdc4b5dae6590cd2b324768bedaa5ab"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\playground\\mixed_automation.py": {
+    "mtime": 1771741349.8793406,
+    "hash": "8a1cae7ab0e043cd1562acd2836bdae4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\playground\\playground.py": {
+    "mtime": 1771741349.8793406,
+    "hash": "047351cdfa975a485733841c2bd55707"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\cloud_events.py": {
+    "mtime": 1771741349.8806875,
+    "hash": "db8b2acc92ce8254c0a228ec84aaadd9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\gif.py": {
+    "mtime": 1771741349.8806875,
+    "hash": "f23689018057fb7be6e5f7e7805407e6"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\judge.py": {
+    "mtime": 1771741349.8819723,
+    "hash": "bf8b35ec3168c4f08e3debe46227e265"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\prompts.py": {
+    "mtime": 1771741349.883477,
+    "hash": "0380e66bfa74ca5496c5959adfe2385d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\service.py": {
+    "mtime": 1771741349.8844833,
+    "hash": "e06a987882f1b4b244653d6d7111f285"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\variable_detector.py": {
+    "mtime": 1771741349.8884826,
+    "hash": "575c9fcc7ae2705f0d6395615aca48aa"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\views.py": {
+    "mtime": 1771741349.8894832,
+    "hash": "5ba390d023419f3787808a50237d7c93"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\message_manager\\service.py": {
+    "mtime": 1771741349.8819723,
+    "hash": "4a5e0d9ccc9488f5b0cf86a67e4e24b0"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\message_manager\\utils.py": {
+    "mtime": 1771741349.8819723,
+    "hash": "0808850fe6bc13dfe0841e97f535f58c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\message_manager\\views.py": {
+    "mtime": 1771741349.883477,
+    "hash": "4ae1d25d71514498654855d81a996962"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\__init__.py": {
+    "mtime": 1771741349.8854823,
+    "hash": "840d53f307135844dd42a626704f82a1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\demo_mode.py": {
+    "mtime": 1771741349.891483,
+    "hash": "4720fc941d8606cc695faf431d677ab9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\events.py": {
+    "mtime": 1771741349.892483,
+    "hash": "958b88e3567679518c9e5ac8d8636e8c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\profile.py": {
+    "mtime": 1771741349.892483,
+    "hash": "bf12d7bdd4b5a0cea474fd302465bbf0"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\python_highlights.py": {
+    "mtime": 1771741349.8934827,
+    "hash": "caad6650a59f56bd4141839cdc447257"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\session.py": {
+    "mtime": 1771741349.8944829,
+    "hash": "0204cf89d83538aea915d32f139b59ff"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\session_manager.py": {
+    "mtime": 1771741349.8944829,
+    "hash": "3bcb3f9f46f9c20414a02e37f51d6bc0"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\video_recorder.py": {
+    "mtime": 1771741349.895483,
+    "hash": "001604af82b7e1fcbd40586775fc297a"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\views.py": {
+    "mtime": 1771741349.895483,
+    "hash": "5784a1a8676fc4b2270bc4d15755feb2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdog_base.py": {
+    "mtime": 1771741349.896483,
+    "hash": "fd943c5541e9a9da0aba03385fe6aa9c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\__init__.py": {
+    "mtime": 1771741349.8904827,
+    "hash": "6b82cf7c99c6398c9ea2d68ce236385e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\cloud\\cloud.py": {
+    "mtime": 1771741349.8904827,
+    "hash": "a7edca9e5b3cc4c8369b4502e99ab602"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\cloud\\views.py": {
+    "mtime": 1771741349.8904827,
+    "hash": "93a5184d75cc8b14919ebcff236a8787"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\aboutblank_watchdog.py": {
+    "mtime": 1771741349.8974826,
+    "hash": "1ded47b13076b4ec4bab0f5eebd0612e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\crash_watchdog.py": {
+    "mtime": 1771741349.8978817,
+    "hash": "d1c77b3d8d4a9cbb84bb517d63934641"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\default_action_watchdog.py": {
+    "mtime": 1771741349.8991513,
+    "hash": "8f9a0d42055b90784d7111c646e51db1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\dom_watchdog.py": {
+    "mtime": 1771741349.8991513,
+    "hash": "602d80218aebcd06b18d57151876ae5c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\downloads_watchdog.py": {
+    "mtime": 1771741349.9001145,
+    "hash": "6bd74ad319baf10455483d6b239bd1cd"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\har_recording_watchdog.py": {
+    "mtime": 1771741349.9011147,
+    "hash": "af99e1cefc2af956b311568d8ba97f47"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\local_browser_watchdog.py": {
+    "mtime": 1771741349.9011147,
+    "hash": "dc6884e062e0b5be28f42cf7c2172ad1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\permissions_watchdog.py": {
+    "mtime": 1771741349.9011147,
+    "hash": "a8cda0a2e8fddd56ea4028b160851736"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\popups_watchdog.py": {
+    "mtime": 1771741349.9021146,
+    "hash": "e1ac50d8661ababf0bfb0fadf0eddd06"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\recording_watchdog.py": {
+    "mtime": 1771741349.9021146,
+    "hash": "04a734a137d614074eab13fcf21fb29d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\screenshot_watchdog.py": {
+    "mtime": 1771741349.903115,
+    "hash": "7ad30836dde92fcc9b6e72f6932324e4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\security_watchdog.py": {
+    "mtime": 1771741349.903115,
+    "hash": "f9e90bf9f83a613d7f92f97caf6ed1d2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\storage_state_watchdog.py": {
+    "mtime": 1771741349.9041142,
+    "hash": "b5dfec47adfaa5cae9d627303ff250d9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\browser\\watchdogs\\__init__.py": {
+    "mtime": 1771741349.896483,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\controller\\__init__.py": {
+    "mtime": 1771741349.9051147,
+    "hash": "f01aceae2c044b874258adbf92ba76a6"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\enhanced_snapshot.py": {
+    "mtime": 1771741349.9051147,
+    "hash": "97ab68ab1fae15578ae941a94c7891f5"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\markdown_extractor.py": {
+    "mtime": 1771741349.906115,
+    "hash": "b052e2d108fbb98df3320a9586067abe"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\service.py": {
+    "mtime": 1771741349.9111142,
+    "hash": "c9d26f093d1ef2062c1e97c708b52f46"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\utils.py": {
+    "mtime": 1771741349.9111142,
+    "hash": "7e70cca228d403215cfb5a4adad8c19d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\views.py": {
+    "mtime": 1771741349.9121144,
+    "hash": "dd2d353b090da1b7b82afbe5921b57c6"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\playground\\extraction.py": {
+    "mtime": 1771741349.9071147,
+    "hash": "fd5d69c1efc14c61f5250115d946c98d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\playground\\multi_act.py": {
+    "mtime": 1771741349.9071147,
+    "hash": "ed49b928d9e2f97ced357e1b6a3cc9d4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\clickable_elements.py": {
+    "mtime": 1771741349.9071147,
+    "hash": "6eec8e31446d9742465dcae7ab87ec1d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\code_use_serializer.py": {
+    "mtime": 1771741349.9081144,
+    "hash": "03c140d8fb9350bec8d974fea2e932ac"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\eval_serializer.py": {
+    "mtime": 1771741349.9081144,
+    "hash": "8453b1a7606961ea3799f9f26ae1e10b"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\html_serializer.py": {
+    "mtime": 1771741349.9091153,
+    "hash": "3d4f777732c3b9bcb2c0638c98c877b4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\paint_order.py": {
+    "mtime": 1771741349.9091153,
+    "hash": "b7088a6517bb0402041d30a63dbb99ee"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\dom\\serializer\\serializer.py": {
+    "mtime": 1771741349.910115,
+    "hash": "aace03001fffb92b4de22c613ca7fa57"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\filesystem\\file_system.py": {
+    "mtime": 1771741349.9131148,
+    "hash": "b09d7d40147f8001c380c7d7a3992968"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\filesystem\\__init__.py": {
+    "mtime": 1771741349.9121144,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\base.py": {
+    "mtime": 1771741349.9183865,
+    "hash": "00b2d3751c375120e69200f531897181"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\exceptions.py": {
+    "mtime": 1771741349.9223843,
+    "hash": "a3c4158d75e4d1338eec80ba1ba18ae9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\messages.py": {
+    "mtime": 1771741349.9263847,
+    "hash": "d86c1b0ab82bf256f863169de7066dcb"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\models.py": {
+    "mtime": 1771741349.9273841,
+    "hash": "00249b0042714493b4747daa8fb7015c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\schema.py": {
+    "mtime": 1771741349.9340377,
+    "hash": "156d681094050d26d968f2d92384a7ee"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\views.py": {
+    "mtime": 1771741349.9390404,
+    "hash": "51387854970d739b4dafd97b80e5419c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\__init__.py": {
+    "mtime": 1771741349.91424,
+    "hash": "b3a67ec969b5dc2f1f910bcf43c64338"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\anthropic\\chat.py": {
+    "mtime": 1771741349.9153857,
+    "hash": "215698dc82f9d8fd8097412ab3b4b0bd"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\anthropic\\serializer.py": {
+    "mtime": 1771741349.9153857,
+    "hash": "25b7ed82c3fdbc8799f1798d55cc9ccc"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\aws\\chat_anthropic.py": {
+    "mtime": 1771741349.9163845,
+    "hash": "360365fc68d81837782b8baf5d2c7e09"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\aws\\chat_bedrock.py": {
+    "mtime": 1771741349.9173844,
+    "hash": "85b67841bf021b6efbb6085b398cdcf7"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\aws\\serializer.py": {
+    "mtime": 1771741349.9173844,
+    "hash": "df22311cff6c73004b122cc68219a644"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\aws\\__init__.py": {
+    "mtime": 1771741349.9163845,
+    "hash": "04adbf49601fa89d31d93b9b141214b6"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\azure\\chat.py": {
+    "mtime": 1771741349.9183865,
+    "hash": "ca0891f417bd70347fe6477fec1e3ea1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\browser_use\\chat.py": {
+    "mtime": 1771741349.9193845,
+    "hash": "d6367d57dad4af6731921fffa2a1f405"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\browser_use\\__init__.py": {
+    "mtime": 1771741349.9193845,
+    "hash": "1f63951f5dbf80f8d284a7b16e6e1765"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\cerebras\\chat.py": {
+    "mtime": 1771741349.920385,
+    "hash": "864de26fe9e005edb5fb09de12d3737e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\cerebras\\serializer.py": {
+    "mtime": 1771741349.920385,
+    "hash": "2f770bd46297ec83ff3146a799612d6d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\deepseek\\chat.py": {
+    "mtime": 1771741349.9223843,
+    "hash": "e0d7043603bc631d6936f1ccd4e33ce3"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\deepseek\\serializer.py": {
+    "mtime": 1771741349.9223843,
+    "hash": "1d3ef078ad6de3722b37692d7fd559eb"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\google\\chat.py": {
+    "mtime": 1771741349.9233844,
+    "hash": "c8def356c4dbb4d81bb31dd65fa26b82"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\google\\serializer.py": {
+    "mtime": 1771741349.9243846,
+    "hash": "13b9aa372c2de3c9f08d477089745d87"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\google\\__init__.py": {
+    "mtime": 1771741349.9233844,
+    "hash": "42420a162b31faed2132745a4e2a238e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\groq\\chat.py": {
+    "mtime": 1771741349.9243846,
+    "hash": "95e848eef2cee8797079c79085da3a66"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\groq\\parser.py": {
+    "mtime": 1771741349.9253848,
+    "hash": "54a427f5275cbf39df00fa602b6c7b13"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\groq\\serializer.py": {
+    "mtime": 1771741349.9253848,
+    "hash": "556933d34558eacab776ef88db21b6c4"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\mistral\\chat.py": {
+    "mtime": 1771741349.9273841,
+    "hash": "ce8bf7b7950882b0405849cdcfcd649f"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\mistral\\schema.py": {
+    "mtime": 1771741349.9273841,
+    "hash": "5d77802993638f8a86bb20f3d189a0bb"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\mistral\\__init__.py": {
+    "mtime": 1771741349.9263847,
+    "hash": "3905d57624fed9671f312169f536f416"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\oci_raw\\chat.py": {
+    "mtime": 1771741349.9293847,
+    "hash": "49a97e0162c0aabe240837c0b063a8f5"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\oci_raw\\serializer.py": {
+    "mtime": 1771741349.9293847,
+    "hash": "d3eca7983eee31f5f5fe99668b9e3852"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\oci_raw\\__init__.py": {
+    "mtime": 1771741349.9283843,
+    "hash": "2b2375c9d693083ecf777c9e1e59c13a"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\ollama\\chat.py": {
+    "mtime": 1771741349.930899,
+    "hash": "cafa48cce68b4c1625e510dd6b0b295d"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\ollama\\serializer.py": {
+    "mtime": 1771741349.930899,
+    "hash": "a83218eb2d3d7c122be9afb6ad3a2797"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openai\\chat.py": {
+    "mtime": 1771741349.9320426,
+    "hash": "8346b90f71783a854a90f08a70ec89df"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openai\\like.py": {
+    "mtime": 1771741349.9320426,
+    "hash": "a466528a7c44a23afb3730b26cf1be18"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openai\\responses_serializer.py": {
+    "mtime": 1771741349.9330378,
+    "hash": "a42bd8458a0c8eb7642a01f3a477ca44"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openai\\serializer.py": {
+    "mtime": 1771741349.9330378,
+    "hash": "27bbfef60daedddaaf90f4196f4880fa"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openrouter\\chat.py": {
+    "mtime": 1771741349.9340377,
+    "hash": "3461878d0567d4b32e6192861ecff684"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\openrouter\\serializer.py": {
+    "mtime": 1771741349.9340377,
+    "hash": "af5d4618974becbd10480436eb36fb90"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_anthropic_cache.py": {
+    "mtime": 1771741349.9350376,
+    "hash": "9340045a39fbfdc0b3f1d4f0962c4933"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_chat_models.py": {
+    "mtime": 1771741349.9360378,
+    "hash": "de6f6815c93611d5ed89ea04aba797ee"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_gemini_image.py": {
+    "mtime": 1771741349.9360378,
+    "hash": "da6934d22b8498b521956f9d956f716c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_groq_loop.py": {
+    "mtime": 1771741349.9370422,
+    "hash": "525950cab8afe413e5e45cec3601bbd0"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_mistral_schema.py": {
+    "mtime": 1771741349.9370422,
+    "hash": "9a8e64300bb14deceb088edaa63f0bbd"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\tests\\test_single_step.py": {
+    "mtime": 1771741349.938042,
+    "hash": "6089d47aacfa22f1a8b663607985c22e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\vercel\\chat.py": {
+    "mtime": 1771741349.9390404,
+    "hash": "9d69f9db428a8227d4fca2cc6c703872"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\vercel\\serializer.py": {
+    "mtime": 1771741349.9390404,
+    "hash": "a00df9b208490ecea360a9e245ca185f"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\vercel\\__init__.py": {
+    "mtime": 1771741349.938042,
+    "hash": "b00d298e4e5a5a2a1fc0a1531374d445"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\screenshots\\service.py": {
+    "mtime": 1771741349.9410405,
+    "hash": "68beb61abfd43200d1686c2a70717286"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\screenshots\\__init__.py": {
+    "mtime": 1771741349.9410405,
+    "hash": "cb75ee6d1c75973862e5a0ba9ce72196"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\telemetry\\service.py": {
+    "mtime": 1771741349.9420404,
+    "hash": "2cafb0333e279e420b8317b839e51417"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\telemetry\\views.py": {
+    "mtime": 1771741349.9430425,
+    "hash": "927441fe72a01a5721328182cf03c8f1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\telemetry\\__init__.py": {
+    "mtime": 1771741349.9420404,
+    "hash": "1f8a1f7dd5d2ad834741a7def8ff3058"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\custom_pricing.py": {
+    "mtime": 1771741349.9440408,
+    "hash": "9b2923afcf094055cb122f491bc011dd"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\mappings.py": {
+    "mtime": 1771741349.9440408,
+    "hash": "3a4c11569207cfdcb9df706b739b33e3"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\service.py": {
+    "mtime": 1771741349.9440408,
+    "hash": "e1879d12139ed17ee07a7d85c73f648e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\views.py": {
+    "mtime": 1771741349.9450395,
+    "hash": "54fc554186b07538260d416780192eec"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\__init__.py": {
+    "mtime": 1771741349.9430425,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tokens\\tests\\test_cost.py": {
+    "mtime": 1771741349.9450395,
+    "hash": "da9bf8cde570deeb49044f79cbfef0dc"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\service.py": {
+    "mtime": 1771741349.949707,
+    "hash": "b4924a8c01293b3467a233dd16eb4ee2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\utils.py": {
+    "mtime": 1771741349.949707,
+    "hash": "bf59508ec01017aeaa7ceb9ad57e6072"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\views.py": {
+    "mtime": 1771741349.9507072,
+    "hash": "f2dbcda119900a26aed4f05845ea79a3"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\extraction\\schema_utils.py": {
+    "mtime": 1771741349.9470387,
+    "hash": "1b476e9d371795458f58eedd31b6319e"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\extraction\\views.py": {
+    "mtime": 1771741349.9473982,
+    "hash": "5a0192eaf1771f22deee95dce86cf28f"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\extraction\\__init__.py": {
+    "mtime": 1771741349.9460382,
+    "hash": "238c4ed395853c57bf2ead5907ca7495"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\registry\\service.py": {
+    "mtime": 1771741349.9487078,
+    "hash": "2a4dc0ee47b4cc2249b7e4ece5b45c34"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\tools\\registry\\views.py": {
+    "mtime": 1771741349.9487078,
+    "hash": "20ca69dc4e87b4aa5884f5cbdd143bd8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\agent.py": {
+    "mtime": 1778865530.0619223,
+    "hash": "b7e88885409d07805bc02d3bb68c86e6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\background_manager.py": {
+    "mtime": 1777300799.1963499,
+    "hash": "8033d0a9ce1d6cf280bb158f429d8e72"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\direct_command_policy.py": {
+    "mtime": 1777800274.3190742,
+    "hash": "ff7a925f499599b19202072531b1ec1c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\response_parser.py": {
+    "mtime": 1778357191.5592062,
+    "hash": "6496b1ebaea1b0f712d02b197014c469"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\server_launch_policy.py": {
+    "mtime": 1777301161.99976,
+    "hash": "58d846ced7400e771adf96ff790005a5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\stream_event_policy.py": {
+    "mtime": 1777301418.9567506,
+    "hash": "92e436ceaf80081cf5136e976c232603"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\tool_allowlist_policy.py": {
+    "mtime": 1778358561.7581623,
+    "hash": "d91359666ad3579b8797bb09e45091bc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\vendor_guard.py": {
+    "mtime": 1778865511.8635013,
+    "hash": "41e0a224efc82391f7060be18a65f1d0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\workspace_policy.py": {
+    "mtime": 1777301617.4737606,
+    "hash": "0a9a16362167e87ea68401c47642a411"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\__init__.py": {
+    "mtime": 1771741349.953707,
+    "hash": "5504771e308c393868a0f28f421077bd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\esbuild.config.js": {
+    "mtime": 1772738832.1424394,
+    "hash": "3f2c3f3380a90402d0ca80629b2f15e9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\eslint.config.js": {
+    "mtime": 1771741349.9567065,
+    "hash": "c0d9277af8adcd5679167e75c8ca9bef"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\bundle\\gemini.js": {
+    "mtime": 1773380446.903011,
+    "hash": "16b046d758c56fddbeaf016f4781cbb8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\index.ts": {
+    "mtime": 1771741349.960707,
+    "hash": "a024093898c2aeb043bbc19790c6f475"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\examples\\ask-user-dialog-demo.tsx": {
+    "mtime": 1771741349.9597073,
+    "hash": "129d9949a31bd7dd0ba31f19d440cb18"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\examples\\scrollable-list-demo.tsx": {
+    "mtime": 1771741349.960707,
+    "hash": "9cbe250207d300785dbc1614259dba2e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\gemini.tsx": {
+    "mtime": 1771741349.9663732,
+    "hash": "ec00e9d4808957472ba39434e2e39f40"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\nonInteractiveCli.ts": {
+    "mtime": 1771741349.9663732,
+    "hash": "d54ec71435176f0ccce0068d45892b35"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\nonInteractiveCliCommands.ts": {
+    "mtime": 1771741349.9663732,
+    "hash": "5d9ed56054c023788892ac91880a1993"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\validateNonInteractiveAuth.ts": {
+    "mtime": 1771741349.9793816,
+    "hash": "7dedc7f61b8aa3778f05adcd587ee99f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\config.ts": {
+    "mtime": 1771741349.961707,
+    "hash": "e92b36fce22d383f51cae86623a441a0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\policy.ts": {
+    "mtime": 1772738832.176412,
+    "hash": "f10418e5e66f2e326dcb285d0501eef1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\sandboxConfig.ts": {
+    "mtime": 1771741349.9627068,
+    "hash": "f64ff59387b01b8e269baaa560eb074d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\settingPaths.ts": {
+    "mtime": 1771741349.9627068,
+    "hash": "580918036ba93a4cd34ca5b069b071be"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\settings-validation.ts": {
+    "mtime": 1771741349.9637072,
+    "hash": "d315744b9b5dc6725a402615bec1dd4f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\settings.ts": {
+    "mtime": 1771741349.9640794,
+    "hash": "eb4888fab1b326ba672f2b5d2ceedd79"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\settingsSchema.ts": {
+    "mtime": 1771741349.9653728,
+    "hash": "6936b307786f5f09eec22e9dab5db46f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\config\\trustedFolders.ts": {
+    "mtime": 1771741349.9653728,
+    "hash": "4e26cd57d3d342988d85f4153136bd89"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\BuiltinCommandLoader.ts": {
+    "mtime": 1771741349.9673736,
+    "hash": "9ab15dd6673d8db6f314d39c58f8d9e4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\CommandService.ts": {
+    "mtime": 1771741349.968374,
+    "hash": "cbdb1620923497185aad75bcbf56e2cf"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\FileCommandLoader.ts": {
+    "mtime": 1771741349.968374,
+    "hash": "68ef0c7a0b01d0d0346c47cb5de2fd1c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\types.ts": {
+    "mtime": 1771741349.9713798,
+    "hash": "a7e3a74f80b070631ef004b20fcfe737"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\prompt-processors\\argumentProcessor.ts": {
+    "mtime": 1771741349.9693801,
+    "hash": "cf9fc8c82192cfd68f45c125015ab8e6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\prompt-processors\\atFileProcessor.ts": {
+    "mtime": 1771741349.9693801,
+    "hash": "2e2ee701866b52a56153a48d5ad5ea31"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\prompt-processors\\injectionParser.ts": {
+    "mtime": 1771741349.9703803,
+    "hash": "697f80f7aec4eb5e3b4d01d42b216354"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\prompt-processors\\shellProcessor.ts": {
+    "mtime": 1771741349.9703803,
+    "hash": "2420443b49721510105cca1e5599f0c9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\services\\prompt-processors\\types.ts": {
+    "mtime": 1771741349.9703803,
+    "hash": "aee17e48ae9c36e151d70329a555bff5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\types.ts": {
+    "mtime": 1771741349.974382,
+    "hash": "0a9d00bcdb8f94eb5a6e0649caf60dc1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\commands\\initCommand.ts": {
+    "mtime": 1771741349.97238,
+    "hash": "5de839c737e9e33a3d24010a7aefe41d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\commands\\types.ts": {
+    "mtime": 1771741349.9733813,
+    "hash": "812db4677475c606f14dde049d653994"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\hooks\\atCommandProcessor.ts": {
+    "mtime": 1771741349.9733813,
+    "hash": "929fcd1aba5fb369b21e8aab808d9ce2"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\noninteractive\\nonInteractiveUi.ts": {
+    "mtime": 1771741349.974382,
+    "hash": "2f7d51ad417fe609ce47bc67e9397c75"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\utils\\commandUtils.ts": {
+    "mtime": 1771741349.975381,
+    "hash": "794017f6ba2b0659af95883a50a03eb7"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\utils\\ConsolePatcher.ts": {
+    "mtime": 1771741349.975381,
+    "hash": "90e565bf77d1ef64aed6f9f89863aefc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\ui\\utils\\textOutput.ts": {
+    "mtime": 1771741349.975381,
+    "hash": "b31763e87fc53735d500d8e5b009369a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\activityLogger.ts": {
+    "mtime": 1772738832.2163465,
+    "hash": "6c9a2113e4ee4e0ef7a4c728422eb0a7"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\cleanup.ts": {
+    "mtime": 1771741349.9763806,
+    "hash": "0c477b25dec060e4171ac487c286d189"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\commands.ts": {
+    "mtime": 1771741349.977382,
+    "hash": "c37ad56daf5451c4ab82fa534915d255"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\commentJson.ts": {
+    "mtime": 1771741349.977382,
+    "hash": "4e703c2913302297d5cae962a9d02f56"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\deepMerge.ts": {
+    "mtime": 1771741349.977382,
+    "hash": "19be5cc662324e326013ae605500fa64"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\envVarResolver.ts": {
+    "mtime": 1771741349.9783814,
+    "hash": "4ca6c5f34e06cce41037a1faa1d1b0a4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\errors.ts": {
+    "mtime": 1771741349.9783814,
+    "hash": "c029dafcc05b73922447b4e86ce1a011"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\resolvePath.ts": {
+    "mtime": 1771741349.9783814,
+    "hash": "12e9ea9cf812b12f3926670b3b002a3f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\src\\utils\\sessionCleanup.ts": {
+    "mtime": 1771741349.9793816,
+    "hash": "7f2acfde4f230fa6e77c23fe5cd175ba"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\index.ts": {
+    "mtime": 1771741349.9807367,
+    "hash": "c4792492f98c60a502ad5eb0bac164ed"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\index.ts": {
+    "mtime": 1772738832.4340005,
+    "hash": "fbb94e1fb4a501fe11cc39cbb29bd4b1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\a2a-client-manager.ts": {
+    "mtime": 1771741349.9820423,
+    "hash": "46c76394262beeb310e5d710e4cdf9d1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\a2aUtils.ts": {
+    "mtime": 1771741349.9820423,
+    "hash": "ac697ff11b06dc7a29bd57c15d28cac5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\acknowledgedAgents.ts": {
+    "mtime": 1771741349.9820423,
+    "hash": "a4e39f80314fda37cfee72a1bea8d605"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\agent-scheduler.ts": {
+    "mtime": 1771741349.9820423,
+    "hash": "5e9ef5517b5b820860d35f6049fea09d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\agentLoader.ts": {
+    "mtime": 1771741349.983548,
+    "hash": "fb4ff84ec55046af987c28a299010bc4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\cli-help-agent.ts": {
+    "mtime": 1771741349.9845567,
+    "hash": "9f4f3e405c42c872e6fed63bbc2f62cd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\codebase-investigator.ts": {
+    "mtime": 1771741349.9845567,
+    "hash": "4f5c01b8c9f3b65ee903a228ddf724c9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\generalist-agent.ts": {
+    "mtime": 1771741349.9845567,
+    "hash": "2803e31d830026c0ee33aca4ab2924a7"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\local-executor.ts": {
+    "mtime": 1771741349.9855545,
+    "hash": "8b57ec47cc7cb1899e6bd683919546e7"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\local-invocation.ts": {
+    "mtime": 1771741349.9865541,
+    "hash": "c4916fd4d209d5221274c2bf5d448c9f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\registry.ts": {
+    "mtime": 1771741349.9865541,
+    "hash": "e972cc8a0e3f7691c352611e23bfa660"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\remote-invocation.ts": {
+    "mtime": 1771741349.9875557,
+    "hash": "b57d04a4dfc18ef2d6beb44a5f7f4618"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\subagent-tool-wrapper.ts": {
+    "mtime": 1771741349.9875557,
+    "hash": "af579d4832ac138a2f85a8b58ed096c5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\subagent-tool.ts": {
+    "mtime": 1771741349.9885545,
+    "hash": "18cf582c0a94f967e566784725eee830"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\types.ts": {
+    "mtime": 1771741349.9885545,
+    "hash": "320b0c94ec1e78776ee5904fdf08cfb8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\agents\\utils.ts": {
+    "mtime": 1771741349.9895551,
+    "hash": "547466654d64e4b7f58533d406af03e8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\availability\\errorClassification.ts": {
+    "mtime": 1771741349.9905543,
+    "hash": "0510691b9832dc6c7e17b2526283b228"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\availability\\modelAvailabilityService.ts": {
+    "mtime": 1771741349.9905543,
+    "hash": "35c1f6f360fff973f1c8bb6d08b3791d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\availability\\modelPolicy.ts": {
+    "mtime": 1771741349.9905543,
+    "hash": "1e0a3259e32721220f1e915cf2961228"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\availability\\policyCatalog.ts": {
+    "mtime": 1771741349.9915557,
+    "hash": "bdf9d41cc5c85c7b78f2199cfb44e0c3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\availability\\policyHelpers.ts": {
+    "mtime": 1771741349.9915557,
+    "hash": "5709b9716f87459ceee16f926d6ff7b0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\code_assist\\converter.ts": {
+    "mtime": 1772738832.2693508,
+    "hash": "0c2fd9312387c4f1fec8849e54f25880"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\code_assist\\oauth2.ts": {
+    "mtime": 1772738832.2992876,
+    "hash": "5beecab536cd23e84ddbcdeb80c8ac92"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\code_assist\\server.ts": {
+    "mtime": 1772738832.3249002,
+    "hash": "a40e6ed7b43499b2063f450874bfa9e6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\code_assist\\types.ts": {
+    "mtime": 1772738832.3786726,
+    "hash": "45ec6a44fc85a782676eccaf2caca0d0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\commands\\extensions.ts": {
+    "mtime": 1771741349.9945545,
+    "hash": "6a42e4277d1fdb003b69feb721b13cc1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\commands\\init.ts": {
+    "mtime": 1771741349.9945545,
+    "hash": "905667f931dbf0f17cb12982fb7990f9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\commands\\memory.ts": {
+    "mtime": 1771741349.9945545,
+    "hash": "102b78ec4bc12a2f9c3b126b4bf56e2d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\commands\\restore.ts": {
+    "mtime": 1771741349.9955542,
+    "hash": "d1f2423d36c763e7df415a15b121d404"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\commands\\types.ts": {
+    "mtime": 1771741349.9955542,
+    "hash": "c69f30873ecac6a39efe88ac93644796"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\config\\config.ts": {
+    "mtime": 1771741349.996554,
+    "hash": "47be2d110297757b8c7ad84f787eaff5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\config\\constants.ts": {
+    "mtime": 1771741349.9975536,
+    "hash": "9929916fefdc1cf19c1cbe383aaf2bf8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\config\\defaultModelConfigs.ts": {
+    "mtime": 1771741349.9979286,
+    "hash": "d8a2d01035536c4458221f9d9165d96a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\config\\models.ts": {
+    "mtime": 1771741349.9979286,
+    "hash": "b038be31dd139591ea4cf45b7bc53785"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\config\\storage.ts": {
+    "mtime": 1771741349.9991834,
+    "hash": "7e9a22af160b4b29c2a7a9b461f8b6c8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\confirmation-bus\\index.ts": {
+    "mtime": 1771741349.9991834,
+    "hash": "5696d6052305e44ab2ad6260510d10fb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\confirmation-bus\\message-bus.ts": {
+    "mtime": 1771741350.000181,
+    "hash": "4a16d3c093c4ca45956dfa1d23e49016"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\confirmation-bus\\types.ts": {
+    "mtime": 1771741350.000181,
+    "hash": "d0722f404fd85b9a9428336d55f341e4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\baseLlmClient.ts": {
+    "mtime": 1771741350.0011811,
+    "hash": "0a45bb48016c1cfa6e647090ddc40595"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\client.ts": {
+    "mtime": 1771741350.0021815,
+    "hash": "a410d65a2be33b39efa607c484f1c3cb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\contentGenerator.ts": {
+    "mtime": 1771741350.0021815,
+    "hash": "1bac0223ba83c48b4945d2de883c9bba"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\coreToolHookTriggers.ts": {
+    "mtime": 1771741350.003181,
+    "hash": "fa7f44a5534a73e17248a81142ef241c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\coreToolScheduler.ts": {
+    "mtime": 1771741350.003181,
+    "hash": "e4fdb284830c8a7480fa2783df389c25"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\fakeContentGenerator.ts": {
+    "mtime": 1771741350.004181,
+    "hash": "b1b53f79b0f17f79b451df030db29f1a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\geminiChat.ts": {
+    "mtime": 1771741350.004181,
+    "hash": "3c945988f3a86c32013033a9da5c78eb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\geminiRequest.ts": {
+    "mtime": 1771741350.0051835,
+    "hash": "14a0e16ca583566d994cdbb97b4cca1c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\logger.ts": {
+    "mtime": 1771741350.0051835,
+    "hash": "e833d9ec79c6cb4991c65464631a2d38"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\loggingContentGenerator.ts": {
+    "mtime": 1771741350.006183,
+    "hash": "bb91bd7fe5c2b9696c74474bc2081b6e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\prompts.ts": {
+    "mtime": 1771741350.006183,
+    "hash": "cee8203e40c36eb0ee3183196dacd8fd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\recordingContentGenerator.ts": {
+    "mtime": 1771741350.006183,
+    "hash": "7209fc9261b35a748084f8da6a6e67fa"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\core\\turn.ts": {
+    "mtime": 1771741350.007182,
+    "hash": "3924166daf891b2f7165805c3552a660"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\fallback\\handler.ts": {
+    "mtime": 1771741350.0081823,
+    "hash": "67a3daf45007d27f837c9c785b54c19a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\fallback\\types.ts": {
+    "mtime": 1771741350.0081823,
+    "hash": "b211f5f24edbfa2410e0732b252ffd5f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\generated\\git-commit.js": {
+    "mtime": 1771742528.210514,
+    "hash": "de7e2053b66dad36740bd9edfa699877"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookAggregator.ts": {
+    "mtime": 1771741350.009182,
+    "hash": "46c419380dbd719f6b27a302872f7b10"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookEventHandler.ts": {
+    "mtime": 1771741350.009182,
+    "hash": "07652f1677b26010e7fba19444058972"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookPlanner.ts": {
+    "mtime": 1771741350.010182,
+    "hash": "790228ccfca549865aad978fe1088f81"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookRegistry.ts": {
+    "mtime": 1771741350.010182,
+    "hash": "29121c7133f7df73f0d15b7c7d4497d1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookRunner.ts": {
+    "mtime": 1771741350.010182,
+    "hash": "d9757994f7b0bd29fac3fd595ac4f3f0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookSystem.ts": {
+    "mtime": 1771741350.0111816,
+    "hash": "1c59b11fbfe78967e980cbdd4f08b1b9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\hookTranslator.ts": {
+    "mtime": 1771741350.0111816,
+    "hash": "6fa2d9c3ad17385c7c738e8699619ee6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\index.ts": {
+    "mtime": 1771741350.0121822,
+    "hash": "f9af3a09ab3c9488a585a8faa151164c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\trustedHooks.ts": {
+    "mtime": 1771741350.0121822,
+    "hash": "7e7428697b3dabb3ca86989a69e7fca1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\hooks\\types.ts": {
+    "mtime": 1771741350.0131817,
+    "hash": "1176f466ee8b4da4abc16c5384bea748"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\constants.ts": {
+    "mtime": 1771741350.0135293,
+    "hash": "c742682349551a0dcf791bb6c52b277c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\detect-ide.ts": {
+    "mtime": 1771741350.0142903,
+    "hash": "13d69ca45a3ab43c5cb850fa8e8e29d4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\ide-client.ts": {
+    "mtime": 1771741350.0142903,
+    "hash": "e8a3b98dde8cde6049da60961bb42900"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\ide-connection-utils.ts": {
+    "mtime": 1771741350.0154357,
+    "hash": "fe96d5fe81e3a55f24ca3322b4182296"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\ide-installer.ts": {
+    "mtime": 1771741350.0154357,
+    "hash": "c7424cf7c119bf87ca29fd973d3f6a00"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\ideContext.ts": {
+    "mtime": 1771741350.0164342,
+    "hash": "76207667887e58a634729752130a9e55"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\process-utils.ts": {
+    "mtime": 1771741350.0164342,
+    "hash": "a6c565877e4615ae89ea2f54268ea3b4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\ide\\types.ts": {
+    "mtime": 1771741350.0164342,
+    "hash": "bc02193910860be2e97e0531a220c116"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mcp\\auth-provider.ts": {
+    "mtime": 1772738832.4498267,
+    "hash": "2adcae6315b1a14af964dabc5b688cc9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mcp\\google-auth-provider.ts": {
+    "mtime": 1772738832.4697208,
+    "hash": "86d5200cbc91ad40d1c57ff027e9d2ad"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mcp\\oauth-provider.ts": {
+    "mtime": 1772738832.5232377,
+    "hash": "32e0769c0ae6098b6c79c42dd61a4e11"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mcp\\oauth-utils.ts": {
+    "mtime": 1772738832.5679083,
+    "hash": "6532abb76ed76674c2e35703ebd61af5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mcp\\sa-impersonation-provider.ts": {
+    "mtime": 1772738832.6574113,
+    "hash": "83770a29fa746f73c4fde621045807ca"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\mocks\\msw.ts": {
+    "mtime": 1771741350.020434,
+    "hash": "0f2db2605f4e539545e9c52a57b6e835"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\output\\json-formatter.ts": {
+    "mtime": 1771741350.020434,
+    "hash": "601170b57763f6b4536ab2318d00afdd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\output\\stream-json-formatter.ts": {
+    "mtime": 1771741350.021433,
+    "hash": "1c425332a352a3c7021e0a0b0f1a8984"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\output\\types.ts": {
+    "mtime": 1771741350.021433,
+    "hash": "77b5a270c4a7cf23bdbb8222c5cbf390"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\config.ts": {
+    "mtime": 1771741350.0224333,
+    "hash": "d26c7d23b3c0a049c32088fb242238d4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\index.ts": {
+    "mtime": 1771741350.0224333,
+    "hash": "16517793422d86e4e7f6abec4a624bf8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\policy-engine.ts": {
+    "mtime": 1771741350.0254352,
+    "hash": "f7ee1fbae30f2b3ec4027943a36cf3da"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\stable-stringify.ts": {
+    "mtime": 1771741350.0254352,
+    "hash": "e8e8a353968855f403df4da22e0ec933"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\toml-loader.ts": {
+    "mtime": 1771741350.0264344,
+    "hash": "2d30ad2cdba47b8f4ac999bce71984eb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\types.ts": {
+    "mtime": 1771741350.0264344,
+    "hash": "c3ce9f717ccdd1f9dd12ac632acd92ed"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\policy\\utils.ts": {
+    "mtime": 1771741350.0274336,
+    "hash": "c86b0d7bfd19875f95715d19018089e6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\prompts\\mcp-prompts.ts": {
+    "mtime": 1771741350.0274336,
+    "hash": "10d43814fbd4ec1c8a9419892a56d2c6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\prompts\\prompt-registry.ts": {
+    "mtime": 1771741350.0284336,
+    "hash": "b5a88bbae01e9303a367b298f98a5504"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\prompts\\promptProvider.ts": {
+    "mtime": 1771741350.0284336,
+    "hash": "47f0a0eabfea25a149d771f9470085c2"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\prompts\\snippets.ts": {
+    "mtime": 1771741350.0294356,
+    "hash": "b6bf35d48d33585b687284faba9b3073"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\prompts\\utils.ts": {
+    "mtime": 1771741350.0294356,
+    "hash": "a25ff711e895462b0bc60feaa4717b59"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\resources\\resource-registry.ts": {
+    "mtime": 1771741350.0304356,
+    "hash": "3df1acc7bc2b16b5697984655b7c9211"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\modelRouterService.ts": {
+    "mtime": 1771741350.0307658,
+    "hash": "5c6f525df4553551dde37c481d945c89"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\routingStrategy.ts": {
+    "mtime": 1771741350.0307658,
+    "hash": "f688743bd36d23729a7dfe78c51453bb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\classifierStrategy.ts": {
+    "mtime": 1771741350.032069,
+    "hash": "ab10bbe69410ca91a187922b096df223"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\compositeStrategy.ts": {
+    "mtime": 1771741350.032069,
+    "hash": "43b58bea551022b14e9799c772c8c931"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\defaultStrategy.ts": {
+    "mtime": 1771741350.0330677,
+    "hash": "1cc23e4f49d3c4a1db584455654c6fad"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\fallbackStrategy.ts": {
+    "mtime": 1771741350.0330677,
+    "hash": "452eff82c081611d1cf0601d1516ad04"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\numericalClassifierStrategy.ts": {
+    "mtime": 1771741350.0340679,
+    "hash": "c5dd76e69386e02f47cbb7b8dc624bb5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\routing\\strategies\\overrideStrategy.ts": {
+    "mtime": 1771741350.0340679,
+    "hash": "8fb9e50b4d5c4e6ddb1ce079d267c43c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\safety\\built-in.ts": {
+    "mtime": 1771741350.0350678,
+    "hash": "d75080044c1ace591f8df142cbc69e62"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\safety\\checker-runner.ts": {
+    "mtime": 1771741350.0350678,
+    "hash": "9ba927e31d0b9eb41e1c966af91c8fcc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\safety\\context-builder.ts": {
+    "mtime": 1771741350.0350678,
+    "hash": "6662961d067737450252f07805988cc3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\safety\\protocol.ts": {
+    "mtime": 1771741350.03607,
+    "hash": "1993ccb3e9b1cb643a9170a38df33c0e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\safety\\registry.ts": {
+    "mtime": 1771741350.03607,
+    "hash": "366af5366ba9f3e960189ab70bd04ed6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\confirmation.ts": {
+    "mtime": 1771741350.0370672,
+    "hash": "75b95bcdf2e701581c24d9f5e00bae27"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\policy.ts": {
+    "mtime": 1771741350.0370672,
+    "hash": "0aeff7f433ac9bdca5d4e414cdbb64a1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\scheduler.ts": {
+    "mtime": 1771741350.0370672,
+    "hash": "f3987cfa978a33aa4641001919d98f2e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\state-manager.ts": {
+    "mtime": 1771741350.0380678,
+    "hash": "cb3b301dfd99d8f299490ef19b8ce245"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\tool-executor.ts": {
+    "mtime": 1771741350.0380678,
+    "hash": "506cdf5d2e5f9be15a0b3436ab56b4a0"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\tool-modifier.ts": {
+    "mtime": 1771741350.0380678,
+    "hash": "1e4f4faa3b85d730f558e46317c5e996"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\scheduler\\types.ts": {
+    "mtime": 1771741350.0390675,
+    "hash": "3dfa9d6860c55019a5dafad64c0c6a3a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\chatCompressionService.ts": {
+    "mtime": 1771741350.0390675,
+    "hash": "5bc479d608b85b030d578cb556ea8a67"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\chatRecordingService.ts": {
+    "mtime": 1771741350.0400674,
+    "hash": "2811446e0d99212e11c3318839dd2822"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\contextManager.ts": {
+    "mtime": 1771741350.0400674,
+    "hash": "2844051f73229b333ce650067c049fcc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\environmentSanitization.ts": {
+    "mtime": 1771741350.041068,
+    "hash": "f22963a3e5e16e060b472a90633d1bd8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\fileDiscoveryService.ts": {
+    "mtime": 1771741350.041068,
+    "hash": "d4ae0a7e0312ad335d51f92e784beac6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\fileSystemService.ts": {
+    "mtime": 1771741350.0420675,
+    "hash": "976f33ae12622fe88a048382cad254b1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\gitService.ts": {
+    "mtime": 1771741350.0420675,
+    "hash": "4561e90df6ddafd1bcac68f781cffaa9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\loopDetectionService.ts": {
+    "mtime": 1771741350.0430682,
+    "hash": "73b689b6b31bfee941057d9327abb4ac"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\modelConfigService.ts": {
+    "mtime": 1771741350.0430682,
+    "hash": "b47de25b838380087dd524c85a2b2273"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\modelConfigServiceTestUtils.ts": {
+    "mtime": 1771741350.0430682,
+    "hash": "3b04d54dbf79c5e7b79b2f2152b87bc5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\sessionSummaryService.ts": {
+    "mtime": 1771741350.0440679,
+    "hash": "1c9baf6809bc01be4a14a65e60e9e8dd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\sessionSummaryUtils.ts": {
+    "mtime": 1771741350.0440679,
+    "hash": "499c25ffc6cdfd7a497441b144acb8f5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\services\\shellExecutionService.ts": {
+    "mtime": 1771741350.0440679,
+    "hash": "ea294e5b43c063b972598a6b466de051"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\skills\\skillLoader.ts": {
+    "mtime": 1771741350.0476303,
+    "hash": "6b7c41127acd5dcbf6dc2216503908fa"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\skills\\skillManager.ts": {
+    "mtime": 1771741350.048765,
+    "hash": "ea19ff6b6c06a80d30f9953f841582f4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\activity-detector.ts": {
+    "mtime": 1771741350.048765,
+    "hash": "af1f532b45232fc0a4fe03b08fb1cdcb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\activity-monitor.ts": {
+    "mtime": 1771741350.0497656,
+    "hash": "93216addcccf579e5a3c7bb48fc3a51f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\activity-types.ts": {
+    "mtime": 1771741350.0497656,
+    "hash": "3aef234c919792e9a0e560980b837adb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\config.ts": {
+    "mtime": 1771741350.0517642,
+    "hash": "4327000e724b986b80fc05c04367b10e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\constants.ts": {
+    "mtime": 1771741350.0527666,
+    "hash": "0d16f0b5f296c8c496b8443888b75805"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\file-exporters.ts": {
+    "mtime": 1771741350.0527666,
+    "hash": "106a7325c3271f360ea0b74bac0a223d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\gcp-exporters.ts": {
+    "mtime": 1771741350.0537655,
+    "hash": "3d7bd9d554d25f7e884f631ae62124aa"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\high-water-mark-tracker.ts": {
+    "mtime": 1771741350.0537655,
+    "hash": "433c80bd6a937aa3cf6750ce3955df2e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\index.ts": {
+    "mtime": 1771741350.0537655,
+    "hash": "1d593dbfdedd56b805ba539d8ac6fd98"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\loggers.ts": {
+    "mtime": 1771741350.0547645,
+    "hash": "ff02a3abdbff0b293ffa205e20f33ca3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\memory-monitor.ts": {
+    "mtime": 1771741350.0547645,
+    "hash": "eb90f7a6008fd1a998d70b1b2f8b0bea"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\metrics.ts": {
+    "mtime": 1771741350.055765,
+    "hash": "6ac88a5678c9a95c61a4a1a48819b301"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\rate-limiter.ts": {
+    "mtime": 1771741350.055765,
+    "hash": "5bf22e7419d9e1221c1d7b8fe593ea15"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\sanitize.ts": {
+    "mtime": 1771741350.0567644,
+    "hash": "56257cee056250e59ecd77f5a590744c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\sdk.ts": {
+    "mtime": 1771741350.0567644,
+    "hash": "43a0e8888540a73760ea41f09f06a08a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\semantic.ts": {
+    "mtime": 1771741350.0567644,
+    "hash": "f928096133ce459b75bb3f79467b86f1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\startupProfiler.ts": {
+    "mtime": 1771741350.0577643,
+    "hash": "1ee7db69cd807d753b23333797738bb4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\telemetry-utils.ts": {
+    "mtime": 1771741350.0577643,
+    "hash": "d332eacca28bd9179558cd9de5b65347"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\telemetryAttributes.ts": {
+    "mtime": 1771741350.0587642,
+    "hash": "6e3eea0ab08ea6f769706f6a3dac8d6c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\tool-call-decision.ts": {
+    "mtime": 1771741350.0587642,
+    "hash": "f9eaf7e861cf377270d754594479307c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\trace.ts": {
+    "mtime": 1771741350.0587642,
+    "hash": "44265d0cdd4462eb3670c2cf8271278a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\types.ts": {
+    "mtime": 1771741350.0597644,
+    "hash": "ab30e0317d2e974c8d409e94a0ef422d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\uiTelemetry.ts": {
+    "mtime": 1771741350.0597644,
+    "hash": "e58348998c661a1f7c5fa4c020903488"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\clearcut-logger\\clearcut-logger.ts": {
+    "mtime": 1771741350.0507636,
+    "hash": "16629ff327b7f0533e347a666c88cd49"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\telemetry\\clearcut-logger\\event-metadata-key.ts": {
+    "mtime": 1771741350.0517642,
+    "hash": "5e79e844b528c2bb2b3806223a0edf5e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\activate-skill.ts": {
+    "mtime": 1771741350.0607646,
+    "hash": "292cc0f8a395a53f69ed8d22732b1471"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\ask-user.ts": {
+    "mtime": 1771741350.0607646,
+    "hash": "7a805d0b20f8720c17b2316c2b82ad9d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\constants.ts": {
+    "mtime": 1771741350.0617645,
+    "hash": "f50df84443c09d553a2de43a52add112"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\diffOptions.ts": {
+    "mtime": 1771741350.0617645,
+    "hash": "5ea9153fac3c0f839a81ee69ec3adea2"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\edit.ts": {
+    "mtime": 1771741350.0627656,
+    "hash": "b8a1afed43af2ae9221bd700b8e16cbd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\enter-plan-mode.ts": {
+    "mtime": 1771741350.0637653,
+    "hash": "069e0fc5615c880c5711c2452e4b5023"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\exit-plan-mode.ts": {
+    "mtime": 1771741350.0644248,
+    "hash": "24c529472afebca792fea98a05fe4143"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\get-internal-docs.ts": {
+    "mtime": 1771741350.0644248,
+    "hash": "0c0c5963ec4fe789f1a4c64b9ea79027"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\glob.ts": {
+    "mtime": 1771741350.0654318,
+    "hash": "25a6ac26058ca22be24b1e46b719278e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\grep.ts": {
+    "mtime": 1771741350.0654318,
+    "hash": "57e1ae79132c6f192df29d2609f502a5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\ls.ts": {
+    "mtime": 1771741350.0664294,
+    "hash": "46ec77c5ca37fc99ca14b219f29efe86"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\mcp-client-manager.ts": {
+    "mtime": 1771741350.0664294,
+    "hash": "736b919649c0a72ca5a392ac21612bbc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\mcp-client.ts": {
+    "mtime": 1771741350.0674312,
+    "hash": "ec4cfb1c22d8f55aed30c39e523352fc"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\mcp-tool.ts": {
+    "mtime": 1771741350.0674312,
+    "hash": "b47f8aa173ebf441b797f1d872667078"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\memoryTool.ts": {
+    "mtime": 1771741350.0674312,
+    "hash": "e59210190d81b6055737cb3ce5c31abe"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\modifiable-tool.ts": {
+    "mtime": 1771741350.0684304,
+    "hash": "abc30eaed2bdbd369ce381b289fb1d47"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\read-file.ts": {
+    "mtime": 1771741350.0684304,
+    "hash": "922f30950753a7b3cfaf7f5654cf3d18"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\read-many-files.ts": {
+    "mtime": 1771741350.0684304,
+    "hash": "08626ca27df04b3a43b2ac5014ac99c9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\ripGrep.ts": {
+    "mtime": 1771741350.0694354,
+    "hash": "e886f1254609f42318e523669973f545"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\shell.ts": {
+    "mtime": 1771741350.0694354,
+    "hash": "59c513f8226d7827fa56657d730dbe56"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\tool-error.ts": {
+    "mtime": 1771741350.0704353,
+    "hash": "bc455be4d831d0e13e2833dd6655f07a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\tool-names.ts": {
+    "mtime": 1771741350.0704353,
+    "hash": "c4fd9d688e03fb286ce690e9deec88e4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\tool-registry.ts": {
+    "mtime": 1771741350.0704353,
+    "hash": "ff43d0735a51fa53e3a64eb6a4f9f352"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\tools.ts": {
+    "mtime": 1771741350.0714352,
+    "hash": "26a81fb084175a1d889aafa4c13c8db7"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\web-fetch.ts": {
+    "mtime": 1771741350.0714352,
+    "hash": "3ad5b0e2880d7954702fd8eb4774c71f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\web-search.ts": {
+    "mtime": 1771741350.0724354,
+    "hash": "296dfea6ef4be0fe871c57e147715451"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\write-file.ts": {
+    "mtime": 1771741350.0724354,
+    "hash": "6360ecb7c6e50d1073c6783b1eb777b3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\write-todos.ts": {
+    "mtime": 1771741350.0724354,
+    "hash": "f9849ee7225e9354881d966f93e69e36"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\tools\\xcode-mcp-fix-transport.ts": {
+    "mtime": 1771741350.073435,
+    "hash": "b3fca25079b351c185d551ad697ccb80"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\apiConversionUtils.ts": {
+    "mtime": 1771741350.074435,
+    "hash": "ba191b535aed6bdd049bad0d259eaaf1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\bfsFileSearch.ts": {
+    "mtime": 1771741350.074435,
+    "hash": "fc284358451138b518c01f5b20069100"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\browser.ts": {
+    "mtime": 1771741350.075436,
+    "hash": "4dd3b332e7b733948ccda499638ccdd4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\channel.ts": {
+    "mtime": 1771741350.075436,
+    "hash": "8448310b1d51b8839a37f19c694c580b"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\checkpointUtils.ts": {
+    "mtime": 1771741350.075436,
+    "hash": "c94d8dc70e77f7c2a422174a914d3a56"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\checks.ts": {
+    "mtime": 1771741350.076435,
+    "hash": "62ef793a4930c04de55d0f820d016ad6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\constants.ts": {
+    "mtime": 1771741350.076435,
+    "hash": "2e613cfeb5f54ca8614b1f6bc4fa2a4d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\customHeaderUtils.ts": {
+    "mtime": 1771741350.0774362,
+    "hash": "ffbdfa320551e82b52575b2eaed343a4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\debugLogger.ts": {
+    "mtime": 1771741350.0774362,
+    "hash": "d99a842b31f5b1a8d480ecd0a84a3623"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\delay.ts": {
+    "mtime": 1771741350.0784376,
+    "hash": "5c53d7a38953bc487059a6f1ec518c6b"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\editCorrector.ts": {
+    "mtime": 1771741350.0784376,
+    "hash": "202f6b49ecb3f8b739bdf23860ea884a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\editor.ts": {
+    "mtime": 1771741350.0794394,
+    "hash": "8e8833377e51789ded8e53042f9562b5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\environmentContext.ts": {
+    "mtime": 1771741350.0794394,
+    "hash": "780bcdf7fa0c84cb2bdc3736cbdf34b4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\errorParsing.ts": {
+    "mtime": 1771741350.0794394,
+    "hash": "173f3e957face8bf573298f76934d869"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\errorReporting.ts": {
+    "mtime": 1771741350.0807369,
+    "hash": "14ccc64b4f7d59478f0dc45288d6a82e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\errors.ts": {
+    "mtime": 1771741350.0811005,
+    "hash": "f884d07962561c191ea86970abb3e6c6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\events.ts": {
+    "mtime": 1771741350.0821116,
+    "hash": "9d1e1edc8cfc5d4d37a88a4a8aa5630d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\exitCodes.ts": {
+    "mtime": 1771741350.0821116,
+    "hash": "6bb3fedec6b787f89f9ba158b1e5316c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\extensionLoader.ts": {
+    "mtime": 1771741350.0821116,
+    "hash": "efa51676b35c15377c1fe2051773b26c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\fetch.ts": {
+    "mtime": 1771741350.0836172,
+    "hash": "bc375bd185bbd0872b021303ed758e40"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\fileDiffUtils.ts": {
+    "mtime": 1771741350.0836172,
+    "hash": "5be447a243ae41e7c3056b297e6323a8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\fileUtils.ts": {
+    "mtime": 1771741350.084625,
+    "hash": "1833a54e5ed510681e67d5c6d76a7108"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\formatters.ts": {
+    "mtime": 1771741350.0866241,
+    "hash": "01085b8cda6114df2eacc3caf97f5797"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\generateContentResponseUtilities.ts": {
+    "mtime": 1771741350.0876248,
+    "hash": "b5ddbfbd72539f00220a13ba3e726d70"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\getFolderStructure.ts": {
+    "mtime": 1771741350.0876248,
+    "hash": "969cca852994f6f2e122b96281c68416"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\getPty.ts": {
+    "mtime": 1771741350.0886242,
+    "hash": "303c2565f55eb5029831073a0ef3c3c9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\gitIgnoreParser.ts": {
+    "mtime": 1771741350.0886242,
+    "hash": "d871d8c549c2992f892fbb4466d3cb15"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\gitUtils.ts": {
+    "mtime": 1771741350.0896223,
+    "hash": "d7d562cd75dcf22e186a63da7807dcd5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\googleErrors.ts": {
+    "mtime": 1771741350.0896223,
+    "hash": "714d7a9d5f8692d64a2778ab103d0039"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\googleQuotaErrors.ts": {
+    "mtime": 1771741350.0896223,
+    "hash": "4396c04a0bc496631afba92aa5316999"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\httpErrors.ts": {
+    "mtime": 1771741350.0906227,
+    "hash": "2d38179c139e4f9544bd2db8ab529294"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\ignoreFileParser.ts": {
+    "mtime": 1771741350.0906227,
+    "hash": "4d36956de2bdd0e82efb5efe78bce665"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\ignorePatterns.ts": {
+    "mtime": 1771741350.0916235,
+    "hash": "db0f035169d607a9cb73f08055800adb"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\installationManager.ts": {
+    "mtime": 1771741350.0916235,
+    "hash": "af182c3337b67b17c9575524e0ac1357"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\language-detection.ts": {
+    "mtime": 1771741350.0916235,
+    "hash": "245c9d36f5cb7bbc33a1d2d60c09b994"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\llm-edit-fixer.ts": {
+    "mtime": 1771741350.0926232,
+    "hash": "4eb4e2348dbb1ee28169b6a1ea17bbbd"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\memoryDiscovery.ts": {
+    "mtime": 1771741350.0926232,
+    "hash": "0e4b18513f2bf6a2be84d855f5f6cdd1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\memoryImportProcessor.ts": {
+    "mtime": 1771741350.0936258,
+    "hash": "c0c2b8995cc01518d48e60e41163b9f5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\messageInspectors.ts": {
+    "mtime": 1771741350.0936258,
+    "hash": "b71a3cc21fb2210234e7d97f9bc37098"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\nextSpeakerChecker.ts": {
+    "mtime": 1771741350.0946255,
+    "hash": "8087d898818f5e0554e83fff496eab46"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\package.ts": {
+    "mtime": 1771741350.0946255,
+    "hash": "b0cc4dc96ed5209d7d3ff030e8f1d595"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\partUtils.ts": {
+    "mtime": 1771741350.0956256,
+    "hash": "7742cc594070bd958a6eb1d9eca9f2b2"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\pathCorrector.ts": {
+    "mtime": 1771741350.0956256,
+    "hash": "5253d34f23c3f5decae9e3142d0866b1"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\pathReader.ts": {
+    "mtime": 1771741350.0956256,
+    "hash": "9c2afc5b3eddf016ba3a3b287dedbd91"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\paths.ts": {
+    "mtime": 1771741350.0966258,
+    "hash": "bebaf57214a7bfb3c7957625f57ad66e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\planUtils.ts": {
+    "mtime": 1771741350.0966258,
+    "hash": "7aac12c056adf8fc949f533375cc51d3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\process-utils.ts": {
+    "mtime": 1771741350.0976257,
+    "hash": "d918af1c4ce44e1a9160b76b663d7999"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\promptIdContext.ts": {
+    "mtime": 1771741350.0980628,
+    "hash": "bb1e20d5de8d481738c39d0fe81d3c75"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\quotaErrorDetection.ts": {
+    "mtime": 1771741350.0980628,
+    "hash": "3c32fee17f621bdc34948c6061ed5b5d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\retry.ts": {
+    "mtime": 1771741350.099298,
+    "hash": "c507ad686bbc72170102308fa9efe4b9"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\safeJsonStringify.ts": {
+    "mtime": 1771741350.099298,
+    "hash": "43e488e0f838768efa84213c19fa5047"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\schemaValidator.ts": {
+    "mtime": 1771741350.1002991,
+    "hash": "ffb8fa7caa39e8322e6f2e47bd8426d6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\secure-browser-launcher.ts": {
+    "mtime": 1771741350.1002991,
+    "hash": "20df42dfd658481888e0d915ba32b0b2"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\security.ts": {
+    "mtime": 1771741350.1012983,
+    "hash": "ee50210c173bdc48541df7d25dd37e3d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\session.ts": {
+    "mtime": 1771741350.1012983,
+    "hash": "4ee69826e7e00f932cc72a7ec5dc135e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\shell-utils.ts": {
+    "mtime": 1771741350.1022985,
+    "hash": "32abb2ee884a42b5952b7b0ad9ca8979"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\stdio.ts": {
+    "mtime": 1771741350.1022985,
+    "hash": "61c467d977c32f44ec2bf2195dc339d8"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\summarizer.ts": {
+    "mtime": 1771741350.1032982,
+    "hash": "117e783112e1144a9e8e96f5707fb444"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\systemEncoding.ts": {
+    "mtime": 1771741350.1032982,
+    "hash": "740455eae8f07298c6c4100334ef1c29"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\terminal.ts": {
+    "mtime": 1771741350.1032982,
+    "hash": "25d320440c93aba5ff80e25005116a80"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\terminalSerializer.ts": {
+    "mtime": 1771741350.1042976,
+    "hash": "22a8ca4d3cd50802df4ef97d618d7ce6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\testUtils.ts": {
+    "mtime": 1771741350.1042976,
+    "hash": "989c558d9ee0977a419bfb7c611c294b"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\textUtils.ts": {
+    "mtime": 1771741350.1052973,
+    "hash": "9aba3073382dc8b6153201f276ea380f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\thoughtUtils.ts": {
+    "mtime": 1771741350.1052973,
+    "hash": "e66fd4d4e2d72157f23bc74e9e527bcf"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\tool-utils.ts": {
+    "mtime": 1771741350.1062963,
+    "hash": "c10119063ad85c1963fdc10656451458"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\toolCallContext.ts": {
+    "mtime": 1771741350.1062963,
+    "hash": "21db7d868d5dab3c2892aea035437318"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\userAccountManager.ts": {
+    "mtime": 1771741350.1072953,
+    "hash": "006b3d36288becc570d7ea826d0c0226"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\version.ts": {
+    "mtime": 1771741350.1072953,
+    "hash": "efbf97a55c71bf937575314717217d87"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\workspaceContext.ts": {
+    "mtime": 1771741350.1072953,
+    "hash": "3cea060ebbd4aeaf002bb448d96c5ead"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\filesearch\\crawlCache.ts": {
+    "mtime": 1771741350.084625,
+    "hash": "180cf80fb1cfa61e38254709ebadade3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\filesearch\\crawler.ts": {
+    "mtime": 1771741350.0856254,
+    "hash": "e9de73b889dda30535b71e07b0d6899d"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\filesearch\\fileSearch.ts": {
+    "mtime": 1771741350.0856254,
+    "hash": "db367e10eabeb94830b5a4466c04bf4a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\filesearch\\ignore.ts": {
+    "mtime": 1771741350.0856254,
+    "hash": "1f0e03281e246a22f3b8a2ed0ce2cf03"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\utils\\filesearch\\result-cache.ts": {
+    "mtime": 1771741350.0866241,
+    "hash": "bebf23e86282bf64d3c95b2159c800ae"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\third_party\\get-ripgrep\\src\\downloadRipGrep.js": {
+    "mtime": 1771741350.1102953,
+    "hash": "7b855bffc7192a82808d27fd8aa9cfc3"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\third_party\\get-ripgrep\\src\\index.js": {
+    "mtime": 1771741350.1102953,
+    "hash": "a44b0f84f184c8f469afb618494a8920"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\accessibility.py": {
+    "mtime": 1778813968.245556,
+    "hash": "ede1c1287e66ea1e0fb3a28327f2f146"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\action_guard.py": {
+    "mtime": 1778771479.0395248,
+    "hash": "f91c5ad82dea535e944fd45445dc23d6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\action_normalizer.py": {
+    "mtime": 1778771479.0431113,
+    "hash": "673f1eac42832d88933035a7a863c660"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\action_policy.py": {
+    "mtime": 1778771479.0431113,
+    "hash": "e6ab6081a2a096ba0da4ab905a5f8b38"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\agent.py": {
+    "mtime": 1778813952.5390425,
+    "hash": "1127d2bfdfe93a4e54111b4316efc662"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\agentic_vision.py": {
+    "mtime": 1777914883.5079687,
+    "hash": "c2020efa8a4bdfa0f3cfdb8130d75f66"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\computer_backend.py": {
+    "mtime": 1778812728.1971219,
+    "hash": "acfa49bdf18ad2d65e0d1b142fd9387b"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\contracts.py": {
+    "mtime": 1778771479.0456245,
+    "hash": "b673a14521c9f7b5ce51133dfef256f6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\controller.py": {
+    "mtime": 1778774418.2069726,
+    "hash": "2747e19b20557c51056dc4e6b40a9305"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\criticizer.py": {
+    "mtime": 1778813987.2544353,
+    "hash": "32beb5167ea044462ea6609a64f329be"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\grounding.py": {
+    "mtime": 1778771479.0456245,
+    "hash": "f256f4e71a77058d9ae750011ccda842"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\image.py": {
+    "mtime": 1771741350.112296,
+    "hash": "926ab1a43d5164bc653ccb3a7f78077c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\interaction_policy.py": {
+    "mtime": 1778060770.5620313,
+    "hash": "9649abfdab79d317e18c72bfa5d033f6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\keyboard.py": {
+    "mtime": 1778060605.3627827,
+    "hash": "5f9400ff6dfbac197f9f074c5055e892"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\legacy_locator.py": {
+    "mtime": 1777914805.5846646,
+    "hash": "5bd83adfb56e4286f159012f6fff8b6e"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\model_policy.py": {
+    "mtime": 1778815155.4601257,
+    "hash": "2e99f6962adad466c2cca665411a2ad6"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\prompts.py": {
+    "mtime": 1778771479.0456245,
+    "hash": "f25a2d7630c63f9cab9d1808b8287e9a"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\runtime_state.py": {
+    "mtime": 1777284673.2884736,
+    "hash": "8fd7e7ebba982ce388cf590142a5bf6c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\screen_context.py": {
+    "mtime": 1778065611.0698524,
+    "hash": "09236aaf96470ab232786771236245c4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\session_state.py": {
+    "mtime": 1778771479.0456245,
+    "hash": "0db49aabfaaab557fa7789473fdb2a28"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\single_call.py": {
+    "mtime": 1778815225.1475246,
+    "hash": "82d03f035d9c43d5d2f1faf06eda24f5"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\status_presenter.py": {
+    "mtime": 1777288343.2090833,
+    "hash": "fde2e523588740ee96d7b31dbb00edd4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\tools.py": {
+    "mtime": 1778065640.2921777,
+    "hash": "40c405f364eeadb9ed230258b1220e8f"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\tool_declarations.py": {
+    "mtime": 1778060663.935732,
+    "hash": "f873f358949bf78ec29e7834e686beda"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\trajectory.py": {
+    "mtime": 1778771479.051764,
+    "hash": "2ffd58f22d3a41750ee11f1707418e7c"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\visual_feedback.py": {
+    "mtime": 1777288107.127292,
+    "hash": "f4a810600b9cfbce00a8b913150a5af4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_vision\\__init__.py": {
+    "mtime": 1777917202.3213513,
+    "hash": "bee5220b22767cd32365f0bdc89d794c"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\agent.py": {
+    "mtime": 1778001422.0221205,
+    "hash": "7934b93636bf9b9f0db8a0ac5776d15b"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\artifact.py": {
+    "mtime": 1778012480.0640476,
+    "hash": "2a8ec223f1b8a4f4bc5bd4eb21fdb52b"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\policy.py": {
+    "mtime": 1778001467.804369,
+    "hash": "bd4d68ed8337e317a55a70e278d4a1fb"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\prompts.py": {
+    "mtime": 1778012559.3135536,
+    "hash": "7f2af56a0e87232ed4956afd3e87280d"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\text_layout.py": {
+    "mtime": 1777286416.7836995,
+    "hash": "034ce34de7e97991c4d3ca853d4745b6"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\tools.py": {
+    "mtime": 1778314372.5695732,
+    "hash": "435488da81fc17990f4d81937d6096fe"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\tool_declarations.py": {
+    "mtime": 1778012581.077192,
+    "hash": "7a9169d0af308635397e276a24d39dfb"
+  },
+  "D:\\projects\\major\\project\\agents\\jarvis\\__init__.py": {
+    "mtime": 1777283751.0082438,
+    "hash": "562ffff63b29674ef2f633e31306b272"
+  },
+  "D:\\projects\\major\\project\\agents\\web_qa\\agent.py": {
+    "mtime": 1779002286.7504745,
+    "hash": "bd59d936a5b34a0ab384d9cc1c2c2a4a"
+  },
+  "D:\\projects\\major\\project\\agents\\web_qa\\mcp_client.py": {
+    "mtime": 1778355322.7061796,
+    "hash": "cefe37077c03b629c241298f32ac298e"
+  },
+  "D:\\projects\\major\\project\\agents\\web_qa\\__init__.py": {
+    "mtime": 1778334166.0000231,
+    "hash": "7835ed28d605aabdc0e341969e98e400"
+  },
+  "D:\\projects\\major\\project\\core\\artifact_lifecycle.py": {
+    "mtime": 1778049813.9955122,
+    "hash": "9575f7b370a2776dd16e291996d2a14d"
+  },
+  "D:\\projects\\major\\project\\core\\assistant_logging.py": {
+    "mtime": 1773383318.188449,
+    "hash": "a4fe3d6d39bfd79d7aff5ff4347e2bf8"
+  },
+  "D:\\projects\\major\\project\\core\\process_lifecycle.py": {
+    "mtime": 1778865294.7503588,
+    "hash": "65721dcf7f3c032c47cb424d27bd5d45"
+  },
+  "D:\\projects\\major\\project\\core\\registry.py": {
+    "mtime": 1771741350.1174471,
+    "hash": "22dd4f361a158d2831fc9b846cff78df"
+  },
+  "D:\\projects\\major\\project\\core\\settings.py": {
+    "mtime": 1778001153.5750616,
+    "hash": "3f481b5171285504809f46a98f78b33e"
+  },
+  "D:\\projects\\major\\project\\core\\__init__.py": {
+    "mtime": 1772738832.7373981,
+    "hash": "34c5066b4ed470fdf6d881361f5ff420"
+  },
+  "D:\\projects\\major\\project\\integrations\\__init__.py": {
+    "mtime": 1772738832.7816062,
+    "hash": "8f76c13a7fac338207ca2c9edf320b3e"
+  },
+  "D:\\projects\\major\\project\\integrations\\audio\\stt.py": {
+    "mtime": 1777363151.8306,
+    "hash": "48477ff3f8a93b970dbb23f7d57943ff"
+  },
+  "D:\\projects\\major\\project\\integrations\\audio\\tts.py": {
+    "mtime": 1778049814.0108876,
+    "hash": "ec005fc963aae5126ba8751662f5e120"
+  },
+  "D:\\projects\\major\\project\\integrations\\audio\\__init__.py": {
+    "mtime": 1777271304.3943927,
+    "hash": "00a81be2414ab7e8265045da60348ff4"
+  },
+  "D:\\projects\\major\\project\\models\\agent_step_runner.py": {
+    "mtime": 1779007066.244959,
+    "hash": "039f11c14708986c9bfe341a0fa67386"
+  },
+  "D:\\projects\\major\\project\\models\\browser_resume_route.py": {
+    "mtime": 1778950121.428307,
+    "hash": "2ea322bc5bb570af2ecc046024593a61"
+  },
+  "D:\\projects\\major\\project\\models\\contracts.py": {
+    "mtime": 1779008905.2313147,
+    "hash": "1356e5a4d52328e737c9c5385c2bd5b6"
+  },
+  "D:\\projects\\major\\project\\models\\direct_answer_runtime.py": {
+    "mtime": 1778999408.8299766,
+    "hash": "d6e856668c6d8a3b3479e3def5c6431f"
+  },
+  "D:\\projects\\major\\project\\models\\direct_response_policy.py": {
+    "mtime": 1779000391.8768792,
+    "hash": "0e3f3903eb8d63e3e5931821f9ee02fa"
+  },
+  "D:\\projects\\major\\project\\models\\function_calls.py": {
+    "mtime": 1778333017.4824035,
+    "hash": "9e6b16551214c5b5ba3c6e1155d683f5"
+  },
+  "D:\\projects\\major\\project\\models\\jarvis_response_runtime.py": {
+    "mtime": 1778999408.8356686,
+    "hash": "be4226d8f47cd3a458f4c2b7674f9fc7"
+  },
+  "D:\\projects\\major\\project\\models\\json_payload_coercion.py": {
+    "mtime": 1779008067.1572273,
+    "hash": "c171873e8b96a14213eb78b2804e9bda"
+  },
+  "D:\\projects\\major\\project\\models\\models.py": {
+    "mtime": 1779002178.3647554,
+    "hash": "6029bd0420757b972d3371184a869dfd"
+  },
+  "D:\\projects\\major\\project\\models\\model_initialization.py": {
+    "mtime": 1778950516.356913,
+    "hash": "f13d0a7f374de3602141ea46daa324cf"
+  },
+  "D:\\projects\\major\\project\\models\\model_status.py": {
+    "mtime": 1778869319.255242,
+    "hash": "cddfcc9282e862c1c76a4ac87058d146"
+  },
+  "D:\\projects\\major\\project\\models\\openrouter_fallback.py": {
+    "mtime": 1778815205.4010499,
+    "hash": "bb24111445c4c6c5fb10292e60d59a5b"
+  },
+  "D:\\projects\\major\\project\\models\\openrouter_runtime.py": {
+    "mtime": 1778999408.8375294,
+    "hash": "0374044168d39bdf985cd70e21cd0853"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_adapters.py": {
+    "mtime": 1779019758.1866777,
+    "hash": "b2e44d3f017f633904f68eabbb7663b9"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_artifacts.py": {
+    "mtime": 1778862490.9090786,
+    "hash": "deea0921b55b8bafada2bfdfc06ac0ee"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_contracts.py": {
+    "mtime": 1779007066.2489617,
+    "hash": "0eec327b1c0b61b20e550d47172b80f3"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_executor.py": {
+    "mtime": 1778863246.5669253,
+    "hash": "22c143e60a8220038735a403e72c9f08"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_planner.py": {
+    "mtime": 1778863246.5669253,
+    "hash": "a54e276a83cea237c29e5fcf1e86584f"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_quality.py": {
+    "mtime": 1779019821.4052906,
+    "hash": "f474d6ed9a7d5e8c624269dac53f942b"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_resources.py": {
+    "mtime": 1778863868.1726074,
+    "hash": "16833089f77a7d43a02a792d9910daac"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_scheduler.py": {
+    "mtime": 1778857265.0282323,
+    "hash": "e489e7f0813f55197c6ddee23604797f"
+  },
+  "D:\\projects\\major\\project\\models\\orchestrator_snapshots.py": {
+    "mtime": 1778863314.0616622,
+    "hash": "f2ed2fa51cf17429f32f2aa686e06fa0"
+  },
+  "D:\\projects\\major\\project\\models\\output_file_artifacts.py": {
+    "mtime": 1778771479.0558245,
+    "hash": "0d7ae0588302a9a9dff5c811c3909a66"
+  },
+  "D:\\projects\\major\\project\\models\\prompts.py": {
+    "mtime": 1778859337.8818598,
+    "hash": "0c4cf065e7c2c7142b73334dc3da3054"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_completion_recovery_policy.py": {
+    "mtime": 1778957818.2477715,
+    "hash": "ffd0cc81ea937ca2cad226189e2aadd3"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_direct_answer_flow.py": {
+    "mtime": 1778959310.0604663,
+    "hash": "254aef05e0c6a66d2e0c303379163415"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_orchestrator.py": {
+    "mtime": 1779008787.2856743,
+    "hash": "66406ee8b7b81c6b8a6669501ac60447"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_orchestrator_contracts.py": {
+    "mtime": 1779007066.240921,
+    "hash": "f8df202ac126d8c730d93b5c8993e746"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_orchestrator_deps.py": {
+    "mtime": 1779005197.4232733,
+    "hash": "75e99b9f2c12dfa9f63e6e3e92e32dc3"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_plan_orchestrator.py": {
+    "mtime": 1779008792.9006886,
+    "hash": "febd94849d0a3a278a9a6afd5ca99f13"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_state.py": {
+    "mtime": 1779007066.2509613,
+    "hash": "fa29bda6cf5987ce6d2967b041ca6a83"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_step_execution_runtime.py": {
+    "mtime": 1779000500.6039655,
+    "hash": "12d1f2701e6f08edaffcf8127be72a74"
+  },
+  "D:\\projects\\major\\project\\models\\rapid_step_payloads.py": {
+    "mtime": 1779007066.238911,
+    "hash": "87ea4ab957e0ab8ff83a0aaf4636a37c"
+  },
+  "D:\\projects\\major\\project\\models\\request_agent_step_runtime.py": {
+    "mtime": 1779000432.5196545,
+    "hash": "a130a213f986f0206432f531c38b4875"
+  },
+  "D:\\projects\\major\\project\\models\\request_entrypoint.py": {
+    "mtime": 1778959563.3238,
+    "hash": "b910a30a4fd60158005f48a45f5e3bc3"
+  },
+  "D:\\projects\\major\\project\\models\\router_backends.py": {
+    "mtime": 1779008917.7215538,
+    "hash": "5bded3c6af11957c9a79792f194c692f"
+  },
+  "D:\\projects\\major\\project\\models\\router_backend_parsing.py": {
+    "mtime": 1779009081.8791492,
+    "hash": "a98ca0ebb3119fe05f4c92e11e6ba76f"
+  },
+  "D:\\projects\\major\\project\\models\\router_backend_types.py": {
+    "mtime": 1778952476.9597545,
+    "hash": "130f527ad9b7184dd6854124847107e1"
+  },
+  "D:\\projects\\major\\project\\models\\router_execution_policy.py": {
+    "mtime": 1778956685.6165154,
+    "hash": "1cb7f0cb61dde9355f871886cee0f650"
+  },
+  "D:\\projects\\major\\project\\models\\router_preflight.py": {
+    "mtime": 1778999408.8395884,
+    "hash": "0dda8db41bb0549f11d9abe6c8a52552"
+  },
+  "D:\\projects\\major\\project\\models\\router_provider_calls.py": {
+    "mtime": 1778999408.8395884,
+    "hash": "725835b77a0897c792f7c3635dcc3f34"
+  },
+  "D:\\projects\\major\\project\\models\\router_provider_config.py": {
+    "mtime": 1778958186.310601,
+    "hash": "c2836030e791365cd2d2ec464ea707d6"
+  },
+  "D:\\projects\\major\\project\\models\\router_provider_policy.py": {
+    "mtime": 1778956665.4043405,
+    "hash": "590a29f32aced23ee46545b405728272"
+  },
+  "D:\\projects\\major\\project\\models\\router_runtime.py": {
+    "mtime": 1779008494.0694559,
+    "hash": "1bd35ea0aee4f37b4fa2c3bdc597b025"
+  },
+  "D:\\projects\\major\\project\\models\\router_runtime_contracts.py": {
+    "mtime": 1779008498.1044512,
+    "hash": "118466d5d5bb5c900d0c14ec76c9c40f"
+  },
+  "D:\\projects\\major\\project\\models\\routing_decision_policy.py": {
+    "mtime": 1779008780.677014,
+    "hash": "012c677a3a3c9f874f8553c4a1ff242e"
+  },
+  "D:\\projects\\major\\project\\models\\routing_guardrails.py": {
+    "mtime": 1779019749.9869463,
+    "hash": "542f10e66553445540bf9b7eef2f25f3"
+  },
+  "D:\\projects\\major\\project\\models\\routing_intent_policy.py": {
+    "mtime": 1778956175.6905065,
+    "hash": "51fbed0e6730eca83cd91df342028344"
+  },
+  "D:\\projects\\major\\project\\models\\routing_payload_parser.py": {
+    "mtime": 1779019740.726478,
+    "hash": "5036bc9977a44a73b6269fd59a4af121"
+  },
+  "D:\\projects\\major\\project\\models\\routing_policy.py": {
+    "mtime": 1779008380.2816086,
+    "hash": "3e56c533e339ca8bb249fcc24e132318"
+  },
+  "D:\\projects\\major\\project\\models\\routing_prompt_parser.py": {
+    "mtime": 1778954195.1719916,
+    "hash": "2547a543c1fa386a147e20b16ac17565"
+  },
+  "D:\\projects\\major\\project\\models\\routing_prompt_state.py": {
+    "mtime": 1779000312.1501396,
+    "hash": "ad2295dfb38799277bb9a93eace1a0c6"
+  },
+  "D:\\projects\\major\\project\\models\\routing_question_policy.py": {
+    "mtime": 1779004746.2336748,
+    "hash": "b860d4db2915fd21d4bbc6cc1697c0d3"
+  },
+  "D:\\projects\\major\\project\\models\\routing_step_identity.py": {
+    "mtime": 1779002453.3061118,
+    "hash": "48eb821313f4868bfbbdcc2201bc3d54"
+  },
+  "D:\\projects\\major\\project\\models\\routing_surface_policy.py": {
+    "mtime": 1779003612.396324,
+    "hash": "573c48f4eb6dd03b940175d8ea1a5a1c"
+  },
+  "D:\\projects\\major\\project\\models\\runtime_config.py": {
+    "mtime": 1777991556.3879905,
+    "hash": "0cc320df6f7d2b7159bd74df64f8dcf1"
+  },
+  "D:\\projects\\major\\project\\models\\screenshot_store.py": {
+    "mtime": 1778867287.251207,
+    "hash": "f956ac39276857979946d81a164e09b9"
+  },
+  "D:\\projects\\major\\project\\models\\screen_context_execution_runtime.py": {
+    "mtime": 1778958664.6837456,
+    "hash": "1b615c9aa567229adcbd6ff73ffc4acd"
+  },
+  "D:\\projects\\major\\project\\models\\screen_context_policy.py": {
+    "mtime": 1779008384.230128,
+    "hash": "3b50bd7c13fcdba9f932bb4efc83cbeb"
+  },
+  "D:\\projects\\major\\project\\models\\screen_context_runtime.py": {
+    "mtime": 1779000399.1735387,
+    "hash": "4fc44b73eccf2ce00695a4c8bbde5e38"
+  },
+  "D:\\projects\\major\\project\\models\\text_normalization.py": {
+    "mtime": 1778999333.0178854,
+    "hash": "e2d1def89c01c0f314c6a6703921fd60"
+  },
+  "D:\\projects\\major\\project\\models\\__init__.py": {
+    "mtime": 1777283615.4862542,
+    "hash": "aee87bc13c3bbac4de52a3dc94ff290c"
+  },
+  "D:\\projects\\major\\project\\tests\\box_test.py": {
+    "mtime": 1772738833.1512144,
+    "hash": "3ffb810f2508c1c2c590ae05c26a997d"
+  },
+  "D:\\projects\\major\\project\\tests\\clear_screen.py": {
+    "mtime": 1772738833.2206998,
+    "hash": "01b6ef4c4bcef063f00b123e0940a623"
+  },
+  "D:\\projects\\major\\project\\tests\\conftest.py": {
+    "mtime": 1778316776.634721,
+    "hash": "c0ffde183dbd5575803a65d4daa8a1b6"
+  },
+  "D:\\projects\\major\\project\\tests\\model_test.py": {
+    "mtime": 1772738833.2567027,
+    "hash": "16c8dea3044e457fda3196719983c5bf"
+  },
+  "D:\\projects\\major\\project\\tests\\points_test.py": {
+    "mtime": 1772738833.2998786,
+    "hash": "e4168e00cd03bfde875920f1dda18d4c"
+  },
+  "D:\\projects\\major\\project\\tests\\status_bubble_harness.py": {
+    "mtime": 1777296992.1061125,
+    "hash": "1f5724252607e08d8607510305ef99fc"
+  },
+  "D:\\projects\\major\\project\\tests\\test_agent_step_runner_browser_message.py": {
+    "mtime": 1778142863.729731,
+    "hash": "271de10ddbd8955e798dfc76b5cb10f5"
+  },
+  "D:\\projects\\major\\project\\tests\\test_agent_step_runner_cua_completion.py": {
+    "mtime": 1778771479.0615227,
+    "hash": "8ed28bd79ef718471ce0d554996d2655"
+  },
+  "D:\\projects\\major\\project\\tests\\test_agent_step_runner_jarvis_artifact.py": {
+    "mtime": 1778142877.8180096,
+    "hash": "66164b6fdf13e67eea4f5afd869de76e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_agent_step_runner_latency.py": {
+    "mtime": 1778771479.0615227,
+    "hash": "e89e31ca3990698da46c79420e340247"
+  },
+  "D:\\projects\\major\\project\\tests\\test_agent_stop_resume.py": {
+    "mtime": 1778961672.4822502,
+    "hash": "bd8420a712c4fc55df225ef44b983526"
+  },
+  "D:\\projects\\major\\project\\tests\\test_all_visuals.py": {
+    "mtime": 1772738833.3386939,
+    "hash": "a9797acdb0d366dbd09bea38c7ecbae0"
+  },
+  "D:\\projects\\major\\project\\tests\\test_app_process_lifecycle.py": {
+    "mtime": 1778865190.544849,
+    "hash": "9151039275af80a5ccbe1535b9cfa9fa"
+  },
+  "D:\\projects\\major\\project\\tests\\test_artifact_lifecycle.py": {
+    "mtime": 1778049696.7872388,
+    "hash": "aff42370888d66ff1df6b40fd3a4de1d"
+  },
+  "D:\\projects\\major\\project\\tests\\test_assistant_logging.py": {
+    "mtime": 1773383318.188449,
+    "hash": "0fc237166f0cc770d813d9598944780f"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_agent_fallback.py": {
+    "mtime": 1778142564.832852,
+    "hash": "07687724cfd838418b14efbd25fd98dc"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_controller.py": {
+    "mtime": 1778142528.5206342,
+    "hash": "b2796b3271a1d515a2847ee2887a9cfa"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_mcp_client.py": {
+    "mtime": 1778086479.1272395,
+    "hash": "3030a1f07e953f659fb1379e61de67e0"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_page_context.py": {
+    "mtime": 1778070753.2502246,
+    "hash": "d69d247a6ca42118680b6161ccfbee66"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_playwright_boundary.py": {
+    "mtime": 1778867089.2855208,
+    "hash": "224111499534070a4c44bcc7a6bd6a1c"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_resume_route_boundary.py": {
+    "mtime": 1778952854.3997455,
+    "hash": "507de7234815588a3dc59d5ad278d809"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_task_policy_boundary.py": {
+    "mtime": 1778142484.371303,
+    "hash": "3c8e65b9943b27062fda3abc696ad886"
+  },
+  "D:\\projects\\major\\project\\tests\\test_browser_use_dependency_boundary.py": {
+    "mtime": 1778865398.3830838,
+    "hash": "42ff5af288aede746058a8359e23993a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_background_manager.py": {
+    "mtime": 1778358182.0785296,
+    "hash": "10cb6847d879348b0be1ee96e0f3383f"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_background_runtime_boundary.py": {
+    "mtime": 1777300894.9248376,
+    "hash": "217b2aea8f2adca706d8d69055752e47"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_direct_command_policy.py": {
+    "mtime": 1777800126.6579149,
+    "hash": "269e18be716d41fb9d00259cb7b34983"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_response_parser_boundary.py": {
+    "mtime": 1778357212.4312396,
+    "hash": "e0967b22868110f73cbdd6aced4f7779"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_server_launch_policy_boundary.py": {
+    "mtime": 1777301225.5833595,
+    "hash": "a6586800ac6326d55be657c27a0cf9b3"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_stream_event_policy_boundary.py": {
+    "mtime": 1777301548.5564137,
+    "hash": "bb1e9e271aa24f346df41d317cdaae40"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_tool_allowlist_policy.py": {
+    "mtime": 1778358584.036329,
+    "hash": "386dbf93b5926b41bb1c811207f12a9a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_trust_policy.py": {
+    "mtime": 1778358591.235955,
+    "hash": "2a94e7c0afd74e709422b77e83d55b57"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cli_workspace_policy_boundary.py": {
+    "mtime": 1777301668.3616316,
+    "hash": "02193624962e86a64c24e1ed87340fdb"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_cli_vendor_boundary.py": {
+    "mtime": 1778865465.4844108,
+    "hash": "bab9e67c3c002fccef651cfb01709f69"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_accessibility_provider.py": {
+    "mtime": 1778814192.1862154,
+    "hash": "7cb69539a143ee907d731602814cc353"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_action_guard_boundary.py": {
+    "mtime": 1778771479.0645578,
+    "hash": "248d0a5dc911e2789aee9633ca398614"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_action_normalizer.py": {
+    "mtime": 1778771479.0655808,
+    "hash": "8164c71484dcb37788de65adfafbbb54"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_agent_boundary.py": {
+    "mtime": 1778814206.2857661,
+    "hash": "b20ca0a4b36dd337923e9a57dfd7d448"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_backend_protocol.py": {
+    "mtime": 1778771479.0655808,
+    "hash": "853a70453541b164c55c0ee6480a0513"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_benchmark_harness.py": {
+    "mtime": 1778771479.0671022,
+    "hash": "0b25bda3bb281782f0fc64877e58fa46"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_contracts.py": {
+    "mtime": 1778771479.0671022,
+    "hash": "0253f1199082e52dd9519dff1d8bc565"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_controller.py": {
+    "mtime": 1778774418.2096741,
+    "hash": "ba4b3e048dd26938d662a50643a7de7a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_criticizer.py": {
+    "mtime": 1778814140.174927,
+    "hash": "3c7cd46c8ef37c4dcc6b90e81364ad9e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_end_to_end_fake_backend.py": {
+    "mtime": 1778771479.0721052,
+    "hash": "6f8b63bfc1bfede78ce19629180f5018"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_grounding.py": {
+    "mtime": 1778771479.073289,
+    "hash": "ef15059c379b2e25f7fd04aa91010674"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_interaction_policy_boundary.py": {
+    "mtime": 1777300566.0241537,
+    "hash": "6a91f67dcaec141c336e004d24a5548d"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_loop_guard.py": {
+    "mtime": 1778815273.2327766,
+    "hash": "6e0cac87d9a71d2d39bc73bdb5557ac4"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_model_policy.py": {
+    "mtime": 1778815235.2719295,
+    "hash": "0ccf47cc3acae11fbc9b87c270fce0ba"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_pyautogui_backend.py": {
+    "mtime": 1778812728.201284,
+    "hash": "2b5d722c4b26ac111b64fa8804830221"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_security_policy.py": {
+    "mtime": 1778065801.4543846,
+    "hash": "1e81da3c71aa754109f81c73ec4c849e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_session_state.py": {
+    "mtime": 1778771479.077236,
+    "hash": "aadb085ef456827b183dd272af8976b6"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_trajectory.py": {
+    "mtime": 1778771479.0778506,
+    "hash": "43f169394b10ece6887ead555cb0a5af"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_visual_feedback_boundary.py": {
+    "mtime": 1777288405.2234287,
+    "hash": "7ed5a8eacb63a13e40e5d8f47091d3bf"
+  },
+  "D:\\projects\\major\\project\\tests\\test_cua_vision_windows_launch_policy.py": {
+    "mtime": 1778771479.0778506,
+    "hash": "1b9c68094b6e702baa5483ac64012f54"
+  },
+  "D:\\projects\\major\\project\\tests\\test_direct_response_policy_boundary.py": {
+    "mtime": 1778999475.823634,
+    "hash": "eb3e477030976b4219e56e50040304fc"
+  },
+  "D:\\projects\\major\\project\\tests\\test_direct_response_transport.py": {
+    "mtime": 1778314350.0111437,
+    "hash": "ebf08f1028c6da37beaba35c439a2d57"
+  },
+  "D:\\projects\\major\\project\\tests\\test_jarvis_security_policy.py": {
+    "mtime": 1778001121.2079706,
+    "hash": "00db1eed60c1d82498e3c127f84052d3"
+  },
+  "D:\\projects\\major\\project\\tests\\test_jarvis_visual_artifact.py": {
+    "mtime": 1778012499.5579083,
+    "hash": "b5fac10294e57e76e7d9afdcecb2d49f"
+  },
+  "D:\\projects\\major\\project\\tests\\test_models_bridge_boundaries.py": {
+    "mtime": 1779008535.7928612,
+    "hash": "fe413ed4db4609c2cf53122b1303151a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_model_initialization_boundary.py": {
+    "mtime": 1778950516.356913,
+    "hash": "a86fffd35df727c1bf27fc05e16b0583"
+  },
+  "D:\\projects\\major\\project\\tests\\test_model_runtime_config.py": {
+    "mtime": 1777991556.3899908,
+    "hash": "de9b9aa3417d7788e9c8b598a4bef5bc"
+  },
+  "D:\\projects\\major\\project\\tests\\test_model_status_boundary.py": {
+    "mtime": 1778869293.0816872,
+    "hash": "87469b4d36cefe1e1e6e1accb9485aa0"
+  },
+  "D:\\projects\\major\\project\\tests\\test_openrouter_runtime_failures.py": {
+    "mtime": 1778872125.2691612,
+    "hash": "4dc2809f0dcf8f5e152e28367893bf48"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_adapters.py": {
+    "mtime": 1779008803.8746984,
+    "hash": "f2b1fd1579935f145e3d7182dcc5a3ac"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_executor.py": {
+    "mtime": 1778863847.1461387,
+    "hash": "ed630624e47643059efde228bad7b92c"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_fake_agent_smoke.py": {
+    "mtime": 1778863121.2045808,
+    "hash": "a0b3e9c2f50cb8ad94d4515fe8532d6f"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_planner.py": {
+    "mtime": 1779008822.8386176,
+    "hash": "7699a23c0652f3fa8aa08485d8566ad8"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_quality.py": {
+    "mtime": 1779019815.3816242,
+    "hash": "a618a4db5ba086c4eff30ad2d4ad895c"
+  },
+  "D:\\projects\\major\\project\\tests\\test_orchestrator_scheduler.py": {
+    "mtime": 1778863847.141817,
+    "hash": "4266c01f3c15734cddd811ac72b8cbaa"
+  },
+  "D:\\projects\\major\\project\\tests\\test_output_file_artifacts.py": {
+    "mtime": 1778771479.079867,
+    "hash": "ccd07dc7a7a545bd54a39eddb11f3e9a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_rapid_completion_recovery_policy.py": {
+    "mtime": 1778958364.0932682,
+    "hash": "0396ff5520fd1fbf96f770033cf3483c"
+  },
+  "D:\\projects\\major\\project\\tests\\test_rapid_direct_answer_flow.py": {
+    "mtime": 1778959348.550848,
+    "hash": "a03edb504c8162840c4d477946e82daf"
+  },
+  "D:\\projects\\major\\project\\tests\\test_rapid_orchestrator_contracts.py": {
+    "mtime": 1779007066.251959,
+    "hash": "7e834e77a44409f54a2281603aade85a"
+  },
+  "D:\\projects\\major\\project\\tests\\test_rapid_state_boundary.py": {
+    "mtime": 1778771479.079867,
+    "hash": "5992dae1f43aa006869d46d13e1df6df"
+  },
+  "D:\\projects\\major\\project\\tests\\test_router_backends_boundary.py": {
+    "mtime": 1778998550.4920251,
+    "hash": "cde5335d065ad9bc077529356e3b87e1"
+  },
+  "D:\\projects\\major\\project\\tests\\test_router_backend_parser_boundary.py": {
+    "mtime": 1779008936.821525,
+    "hash": "62c672ce669e21e1c3daf1d1fed15c3d"
+  },
+  "D:\\projects\\major\\project\\tests\\test_router_chaining.py": {
+    "mtime": 1779008841.7230115,
+    "hash": "bed987cef91493af1001a2f9e7ae286f"
+  },
+  "D:\\projects\\major\\project\\tests\\test_router_provider_config_boundary.py": {
+    "mtime": 1778958186.3111541,
+    "hash": "b389143d062113b12272a884f3f0f843"
+  },
+  "D:\\projects\\major\\project\\tests\\test_router_provider_failures.py": {
+    "mtime": 1778954210.3973007,
+    "hash": "3733fd0fe360b8b14c869ee7f0f194dd"
+  },
+  "D:\\projects\\major\\project\\tests\\test_routing_contracts.py": {
+    "mtime": 1779008434.165981,
+    "hash": "4f924fee03edca5ddad2bef8ce8713e1"
+  },
+  "D:\\projects\\major\\project\\tests\\test_routing_payload_parser_boundary.py": {
+    "mtime": 1779019801.3503914,
+    "hash": "5c06b9b3d13ea25169b911b87cd5819e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_routing_policy.py": {
+    "mtime": 1778998550.4948125,
+    "hash": "a058f33f6cd1b081c53dde5ab0861c99"
+  },
+  "D:\\projects\\major\\project\\tests\\test_routing_policy_module_boundaries.py": {
+    "mtime": 1779005197.4232733,
+    "hash": "40655d196442e684a62ed19760677856"
+  },
+  "D:\\projects\\major\\project\\tests\\test_runtime_state_config_boundary.py": {
+    "mtime": 1777297026.2350397,
+    "hash": "12fd4537c010f143e567f723fbf322ad"
+  },
+  "D:\\projects\\major\\project\\tests\\test_screenshot_store_boundary.py": {
+    "mtime": 1778867266.7391944,
+    "hash": "35b178556a2f99cede9d17eb8c34f780"
+  },
+  "D:\\projects\\major\\project\\tests\\test_screen_context_execution_runtime.py": {
+    "mtime": 1778962039.8942614,
+    "hash": "7260dd5ca7ab0264f073839111a49494"
+  },
+  "D:\\projects\\major\\project\\tests\\test_status_bubble_browser.py": {
+    "mtime": 1777296997.3866148,
+    "hash": "fa927d7ce2d0da9c0a85ba5a04a5a2d9"
+  },
+  "D:\\projects\\major\\project\\tests\\test_status_bubble_completion_interactive.py": {
+    "mtime": 1777297015.102938,
+    "hash": "1a83ce501ca260f4d8e2639160e680a1"
+  },
+  "D:\\projects\\major\\project\\tests\\test_status_bubble_cua_cli.py": {
+    "mtime": 1777297005.2761943,
+    "hash": "4df74a949eaedefedd69d336c223bec8"
+  },
+  "D:\\projects\\major\\project\\tests\\test_status_bubble_cua_vision.py": {
+    "mtime": 1777297010.5906405,
+    "hash": "d41a02c011dc7e9c24530563401360a5"
+  },
+  "D:\\projects\\major\\project\\tests\\test_tool_declaration_contracts.py": {
+    "mtime": 1778012529.1337903,
+    "hash": "ef85c98de4216320a15c0019262a5476"
+  },
+  "D:\\projects\\major\\project\\tests\\test_tts.py": {
+    "mtime": 1778049696.7872388,
+    "hash": "7237a698d1b6dea1970b5fc7567edddb"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_agent_work_trace.py": {
+    "mtime": 1778863332.863006,
+    "hash": "e4c5e1d0f2d9f309211cb96f85f5ce58"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_artifact_lifecycle.py": {
+    "mtime": 1778049696.7872388,
+    "hash": "90266c164a3df5a0d55219550c7be0a1"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_chat_delete_confirmation.py": {
+    "mtime": 1778000076.9554892,
+    "hash": "c0e4a87d6f9d6d0e2523a93f51d70592"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_chat_outcome.py": {
+    "mtime": 1777842615.2360113,
+    "hash": "382960177c98782a868d75d924add3ff"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_chat_sessions.py": {
+    "mtime": 1778007056.3409235,
+    "hash": "2630817230af599618afbe468da4bd9e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_generating_indicator.py": {
+    "mtime": 1777840315.5377507,
+    "hash": "42ebd6bac585facb850ae791c5fc89c6"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_input_window_controls.py": {
+    "mtime": 1778356885.127835,
+    "hash": "5ceeabab07d763af20ec5326bf55064e"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_server_config.py": {
+    "mtime": 1778001492.6356735,
+    "hash": "2f2ffe1c495406572b8d554fb17261f0"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_server_security.py": {
+    "mtime": 1778314333.2087276,
+    "hash": "aca8f8ddcba8fa373be8b588c85f68a7"
+  },
+  "D:\\projects\\major\\project\\tests\\test_ui_vision_artifact.py": {
+    "mtime": 1778336772.9720707,
+    "hash": "4053da85284399ba5147a03e42de21ff"
+  },
+  "D:\\projects\\major\\project\\tests\\test_voice_command_flow.py": {
+    "mtime": 1777992364.1390195,
+    "hash": "ab1de3fc21d085f13f815e6cb392ea21"
+  },
+  "D:\\projects\\major\\project\\tests\\test_web_qa_agent.py": {
+    "mtime": 1778356872.3260436,
+    "hash": "27e1bb548262bd8f9d04044a57bcea2b"
+  },
+  "D:\\projects\\major\\project\\tests\\__init__.py": {
+    "mtime": 1772738833.1058397,
+    "hash": "ecf03b648120ab49cb28091eaeef2884"
+  },
+  "D:\\projects\\major\\project\\tests\\cua_vision_tasks\\fixtures.py": {
+    "mtime": 1778814020.510522,
+    "hash": "97818071ba2fecfb44ddec24510b303b"
+  },
+  "D:\\projects\\major\\project\\tests\\cua_vision_tasks\\__init__.py": {
+    "mtime": 1778771479.0595462,
+    "hash": "73592905c6f7bb193439df51357088a5"
+  },
+  "D:\\projects\\major\\project\\ui\\agent_work_trace.mjs": {
+    "mtime": 1778863344.4532955,
+    "hash": "193570683a161675fb54860f70c94ee7"
+  },
+  "D:\\projects\\major\\project\\ui\\artifact_lifecycle.js": {
+    "mtime": 1778049849.525481,
+    "hash": "b921d3d75343284f08eb4a1083ddb6a2"
+  },
+  "D:\\projects\\major\\project\\ui\\browser-api-shim.js": {
+    "mtime": 1778011468.6229248,
+    "hash": "831f88e551c83f0115e7db616f84e920"
+  },
+  "D:\\projects\\major\\project\\ui\\chat_outcome.mjs": {
+    "mtime": 1777842733.9853032,
+    "hash": "a86faac43c54001b49e4fe2470e7e68b"
+  },
+  "D:\\projects\\major\\project\\ui\\chat_reply_policy.mjs": {
+    "mtime": 1778356840.2296708,
+    "hash": "37a88312a53b5a66841338b3108c4f6c"
+  },
+  "D:\\projects\\major\\project\\ui\\chat_sessions.js": {
+    "mtime": 1778007263.9541724,
+    "hash": "47aea5bbdff6ad58c9c8ee00d184a806"
+  },
+  "D:\\projects\\major\\project\\ui\\forge.config.js": {
+    "mtime": 1777183186.569365,
+    "hash": "18403c809a3ff80c4efc3d24ae814031"
+  },
+  "D:\\projects\\major\\project\\ui\\generating_indicator.mjs": {
+    "mtime": 1777840340.3527143,
+    "hash": "a0de9d28b622d5d28a5391245a34c3e1"
+  },
+  "D:\\projects\\major\\project\\ui\\input_window.js": {
+    "mtime": 1778863246.5669253,
+    "hash": "b65e747cdd1422f6e78fd26e5665ce2f"
+  },
+  "D:\\projects\\major\\project\\ui\\main.js": {
+    "mtime": 1778049849.525481,
+    "hash": "97af887092b18e68e4ef5b95b6bf6215"
+  },
+  "D:\\projects\\major\\project\\ui\\preload.js": {
+    "mtime": 1778011434.4506907,
+    "hash": "4f506a8b4b43c6d4327a6b2a2f910771"
+  },
+  "D:\\projects\\major\\project\\ui\\renderer.js": {
+    "mtime": 1778009255.0757682,
+    "hash": "34debecadb20800058c4e88a8844d6bb"
+  },
+  "D:\\projects\\major\\project\\ui\\server.py": {
+    "mtime": 1778336772.9691594,
+    "hash": "cf7af3dfcbfb10eac8e087fcaf306bdb"
+  },
+  "D:\\projects\\major\\project\\ui\\server_config.js": {
+    "mtime": 1778001159.5979505,
+    "hash": "1d03132c18e326ca7be7735b3ddad0e4"
+  },
+  "D:\\projects\\major\\project\\ui\\status_lifecycle.js": {
+    "mtime": 1777230199.9193935,
+    "hash": "e4bbe7b192eefcd8174b091ccc37cc28"
+  },
+  "D:\\projects\\major\\project\\ui\\__init__.py": {
+    "mtime": 1771741350.128448,
+    "hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "D:\\projects\\major\\project\\ui\\animations\\command_overlay.js": {
+    "mtime": 1777230798.810421,
+    "hash": "7cae959164a6cc5e643ee01cf380d46f"
+  },
+  "D:\\projects\\major\\project\\ui\\animations\\cursor_status.js": {
+    "mtime": 1771741350.1304474,
+    "hash": "bcb8f3afd556969a8c78848f438b0e8b"
+  },
+  "D:\\projects\\major\\project\\ui\\animations\\overlay_image.js": {
+    "mtime": 1771741350.1321762,
+    "hash": "82e4f5d33359dbf41b183ee055da3d17"
+  },
+  "D:\\projects\\major\\project\\ui\\animations\\screen_glow.js": {
+    "mtime": 1771741350.1331751,
+    "hash": "4670491c62d5742a21ec8fa8ef23dc49"
+  },
+  "D:\\projects\\major\\project\\ui\\animations\\status_bubble.js": {
+    "mtime": 1777230865.751438,
+    "hash": "a0d445aa2b07d8a0d09affb049be9bc2"
+  },
+  "D:\\projects\\major\\project\\ui\\dom_nodes\\overlay_box.js": {
+    "mtime": 1771741350.1361737,
+    "hash": "1c66d3b53c03206d0414d98139004678"
+  },
+  "D:\\projects\\major\\project\\ui\\dom_nodes\\overlay_text.js": {
+    "mtime": 1771741350.1371748,
+    "hash": "a24edfdcf1e89b3ec53394e2401df9be"
+  },
+  "D:\\projects\\major\\project\\ui\\scripts\\start-electron.js": {
+    "mtime": 1777222323.2942908,
+    "hash": "d7e488c194144cbccc52c4196d944c4c"
+  },
+  "D:\\projects\\major\\project\\ui\\scripts\\windows-signing.js": {
+    "mtime": 1777183218.0285785,
+    "hash": "09855273785a54223681cd1a8a455800"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\chat_artifact.py": {
+    "mtime": 1778007173.6194158,
+    "hash": "af8269268c59b8704a61b4ec6486de5d"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\chat_response.py": {
+    "mtime": 1778314366.6643863,
+    "hash": "1ac8c95691717d0a273c155dda9bd2dc"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\chat_visibility.py": {
+    "mtime": 1778009920.5013561,
+    "hash": "ecd5c95d8937b18a7cc6ab97a105f9a9"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\clear_screen.py": {
+    "mtime": 1771741350.1441748,
+    "hash": "efc128e49f1aff77c839328393b612bd"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\client.py": {
+    "mtime": 1778001171.166543,
+    "hash": "5dc68a92112981bc86a2f948c6f99396"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\create_text.py": {
+    "mtime": 1771741350.1441748,
+    "hash": "bc79dcfce91bc8825ad55fe3b0ed82eb"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\cursor_status.py": {
+    "mtime": 1771741350.145179,
+    "hash": "c79b17c808e5a4748c8e71d9630664be"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\destroy_box.py": {
+    "mtime": 1771741350.145179,
+    "hash": "c4b58481d7ab1e2b366c8b3b4acba57b"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\destroy_text.py": {
+    "mtime": 1771741350.145179,
+    "hash": "a37ba7b8aa63478838634f8444e8dd90"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\draw_bounding_box.py": {
+    "mtime": 1771741350.1461756,
+    "hash": "e323ce449b1ce413274fbe50e095438b"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\draw_dot.py": {
+    "mtime": 1771741350.1461756,
+    "hash": "b8446d714361c995fdb66cd50c60a010"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\status_bubble.py": {
+    "mtime": 1771741350.147175,
+    "hash": "65701b9057f3aade96ee833dde26efa3"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\__init__.py": {
+    "mtime": 1771741350.1431744,
+    "hash": "81051bcc2cf1bedf378224b0a93e2877"
+  },
+  "D:\\projects\\major\\project\\AI_SLOP_AUDIT.md": {
+    "mtime": 1778771479.0395248,
+    "hash": "5b86b353bc429a3ed5548ef6a981d372"
+  },
+  "D:\\projects\\major\\project\\battery-report.html": {
+    "mtime": 1777918466.994146,
+    "hash": "036c9d46a22a4efd24dee74e90e46e86"
+  },
+  "D:\\projects\\major\\project\\CODEBASE_DOCUMENTATION.md": {
+    "mtime": 1776953473.3859882,
+    "hash": "e330b5f7db95266d9956f3f5bf912a81"
+  },
+  "D:\\projects\\major\\project\\README.md": {
+    "mtime": 1778336623.862011,
+    "hash": "230a4ea98f731e2cfdd71d1a77a24978"
+  },
+  "D:\\projects\\major\\project\\requirements.txt": {
+    "mtime": 1778074100.6856318,
+    "hash": "382e19a2bb9d90eb449f543b1f411968"
+  },
+  "D:\\projects\\major\\project\\UI_ENHANCEMENT_PLAN.md": {
+    "mtime": 1777020221.344979,
+    "hash": "a750d319cd8cbbe267ad28cab16c4cae"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\README.md": {
+    "mtime": 1771741349.8753405,
+    "hash": "d380a717cbc0916145321709070e6489"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\actor\\README.md": {
+    "mtime": 1771741349.876341,
+    "hash": "bebf39e727c65b3793f90674d3bbbdfc"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt.md": {
+    "mtime": 1771741349.8854823,
+    "hash": "e2142ff68ef48363f93d1979801fd9f2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_anthropic_flash.md": {
+    "mtime": 1771741349.8864827,
+    "hash": "6bb8a97c4518dfe597754c21be9257a2"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_browser_use.md": {
+    "mtime": 1771741349.8864827,
+    "hash": "12b5133913bba2d48253675dd263e296"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_browser_use_flash.md": {
+    "mtime": 1771741349.8874848,
+    "hash": "31eafac875847c57945a103c01a89df1"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_browser_use_no_thinking.md": {
+    "mtime": 1771741349.8874848,
+    "hash": "21420a328cfe1d1b9ba47b2d83c7a877"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_flash.md": {
+    "mtime": 1771741349.8874848,
+    "hash": "cdefc90fe94b71ed6f7351252697f7d9"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_flash_anthropic.md": {
+    "mtime": 1771741349.8884826,
+    "hash": "9d7628d181c178d125d5b20b6ee6149c"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\agent\\system_prompts\\system_prompt_no_thinking.md": {
+    "mtime": 1771741349.8884826,
+    "hash": "e35b51be4dd17a68a8aa274bb53adb27"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\README.md": {
+    "mtime": 1771741349.91424,
+    "hash": "48060f09056299b4484f194ab9daae9f"
+  },
+  "D:\\projects\\major\\project\\agents\\browser\\browser_use\\llm\\oci_raw\\README.md": {
+    "mtime": 1771741349.9283843,
+    "hash": "f35090a3a168aa9be765548c467c8059"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\GEMINI.md": {
+    "mtime": 1771741349.9557068,
+    "hash": "b588f12a36c299e0e88ac57dd512f594"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\README.md": {
+    "mtime": 1771741349.9557068,
+    "hash": "fc85456eadf0a7a5f748a4624ec49ed4"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\cli\\GEMINI.md": {
+    "mtime": 1771741349.9597073,
+    "hash": "f84a7646ca6fccc7b3e071626cce1526"
+  },
+  "D:\\projects\\major\\project\\agents\\cua_cli\\gemini-cli\\packages\\core\\src\\skills\\builtin\\skill-creator\\SKILL.md": {
+    "mtime": 1771741350.046068,
+    "hash": "b1905038cb409b34d5ef693ab667e320"
+  },
+  "D:\\projects\\major\\project\\docs\\audits\\ai-slop\\AI_SLOP_AUDIT.md": {
+    "mtime": 1779019917.1583443,
+    "hash": "0e97fada7c3e394422010aaafbf466e1"
+  },
+  "D:\\projects\\major\\project\\docs\\audits\\ai-slop\\MODEL_ROUTER_REMEDIATION_TASKS.md": {
+    "mtime": 1779019891.4386637,
+    "hash": "6684274ac9e058430ad856eead27fd62"
+  },
+  "D:\\projects\\major\\project\\docs\\superpowers\\plans\\2026-05-06-artifact-lifecycle-cleanup.md": {
+    "mtime": 1778049696.7872388,
+    "hash": "1f8405c59e03e9851cbe0f3e97a36256"
+  },
+  "D:\\projects\\major\\project\\docs\\superpowers\\plans\\2026-05-06-hybrid-playwright-browser-agent.md": {
+    "mtime": 1778142906.6290262,
+    "hash": "dafdf661124e1bb417dda1f7fcda80a0"
+  },
+  "D:\\projects\\major\\project\\docs\\superpowers\\plans\\2026-05-09-web-qa-agent.md": {
+    "mtime": 1778336623.8679435,
+    "hash": "510cf4558b419a084d195100234dfa2d"
+  },
+  "D:\\projects\\major\\project\\docs\\superpowers\\plans\\2026-05-14-cua-rearchitecture.md": {
+    "mtime": 1778771479.054581,
+    "hash": "b1b6d7308e0079bde35eabb49fee5296"
+  },
+  "D:\\projects\\major\\project\\docs\\superpowers\\plans\\2026-05-15-mas-orchestrator-lld.md": {
+    "mtime": 1778863377.184133,
+    "hash": "91053cf35c9bbd0f070195efe47ec428"
+  },
+  "D:\\projects\\major\\project\\ui\\ENTERPRISE_SIGNING.md": {
+    "mtime": 1777222416.3999825,
+    "hash": "0dc865d10ff6ca45c464aede8f3bc796"
+  },
+  "D:\\projects\\major\\project\\ui\\index.html": {
+    "mtime": 1777230234.2753198,
+    "hash": "f12d7e371b302add4cf82bc612f093ad"
+  },
+  "D:\\projects\\major\\project\\ui\\input.html": {
+    "mtime": 1778005814.324062,
+    "hash": "ba61979e88c32c252607c4ac7d96afb4"
+  },
+  "D:\\projects\\major\\project\\ui\\overlay.html": {
+    "mtime": 1777126260.006672,
+    "hash": "555614431aebb090f3fd400b23f66d0e"
+  },
+  "D:\\projects\\major\\project\\ui\\visualization_api\\README.md": {
+    "mtime": 1771741350.1431744,
+    "hash": "d6949af0b138d9ce34d85149970a7ebb"
+  },
+  "D:\\projects\\major\\project\\ui\\assets\\assistant_mark.svg": {
+    "mtime": 1772028840.856192,
+    "hash": "22da1baa0bee5663be84477fa62151b1"
+  },
+  "D:\\projects\\major\\project\\ui\\assets\\gemini_icon.png": {
+    "mtime": 1771741350.1361737,
+    "hash": "7c55af901faf5c1f9fee8ed2bb61c35d"
+  }
+}

@@ -13,6 +13,8 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
 from agents.browser.agent import BrowserAgent
+from agents.browser.browser_use_boundary import BrowserUseLifecycle
+import models.browser_resume_route as browser_resume_route
 import models.models as model_module
 
 
@@ -31,11 +33,17 @@ class _FakeAgentState:
         self.follow_up_task = False
 
 
+class _FailingStopBrowserUseAgent:
+    def stop(self):
+        raise RuntimeError("browser-use stop hook failed")
+
+
 async def test_stop_request_reaches_registered_browser_use_agent() -> None:
-    original_agents = set(BrowserAgent._active_browser_use_agents)
-    original_stop_requested = BrowserAgent._browser_use_stop_requested
+    original_lifecycle = BrowserAgent._browser_use_lifecycle
+    original_failures = BrowserAgent._last_browser_use_stop_failures
     try:
-        BrowserAgent._active_browser_use_agents.clear()
+        BrowserAgent._browser_use_lifecycle = BrowserUseLifecycle()
+        BrowserAgent._last_browser_use_stop_failures = ()
         BrowserAgent.clear_stop_request()
         fake_agent = _FakeBrowserUseAgent()
 
@@ -46,15 +54,35 @@ async def test_stop_request_reaches_registered_browser_use_agent() -> None:
         assert fake_agent.stop_calls == 1, fake_agent.stop_calls
         assert await BrowserAgent._should_stop_browser_use_agent()
     finally:
-        BrowserAgent._active_browser_use_agents = original_agents
-        BrowserAgent._browser_use_stop_requested = original_stop_requested
+        BrowserAgent._browser_use_lifecycle = original_lifecycle
+        BrowserAgent._last_browser_use_stop_failures = original_failures
+
+
+async def test_stop_request_surfaces_browser_use_lifecycle_failures() -> None:
+    original_lifecycle = BrowserAgent._browser_use_lifecycle
+    original_failures = BrowserAgent._last_browser_use_stop_failures
+    try:
+        BrowserAgent._browser_use_lifecycle = BrowserUseLifecycle()
+        BrowserAgent._last_browser_use_stop_failures = ()
+
+        BrowserAgent._register_active_browser_use_agent(_FakeBrowserUseAgent())
+        BrowserAgent._register_active_browser_use_agent(_FailingStopBrowserUseAgent())
+        stopped = BrowserAgent.request_stop_all()
+
+        assert stopped == 1, stopped
+        assert len(BrowserAgent._last_browser_use_stop_failures) == 1
+        failure = BrowserAgent._last_browser_use_stop_failures[0]
+        assert failure.operation == "agent.stop", failure
+        assert "browser-use stop hook failed" in str(failure.error), failure
+    finally:
+        BrowserAgent._browser_use_lifecycle = original_lifecycle
+        BrowserAgent._last_browser_use_stop_failures = original_failures
 
 
 async def test_interrupted_browser_use_state_can_be_resumed_without_losing_context() -> None:
-    original_state = BrowserAgent._interrupted_browser_use_state
-    original_task = BrowserAgent._interrupted_browser_use_task
-    original_summary = BrowserAgent._interrupted_browser_use_summary
+    original_lifecycle = BrowserAgent._browser_use_lifecycle
     try:
+        BrowserAgent._browser_use_lifecycle = BrowserUseLifecycle()
         state = _FakeAgentState()
         fake_agent = type("AgentWithState", (), {"state": state})()
         BrowserAgent._remember_interrupted_browser_use_agent(
@@ -73,34 +101,33 @@ async def test_interrupted_browser_use_state_can_be_resumed_without_losing_conte
         assert resumed_state.stopped is False
         assert resumed_state.follow_up_task is True
     finally:
-        BrowserAgent._interrupted_browser_use_state = original_state
-        BrowserAgent._interrupted_browser_use_task = original_task
-        BrowserAgent._interrupted_browser_use_summary = original_summary
+        BrowserAgent._browser_use_lifecycle = original_lifecycle
 
 
 async def test_router_routes_continue_to_interrupted_browser_work() -> None:
-    original_state = BrowserAgent._interrupted_browser_use_state
-    original_task = BrowserAgent._interrupted_browser_use_task
-    original_summary = BrowserAgent._interrupted_browser_use_summary
+    original_lifecycle = BrowserAgent._browser_use_lifecycle
     try:
-        BrowserAgent._interrupted_browser_use_state = _FakeAgentState()
-        BrowserAgent._interrupted_browser_use_task = "open the dashboard and finish setup"
-        BrowserAgent._interrupted_browser_use_summary = "Stopped during browser setup."
+        BrowserAgent._browser_use_lifecycle = BrowserUseLifecycle()
+        fake_agent = type("AgentWithState", (), {"state": _FakeAgentState()})()
+        BrowserAgent._remember_interrupted_browser_use_agent(
+            fake_agent,
+            task="open the dashboard and finish setup",
+            summary="Stopped during browser setup.",
+        )
 
-        routed = model_module._resume_interrupted_agent_route("continue where you left off")
+        routed = browser_resume_route.build_browser_resume_route("continue where you left off")
 
         assert routed == {
             "agent": "browser",
             "task": "open the dashboard and finish setup",
         }, routed
     finally:
-        BrowserAgent._interrupted_browser_use_state = original_state
-        BrowserAgent._interrupted_browser_use_task = original_task
-        BrowserAgent._interrupted_browser_use_summary = original_summary
+        BrowserAgent._browser_use_lifecycle = original_lifecycle
 
 
 if __name__ == "__main__":
     asyncio.run(test_stop_request_reaches_registered_browser_use_agent())
+    asyncio.run(test_stop_request_surfaces_browser_use_lifecycle_failures())
     asyncio.run(test_interrupted_browser_use_state_can_be_resumed_without_losing_context())
     asyncio.run(test_router_routes_continue_to_interrupted_browser_work())
     print("[test_agent_stop_resume] All checks passed.")

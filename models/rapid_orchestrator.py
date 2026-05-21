@@ -3,260 +3,72 @@ Rapid-response orchestration flow extracted from models.models.
 """
 
 from __future__ import annotations
-
-import re
-import time
-import traceback
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Optional
+
+from models.orchestrator_adapters import plan_from_route, route_from_task
+from models.rapid_plan_orchestrator import execute_rapid_plan_payload, is_plan_payload
+from models.rapid_completion_recovery_policy import (
+    evaluate_incomplete_step_recovery,
+)
+from models.rapid_direct_answer_flow import try_handle_direct_qa_request
+from models.rapid_orchestrator_outcomes import (
+    RapidRequestOutcomeReporter,
+    raise_structural_subflow_error,
+)
+from models.rapid_orchestrator_contracts import (
+    RapidAgentStepResult,
+    RapidAssistantLogger,
+    RapidChainFormatter,
+    RapidDirectAnswerer,
+    RapidDirectQaPredicate,
+    RapidDirectResponseFinalizer,
+    RapidHistoryAppender,
+    RapidHistoryFormatter,
+    RapidModelFactory,
+    RapidRepeatPredicate,
+    RapidRoutingGuardrails,
+    RapidRoutingResultEnricher,
+    RapidRoutingSignature,
+    RapidRoutingTaskText,
+    RapidScreenContextMessage,
+    RapidScreenshotGetter,
+    RapidScreenshotPreparer,
+    RapidStepContextRecorder,
+    RapidStepRunner,
+    RapidTextCleaner,
+    RapidToolMap,
+    RapidRouteResult,
+)
+from models.routing_payload_parser import BlockedStepSignature, ScreenContextPayload
+from models.rapid_step_execution_runtime import execute_delegated_step
 
 
 @dataclass(slots=True)
 class RapidOrchestratorDeps:
-    model_factory: Callable[[str, str], Any]
-    append_rapid_history: Callable[[str, str, str], None]
-    format_rapid_history_for_prompt: Callable[[], str]
-    run_routed_agent_step: Callable[..., Awaitable[dict[str, Any]]]
-    enrich_routing_result: Callable[[dict[str, Any], str], dict[str, Any]]
-    record_step_context: Callable[[dict[str, Any]], None]
-    get_stored_screenshot: Callable[[], Any]
-    prepare_vision_screenshot: Callable[..., Awaitable[Any]]
-    clean_text: Callable[[object, str, int | None], str]
-    format_chain_state_for_prompt: Callable[..., str]
-    apply_routing_guardrails: Callable[..., dict[str, Any]]
-    routing_task_text: Callable[[dict[str, Any]], str]
-    routing_signature: Callable[[dict[str, Any]], tuple[str, str]]
-    user_requested_repeat: Callable[[str], bool]
-    finalize_direct_response_text: Callable[..., str]
-    is_direct_qa_request: Callable[[str], bool]
-    answer_direct_request: Callable[..., Awaitable[str]]
-    screen_context_message: Callable[[dict[str, Any]], str]
-    router_tool_map: dict[str, Any]
-    log_assistant_event: Callable[..., None]
+    model_factory: RapidModelFactory
+    append_rapid_history: RapidHistoryAppender
+    format_rapid_history_for_prompt: RapidHistoryFormatter
+    run_routed_agent_step: RapidStepRunner
+    enrich_routing_result: RapidRoutingResultEnricher
+    record_step_context: RapidStepContextRecorder
+    get_stored_screenshot: RapidScreenshotGetter
+    prepare_vision_screenshot: RapidScreenshotPreparer
+    clean_text: RapidTextCleaner
+    format_chain_state_for_prompt: RapidChainFormatter
+    apply_routing_guardrails: RapidRoutingGuardrails
+    routing_task_text: RapidRoutingTaskText
+    routing_signature: RapidRoutingSignature
+    user_requested_repeat: RapidRepeatPredicate
+    finalize_direct_response_text: RapidDirectResponseFinalizer
+    is_direct_qa_request: RapidDirectQaPredicate
+    answer_direct_request: RapidDirectAnswerer
+    screen_context_message: RapidScreenContextMessage
+    router_tool_map: RapidToolMap
+    log_assistant_event: RapidAssistantLogger
     rapid_response_system_prompt: str
     max_router_chain_steps: int
     repeated_step_limit: int
-
-
-def _normalized_task_text(value: object) -> str:
-    return " ".join(str(value or "").split()).strip().lower()
-
-
-_TASK_TOKEN_RE = re.compile(r"[a-z0-9]+")
-_TASK_TOKEN_STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "been",
-        "being",
-        "can",
-        "could",
-        "com",
-        "current",
-        "do",
-        "does",
-        "for",
-        "from",
-        "http",
-        "https",
-        "i",
-        "in",
-        "is",
-        "it",
-        "its",
-        "just",
-        "main",
-        "me",
-        "my",
-        "of",
-        "on",
-        "or",
-        "please",
-        "should",
-        "that",
-        "the",
-        "this",
-        "to",
-        "using",
-        "was",
-        "were",
-        "what",
-        "whats",
-        "will",
-        "with",
-        "would",
-        "www",
-        "you",
-    }
-)
-_TASK_TOKEN_SYNONYMS = {
-    "analysed": "analyze",
-    "analyses": "analyze",
-    "analysing": "analyze",
-    "analysis": "analyze",
-    "analyse": "analyze",
-    "extract": "read",
-    "extracted": "read",
-    "extracting": "read",
-    "fetch": "read",
-    "fetched": "read",
-    "fetching": "read",
-    "findings": "finding",
-    "headings": "heading",
-    "locally": "local",
-    "readable": "read",
-    "reading": "read",
-    "repository": "repo",
-    "repositories": "repo",
-    "said": "content",
-    "say": "content",
-    "says": "content",
-    "summaries": "summarize",
-    "summarise": "summarize",
-    "summarised": "summarize",
-    "summarises": "summarize",
-    "summarising": "summarize",
-    "summary": "summarize",
-    "titles": "title",
-    "urls": "url",
-    "webpage": "page",
-    "webpages": "page",
-    "website": "site",
-    "websites": "site",
-}
-
-
-def _canonical_task_token(token: str) -> str:
-    mapped = _TASK_TOKEN_SYNONYMS.get(token)
-    if mapped:
-        return mapped
-    if len(token) > 4 and token.endswith("ies"):
-        return token[:-3] + "y"
-    if len(token) > 5 and token.endswith("ing"):
-        return token[:-3]
-    if len(token) > 4 and token.endswith("ed"):
-        return token[:-2]
-    if len(token) > 3 and token.endswith("s"):
-        return token[:-1]
-    return token
-
-
-def _meaningful_task_tokens(value: object) -> set[str]:
-    tokens: set[str] = set()
-    for raw_token in _TASK_TOKEN_RE.findall(_normalized_task_text(value)):
-        token = _canonical_task_token(raw_token)
-        if len(token) < 2 or token in _TASK_TOKEN_STOPWORDS:
-            continue
-        tokens.add(token)
-    return tokens
-
-
-def _routed_task_covers_user_request(
-    *,
-    user_prompt: str,
-    routing_result: dict[str, Any],
-    step_result: dict[str, Any],
-    routing_task_text: Callable[[dict[str, Any]], str],
-) -> bool:
-    requested_tokens = _meaningful_task_tokens(user_prompt)
-    if not requested_tokens:
-        return False
-
-    candidate_tokens = set()
-    candidate_tokens.update(_meaningful_task_tokens(routing_task_text(routing_result)))
-    candidate_tokens.update(_meaningful_task_tokens(step_result.get("task")))
-    if not candidate_tokens:
-        return False
-
-    return requested_tokens.issubset(candidate_tokens)
-
-
-def _step_marked_complete(step_result: dict[str, Any]) -> bool:
-    return step_result.get("complete", True) is not False
-
-
-def _latest_unresolved_incomplete_step(chain_steps: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for step in reversed(chain_steps):
-        if str(step.get("agent") or "").strip().lower() == "router_guard":
-            continue
-        if step.get("success") and _step_marked_complete(step):
-            return None
-        if step.get("success") and not _step_marked_complete(step):
-            return step
-    return None
-
-
-def _recovery_route_for_incomplete_step(
-    *,
-    user_prompt: str,
-    incomplete_step: dict[str, Any],
-) -> dict[str, Any] | None:
-    agent = str(incomplete_step.get("agent") or "").strip().lower()
-    if agent == "browser":
-        return {
-            "agent": "cua_vision",
-            "task": (
-                "Continue in the currently open browser window and finish the original "
-                f"user request: {user_prompt}"
-            ),
-        }
-    return None
-
-
-def _route_repeats_incomplete_step(
-    *,
-    routing_result: dict[str, Any],
-    incomplete_step: dict[str, Any],
-    routing_task_text: Callable[[dict[str, Any]], str],
-) -> bool:
-    route_agent = str(routing_result.get("agent") or "").strip().lower()
-    step_agent = str(incomplete_step.get("agent") or "").strip().lower()
-    if route_agent != step_agent:
-        return False
-    return _normalized_task_text(routing_task_text(routing_result)) == _normalized_task_text(
-        incomplete_step.get("task")
-    )
-
-
-def _should_finish_after_successful_agent_step(
-    *,
-    user_prompt: str,
-    routing_result: dict[str, Any],
-    step_result: dict[str, Any],
-    chain_steps: list[dict[str, Any]],
-    routing_task_text: Callable[[dict[str, Any]], str],
-) -> bool:
-    if not step_result.get("success"):
-        return False
-    if not _step_marked_complete(step_result):
-        return False
-    if len(chain_steps) != 1:
-        return False
-
-    agent = str(step_result.get("agent") or routing_result.get("agent") or "").strip().lower()
-    if agent not in {"browser", "cua_cli", "cua_vision", "web_qa"}:
-        return False
-
-    requested = _normalized_task_text(user_prompt)
-    if not requested:
-        return False
-
-    routed_task = _normalized_task_text(routing_task_text(routing_result))
-    completed_task = _normalized_task_text(step_result.get("task"))
-    if requested in {routed_task, completed_task}:
-        return True
-    return _routed_task_covers_user_request(
-        user_prompt=user_prompt,
-        routing_result=routing_result,
-        step_result=step_result,
-        routing_task_text=routing_task_text,
-    )
-
 
 async def run_rapid_request(
     *,
@@ -273,59 +85,29 @@ async def run_rapid_request(
 
     deps.append_rapid_history("user", user_prompt, "user")
 
-    chain_steps: list[dict[str, Any]] = []
-    seen_step_signatures: dict[tuple[str, str], int] = {}
-    blocked_step_signatures: set[tuple[str, str]] = set()
-    latest_screen_context: Optional[dict[str, Any]] = None
+    chain_steps: list[RapidAgentStepResult] = []
+    seen_step_signatures: dict[BlockedStepSignature, int] = {}
+    blocked_step_signatures: set[BlockedStepSignature] = set()
+    latest_screen_context: Optional[ScreenContextPayload] = None
+    outcomes = RapidRequestOutcomeReporter(
+        request_id=request_id,
+        user_prompt=user_prompt,
+        append_rapid_history=deps.append_rapid_history,
+        clean_text=deps.clean_text,
+        finalize_direct_response_text=deps.finalize_direct_response_text,
+        log_assistant_event=deps.log_assistant_event,
+        router_tool_map=deps.router_tool_map,
+    )
 
     if deps.is_direct_qa_request(user_prompt):
-        direct_started = time.monotonic()
-        try:
-            direct_answer = await deps.answer_direct_request(
-                model=model,
-                user_prompt=user_prompt,
-                history_block=deps.format_rapid_history_for_prompt(),
-            )
-            direct_text = deps.finalize_direct_response_text(
-                user_prompt=user_prompt,
-                chain_steps=chain_steps,
-                text=direct_answer,
-            )
-            deps.log_assistant_event(
-                "router_decision",
-                request_id=request_id,
-                agent="direct",
-                task=deps.clean_text(user_prompt, "", 420),
-                duration_seconds=time.monotonic() - direct_started,
-                metadata={"step_index": 0, "reason": "direct_qa_fast_path"},
-            )
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                tool(text=direct_text, source="rapid_response")
-            deps.append_rapid_history("assistant", direct_text, "rapid")
-            deps.log_assistant_event(
-                "request_completed",
-                request_id=request_id,
-                agent="direct",
-                task=deps.clean_text(user_prompt, "", 420),
-                message=direct_text,
-                success=True,
-                duration_seconds=time.monotonic() - direct_started,
-                metadata={"delegated_steps": 0, "fast_direct_qa": True},
-            )
+        if await try_handle_direct_qa_request(
+            model=model,
+            user_prompt=user_prompt,
+            request_id=request_id,
+            deps=deps,
+            chain_steps=chain_steps,
+        ):
             return
-        except Exception as exc:
-            error_text = deps.clean_text(str(exc), "Direct answer failed.", 420)
-            deps.log_assistant_event(
-                "direct_answer_failed",
-                request_id=request_id,
-                agent="direct",
-                task=deps.clean_text(user_prompt, "", 420),
-                message=error_text,
-                error=str(exc),
-                success=False,
-                duration_seconds=time.monotonic() - direct_started,
-            )
 
     for step_index in range(deps.max_router_chain_steps):
         history_block = deps.format_rapid_history_for_prompt()
@@ -346,40 +128,38 @@ async def run_rapid_request(
         try:
             routing_result = await model.route_request(rapid_prompt)
         except Exception as exc:
+            raise_structural_subflow_error(exc)
             error_text = deps.clean_text(str(exc), "Router failed.", 420)
-            router_error = f"Router failed: {error_text}"
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                tool(text=router_error, source="rapid_response")
-            deps.append_rapid_history("assistant", router_error, "rapid")
-            deps.log_assistant_event(
-                "request_failed",
-                request_id=request_id,
+            outcomes.fail_request(
                 agent="router",
-                task=deps.clean_text(user_prompt, "", 420),
-                message=router_error,
+                message=f"Router failed: {error_text}",
                 error=error_text,
-                success=False,
                 metadata={"step_index": step_index + 1},
             )
             return
 
         if not isinstance(routing_result, dict):
-            router_error = "Router failed: invalid routing response shape."
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                tool(text=router_error, source="rapid_response")
-            deps.append_rapid_history("assistant", router_error, "rapid")
-            deps.log_assistant_event(
-                "request_failed",
-                request_id=request_id,
+            outcomes.fail_request(
                 agent="router",
-                task=deps.clean_text(user_prompt, "", 420),
-                message=router_error,
+                message="Router failed: invalid routing response shape.",
                 error="Invalid routing response shape.",
-                success=False,
                 metadata={"step_index": step_index + 1},
             )
+            return
+
+        if is_plan_payload(routing_result):
+            plan_result = await execute_rapid_plan_payload(
+                routing_result=routing_result,
+                user_prompt=user_prompt,
+                model=model,
+                jarvis_model=jarvis_model,
+                request_id=request_id,
+                deps=deps,
+                step_index=step_index,
+                latest_screen_context=latest_screen_context,
+            )
+            chain_steps.extend(plan_result.chain_steps)
+            latest_screen_context = plan_result.latest_screen_context
             return
 
         routing_result = deps.apply_routing_guardrails(
@@ -388,24 +168,16 @@ async def run_rapid_request(
             latest_screen_context=latest_screen_context,
         )
         routing_result = deps.enrich_routing_result(routing_result, user_prompt)
-        incomplete_step = _latest_unresolved_incomplete_step(chain_steps)
-        should_recover_from_incomplete = (
-            incomplete_step is not None
-            and (
-                routing_result.get("agent") == "direct"
-                or _route_repeats_incomplete_step(
-                    routing_result=routing_result,
-                    incomplete_step=incomplete_step,
-                    routing_task_text=deps.routing_task_text,
-                )
-            )
+        recovery_decision = evaluate_incomplete_step_recovery(
+            user_prompt=user_prompt,
+            routing_result=routing_result,
+            chain_steps=chain_steps,
+            routing_task_text=deps.routing_task_text,
         )
-        if should_recover_from_incomplete and incomplete_step is not None:
-            recovery_route = _recovery_route_for_incomplete_step(
-                user_prompt=user_prompt,
-                incomplete_step=incomplete_step,
-            )
-            if recovery_route is not None:
+        if recovery_decision is not None:
+            incomplete_step = recovery_decision.incomplete_step
+            recovery_route = recovery_decision.recovery_route
+            if recovery_route:
                 guard_msg = (
                     "Router attempted to finish or repeat an incomplete delegated step. "
                     "Continuing with a different agent so the original request can be completed."
@@ -436,6 +208,10 @@ async def run_rapid_request(
                 )
                 routing_result = recovery_route
 
+        orchestration_plan = plan_from_route(user_prompt, routing_result, max_parallel=1)
+        orchestration_task = orchestration_plan.tasks[0]
+        routing_result = route_from_task(orchestration_task)
+
         deps.log_assistant_event(
             "router_decision",
             request_id=request_id,
@@ -446,27 +222,11 @@ async def run_rapid_request(
 
         if routing_result.get("agent") == "direct":
             direct_args = routing_result.get("direct_response_args")
-            if not isinstance(direct_args, dict):
-                direct_args = {}
-            raw_direct_text = direct_args.get("text") or routing_result.get("response_text")
-            direct_text = deps.finalize_direct_response_text(
-                user_prompt=user_prompt,
+            outcomes.complete_direct_response(
+                response_text=routing_result.get("response_text"),
                 chain_steps=chain_steps,
-                text=raw_direct_text,
-            )
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                safe_args = dict(direct_args)
-                safe_args.pop("text", None)
-                tool(text=direct_text, source="rapid_response", **safe_args)
-            deps.append_rapid_history("assistant", direct_text, "rapid")
-            deps.log_assistant_event(
-                "request_completed",
-                request_id=request_id,
                 agent="direct",
-                task=deps.clean_text(user_prompt, "", 420),
-                message=direct_text,
-                success=True,
+                direct_args=direct_args if isinstance(direct_args, dict) else None,
                 metadata={"delegated_steps": len(chain_steps)},
             )
             return
@@ -526,173 +286,33 @@ async def run_rapid_request(
             )
             continue
 
-        if routing_result.get("agent") == "screen_context":
-            judge_task = routing_result.get("task") or user_prompt
-            focus = routing_result.get("focus") or ""
-            print(
-                f"[Router][Chain] Step {step_index + 1}/{deps.max_router_chain_steps}: "
-                f"agent=screen_context task={deps.clean_text(judge_task, '', 200)}"
-            )
-            screenshot = await deps.prepare_vision_screenshot(keep_chat_hidden=False)
-            screen_context_started = time.monotonic()
-            deps.log_assistant_event(
-                "agent_step_started",
-                request_id=request_id,
-                agent="screen_context",
-                task=deps.clean_text(judge_task, "", 420),
-                metadata={"focus": deps.clean_text(focus, "", 220)},
-            )
-            try:
-                latest_screen_context = await model.generate_screen_context(
-                    user_request=judge_task,
-                    image=screenshot,
-                    focus=focus,
-                )
-                message = deps.screen_context_message(latest_screen_context)
-                step_result = {
-                    "agent": "screen_context",
-                    "task": deps.clean_text(judge_task, "", 220),
-                    "success": True,
-                    "message": message,
-                    "source": "screen_judge",
-                }
-                deps.log_assistant_event(
-                    "agent_step_completed",
-                    request_id=request_id,
-                    agent="screen_context",
-                    task=deps.clean_text(judge_task, "", 420),
-                    message=message,
-                    success=True,
-                    duration_seconds=time.monotonic() - screen_context_started,
-                    metadata=latest_screen_context,
-                )
-            except Exception as exc:
-                step_result = {
-                    "agent": "screen_context",
-                    "task": deps.clean_text(judge_task, "", 220),
-                    "success": False,
-                    "message": deps.clean_text(str(exc), "Failed to collect screen context.", 420),
-                    "source": "screen_judge",
-                }
-                deps.log_assistant_event(
-                    "agent_step_failed",
-                    request_id=request_id,
-                    agent="screen_context",
-                    task=deps.clean_text(judge_task, "", 420),
-                    message=step_result["message"],
-                    error=str(exc),
-                    success=False,
-                    duration_seconds=time.monotonic() - screen_context_started,
-                    metadata={"traceback": traceback.format_exc()},
-                )
-
-            chain_steps.append(step_result)
-            deps.append_rapid_history(
-                "assistant",
-                step_result.get("message", ""),
-                step_result.get("source", "rapid"),
-            )
-            if not step_result.get("success"):
-                failure_msg = (
-                    f"Stopping chained execution because screen context failed: "
-                    f"{step_result.get('message')}"
-                )
-                tool = deps.router_tool_map.get("direct_response")
-                if tool:
-                    tool(text=deps.clean_text(failure_msg, "Task failed.", 420), source="rapid_response")
-                deps.append_rapid_history("assistant", failure_msg, "rapid")
-                deps.log_assistant_event(
-                    "request_failed",
-                    request_id=request_id,
-                    agent="screen_context",
-                    task=deps.clean_text(judge_task, "", 420),
-                    message=failure_msg,
-                    error=step_result.get("message", ""),
-                    success=False,
-                )
-                return
-            continue
-
         print(
             f"[Router][Chain] Step {step_index + 1}/{deps.max_router_chain_steps}: "
             f"agent={routing_result.get('agent')} task={deps.routing_task_text(routing_result)}"
         )
-        step_result = await deps.run_routed_agent_step(
+        step_execution = await execute_delegated_step(
             model=model,
             routing_result=routing_result,
+            user_prompt=user_prompt,
             jarvis_model=jarvis_model,
             request_id=request_id,
-            prepare_vision_screenshot=deps.prepare_vision_screenshot,
-        )
-        chain_steps.append(step_result)
-        deps.record_step_context(step_result)
-        deps.append_rapid_history(
-            "assistant",
-            step_result.get("message", ""),
-            step_result.get("source", "rapid"),
-        )
-        if _should_finish_after_successful_agent_step(
-            user_prompt=user_prompt,
-            routing_result=routing_result,
-            step_result=step_result,
+            deps=deps,
             chain_steps=chain_steps,
-            routing_task_text=deps.routing_task_text,
-        ):
-            direct_text = deps.finalize_direct_response_text(
-                user_prompt=user_prompt,
-                chain_steps=chain_steps,
-                text=step_result.get("message"),
-            )
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                tool(text=direct_text, source="rapid_response")
-            deps.append_rapid_history("assistant", direct_text, "rapid")
-            deps.log_assistant_event(
-                "request_completed",
-                request_id=request_id,
-                agent=str(step_result.get("agent") or routing_result.get("agent") or ""),
-                task=deps.clean_text(user_prompt, "", 420),
-                message=direct_text,
-                success=True,
-                metadata={
-                    "delegated_steps": len(chain_steps),
-                    "fast_finish": True,
-                },
-            )
+            orchestration_plan=orchestration_plan,
+            orchestration_task=orchestration_task,
+        )
+        orchestration_plan = step_execution.orchestration_plan
+        if step_execution.latest_screen_context is not None:
+            latest_screen_context = step_execution.latest_screen_context
+        if step_execution.disposition != "continue":
             return
-        if not step_result.get("success"):
-            failure_msg = (
-                f"Stopping chained execution because {step_result.get('agent')} failed: "
-                f"{step_result.get('message')}"
-            )
-            tool = deps.router_tool_map.get("direct_response")
-            if tool:
-                tool(text=deps.clean_text(failure_msg, "Task failed.", 420), source="rapid_response")
-            deps.append_rapid_history("assistant", failure_msg, "rapid")
-            deps.log_assistant_event(
-                "request_failed",
-                request_id=request_id,
-                agent=str(step_result.get("agent") or ""),
-                task=deps.clean_text(step_result.get("task"), "", 420),
-                message=failure_msg,
-                error=step_result.get("message", ""),
-                success=False,
-            )
-            return
+        continue
 
     max_step_msg = (
         f"I stopped after {deps.max_router_chain_steps} delegated steps to avoid loops. "
         "If you want me to continue, ask for the next specific step."
     )
-    tool = deps.router_tool_map.get("direct_response")
-    if tool:
-        tool(text=max_step_msg, source="rapid_response")
-    deps.append_rapid_history("assistant", max_step_msg, "rapid")
-    deps.log_assistant_event(
-        "request_stopped",
-        request_id=request_id,
-        task=deps.clean_text(user_prompt, "", 420),
+    outcomes.stop_request(
         message=max_step_msg,
-        success=False,
         metadata={"reason": "max_router_chain_steps"},
     )

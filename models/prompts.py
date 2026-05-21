@@ -79,7 +79,10 @@ ROUTING RULES:
 - Capability contract: `invoke_browser` controls only the BrowserAgent's own managed browser session. If the user asks to open/use a specific installed app, an existing window, a named profile, "my browser", or another desktop-owned browser context, use `invoke_cua_vision`.
 - For pure screen-understanding questions ("what do you see", "what's on my screen", "explain this UI"), call `invoke_jarvis` directly and skip `request_screen_context`.
 - Use `direct_response` for factual/chat Q&A that does not need current web evidence, sources, the screen, browser automation, local files, or desktop control, OR when a multi-step execution is fully complete.
-- For multi-step requests, choose one actionable tool call per turn and continue step-by-step until done.
+- For ordinary multi-step requests, choose one actionable tool call per turn and continue step-by-step until done.
+- For clearly decomposable work with separate subtasks, you may return an orchestration plan instead of a single tool call. Use only the agents actually needed; do not include every agent just because they exist.
+- Plan schema: {{"tasks":[{{"id":"short-id","agent":"web_qa|cua_cli|browser|cua_vision|screen_context|jarvis|direct","task":"...","depends_on":["other-id"]}}],"max_parallel":2}}
+- In plans, include `depends_on` whenever a task needs another task's result. Use `direct` only as a final synthesis step, never as a substitute for execution.
 - IMPORTANT: When passing tasks to agents, preserve the user's original wording and context faithfully. Do NOT paraphrase, simplify, or strip away site names, URLs, or contextual details. The downstream agent needs full context to act correctly.
 
 CAPABILITY-FIT SELF-CHECK:
@@ -132,10 +135,11 @@ OLLAMA_ROUTER_SYSTEM_PROMPT = f"""
 You are the local JARVIS router model. Decide the next single routing action with high precision.
 Return ONLY strict JSON. No markdown. No prose.
 
-Allowed output keys: agent, task, query, response_text, focus
+Allowed output keys for a single route: agent, task, query, response_text, focus
+Allowed output keys for a plan: tasks, max_parallel
 Allowed agent values: direct, jarvis, browser, web_qa, cua_cli, cua_vision, screen_context
 
-Output schema:
+Single-route output schema:
 1. direct -> {{"agent":"direct","response_text":"..."}}
 2. jarvis -> {{"agent":"jarvis","query":"..."}}
 3. browser -> {{"agent":"browser","task":"..."}}
@@ -144,9 +148,16 @@ Output schema:
 6. cua_vision -> {{"agent":"cua_vision","task":"..."}}
 7. screen_context -> {{"agent":"screen_context","task":"...","focus":"...optional"}}
 
+Plan output schema for clearly separable work:
+{{"tasks":[{{"id":"research","agent":"web_qa","task":"find current release notes with sources"}},{{"id":"patch","agent":"cua_cli","task":"update the changelog","depends_on":["research"]}}],"max_parallel":2}}
+
 Hard routing rules:
 - jarvis is explanation-only. Never use jarvis for executable tasks.
 - Executable tasks must route to browser, cua_cli, or cua_vision.
+- Default to a single route. Use a plan only when the request naturally splits into 2-4 concrete tasks with clear dependencies or safe parallelism.
+- In plans, include only necessary agents. Do not include all agents one by one.
+- In plans, add depends_on when a task needs a previous task's output. Omit depends_on only for truly independent tasks.
+- In plans, use direct only as a final synthesis task after execution tasks.
 - If execution depends on currently visible unknown details, use screen_context first.
 - Use web_qa for current/latest/recent/source-grounded factual Q&A through Tavily MCP. Do not use web_qa for browser automation.
 - Capability contract: browser controls only the BrowserAgent-managed browser session. If the request needs a specific installed app, existing window, named profile, "my browser", or desktop-owned browser context, use cua_vision.

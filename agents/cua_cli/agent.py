@@ -6,6 +6,7 @@ The rapid response model invokes this agent for CLI tasks.
 """
 import atexit
 import asyncio
+import hashlib
 import json
 import os
 import tempfile
@@ -18,6 +19,7 @@ from typing import Optional, List, Dict, Callable, Awaitable, Any
 
 from dotenv import load_dotenv
 from agents.cua_cli.background_manager import (
+    await_foreground_process_operation,
     cleanup_background_processes_sync,
     is_local_port_open,
     list_background_processes,
@@ -47,6 +49,12 @@ from agents.cua_cli.response_parser import (
     parse_json_response,
     parse_stream_json_response,
 )
+from agents.cua_cli.response_runtime import (
+    ResponseRuntimeDependencies,
+    clean_join_text as _clean_join_text,
+    finalize_cli_response,
+    stringify_terminal_value as _stringify_terminal_value,
+)
 from agents.cua_cli.stream_event_policy import (
     emit_terminal_stream_event,
     format_tool_status,
@@ -54,6 +62,7 @@ from agents.cua_cli.stream_event_policy import (
     status_from_stream_event,
 )
 from agents.cua_cli.tool_allowlist_policy import allowed_tools_for_task
+from agents.cua_cli.vendor_guard import validate_gemini_cli_vendor
 from agents.cua_cli.workspace_policy import (
     compute_workspace_dirs,
     dedupe_workspace_dirs,
@@ -76,36 +85,6 @@ class CLIResponse:
     output: str
     error: Optional[str] = None
     tool_calls: Optional[List[Dict]] = None
-
-
-def _clean_join_text(*parts: Any) -> str:
-    cleaned_parts: List[str] = []
-    for part in parts:
-        text = " ".join(str(part or "").split())
-        if text:
-            cleaned_parts.append(text)
-    return " | ".join(cleaned_parts)
-
-
-def _stringify_terminal_value(value: Any, max_len: int = 6000) -> str:
-    if value is None:
-        return ""
-
-    if isinstance(value, str):
-        text = value
-    else:
-        try:
-            text = json.dumps(value, indent=2, ensure_ascii=True)
-        except Exception:
-            text = str(value)
-
-    normalized = text.replace("\r\n", "\n").strip()
-    if not normalized:
-        return ""
-    if len(normalized) > max_len:
-        clipped = normalized[: max_len - 18].rstrip()
-        return f"{clipped}\n...[truncated]..."
-    return normalized
 
 
 def _truthy_env(name: str) -> bool:
@@ -151,7 +130,8 @@ class CLIAgent:
             gemini_cli_path = str(Path(__file__).parent / "gemini-cli")
 
         self.gemini_cli_path = gemini_cli_path
-        self.cli_bin = os.path.join(gemini_cli_path, "bundle", "gemini.js")
+        self._vendor_validation = validate_gemini_cli_vendor(self.gemini_cli_path)
+        self.cli_bin = str(self._vendor_validation.entrypoint_path)
         self.approval_mode = self._resolve_approval_mode(approval_mode)
         self._full_trust = (
             _truthy_env("JARVIS_CLI_FULL_TRUST")
@@ -321,7 +301,10 @@ class CLIAgent:
         """
         Ensure a writable Gemini CLI home directory.
         """
-        gemini_home = Path(self.gemini_cli_path).resolve() / ".jarvis_gemini_home"
+        vendor_key = hashlib.sha256(
+            os.path.normcase(str(Path(self.gemini_cli_path).resolve())).encode("utf-8")
+        ).hexdigest()[:16]
+        gemini_home = Path(tempfile.gettempdir()) / "jarvis_gemini_cli_home" / vendor_key
         gemini_home.mkdir(parents=True, exist_ok=True)
         return str(gemini_home)
 
@@ -485,6 +468,23 @@ class CLIAgent:
             extract_port_candidates=cls._extract_port_candidates,
         )
 
+    def _response_runtime_dependencies(self) -> ResponseRuntimeDependencies:
+        return ResponseRuntimeDependencies(
+            infer_server_launch_from_tool_calls=self._infer_server_launch_from_tool_calls,
+            extract_port_candidates=self._extract_port_candidates,
+            wait_for_any_port=self._wait_for_any_port,
+            start_background_process=self._start_background_process,
+            build_cli_env=self._build_cli_env,
+            is_timeout_error_text=self._is_timeout_error_text,
+        )
+
+    async def _finalize_cli_response(self, task: str, response: CLIResponse) -> dict:
+        return await finalize_cli_response(
+            task,
+            response,
+            deps=self._response_runtime_dependencies(),
+        )
+
     @classmethod
     def _cleanup_background_processes_sync(cls) -> None:
         cleanup_background_processes_sync(managed_store=cls._managed_background_processes)
@@ -573,79 +573,6 @@ class CLIAgent:
 
         return None
 
-    async def _validate_local_server_claim(self, output_text: str) -> Optional[str]:
-        if not output_text:
-            return None
-        lowered = output_text.lower()
-        has_localhost_hint = ("localhost" in lowered) or ("127.0.0.1" in lowered) or ("port " in lowered)
-        has_running_hint = any(word in lowered for word in ("running", "started", "listening", "serving", "available at"))
-        if not (has_localhost_hint and has_running_hint):
-            return None
-
-        ports = self._extract_port_candidates(output_text)
-        if not ports:
-            return None
-        opened = await self._wait_for_any_port(ports, timeout_seconds=15.0)
-        if opened is not None:
-            return None
-        return (
-            "Task reported a local server as running, but none of the claimed ports are reachable: "
-            f"{ports}. The process likely exited or never started successfully."
-        )
-
-    async def _maybe_promote_server_launch_from_tool_calls(
-        self,
-        task: str,
-        response: CLIResponse,
-    ) -> Optional[dict]:
-        launch = self._infer_server_launch_from_tool_calls(response.tool_calls)
-        if not launch:
-            return None
-
-        launch_command = launch["command"]
-        launch_cwd = launch["cwd"]
-
-        combined = "\n".join(filter(None, [task, response.output, launch_command]))
-        ports = self._extract_port_candidates(combined)
-        if ports:
-            opened = await self._wait_for_any_port(ports, timeout_seconds=1.2)
-            if opened is not None:
-                # Server already reachable from host. If prior run timed out, treat as
-                # success so orchestration can continue.
-                if self._is_timeout_error_text(response.error):
-                    return {
-                        "success": True,
-                        "result": _clean_join_text(
-                            response.output,
-                            f"Local server is reachable on http://127.0.0.1:{opened}.",
-                        ),
-                        "error": None,
-                        "tool_calls": response.tool_calls,
-                    }
-                return None
-
-        env = self._build_cli_env()
-        started = await self._start_background_process(
-            command=launch_command,
-            env=env,
-            working_dir=launch_cwd,
-            task=task,
-        )
-
-        merged_result = _clean_join_text(response.output, started.get("result"))
-        merged_tool_calls: List[Dict[str, Any]] = []
-        if response.tool_calls:
-            merged_tool_calls.extend(response.tool_calls)
-        if started.get("tool_calls"):
-            merged_tool_calls.extend(started["tool_calls"])
-
-        return {
-            "success": True,
-            "result": merged_result,
-            "error": None,
-            "tool_calls": merged_tool_calls or None,
-        }
-
     @staticmethod
     def _is_timeout_error_text(text: Optional[str]) -> bool:
         lowered = str(text or "").lower()
@@ -664,81 +591,6 @@ class CLIAgent:
             r"\bi(?:'m| am) unable to execute shell commands\b",
         ]
         return any(re.search(p, lowered) for p in patterns)
-
-    @staticmethod
-    def _looks_like_generic_api_failure(error_text: Optional[str]) -> bool:
-        lowered = str(error_text or "").lower()
-        if not lowered:
-            return False
-        markers = (
-            "fetch failed",
-            "sending request",
-            "[api error:",
-            "exception typeerror",
-            "session error",
-        )
-        return any(marker in lowered for marker in markers)
-
-    @staticmethod
-    def _collect_tool_error_messages(
-        tool_calls: Optional[List[Dict[str, Any]]],
-    ) -> List[str]:
-        messages: List[str] = []
-        for tool_call in tool_calls or []:
-            if not isinstance(tool_call, dict):
-                continue
-            if str(tool_call.get("status") or "").strip().lower() != "error":
-                continue
-
-            message = ""
-            raw_error = tool_call.get("error")
-            if isinstance(raw_error, dict):
-                message = str(raw_error.get("message") or raw_error.get("error") or "")
-            elif raw_error is not None:
-                message = str(raw_error)
-
-            if not message:
-                raw_result = tool_call.get("result")
-                if isinstance(raw_result, str):
-                    message = raw_result
-                elif raw_result is not None:
-                    message = _stringify_terminal_value(raw_result, max_len=800)
-
-            cleaned = " ".join(str(message or "").split())
-            if cleaned and cleaned not in messages:
-                messages.append(cleaned)
-        return messages
-
-    @staticmethod
-    def _last_tool_call_failed(tool_calls: Optional[List[Dict[str, Any]]]) -> bool:
-        for tool_call in reversed(tool_calls or []):
-            if not isinstance(tool_call, dict):
-                continue
-            status = str(tool_call.get("status") or "").strip().lower()
-            if status:
-                return status == "error"
-        return False
-
-    @classmethod
-    def _normalize_cli_response(cls, response: CLIResponse) -> CLIResponse:
-        tool_errors = cls._collect_tool_error_messages(response.tool_calls)
-        if not tool_errors:
-            return response
-
-        primary_error = tool_errors[-1]
-        if cls._last_tool_call_failed(response.tool_calls):
-            response.success = False
-
-        if not response.output and not response.success:
-            response.output = primary_error
-
-        if response.error:
-            if cls._looks_like_generic_api_failure(response.error):
-                response.error = _clean_join_text(primary_error, response.error)
-        elif not response.success:
-            response.error = primary_error
-
-        return response
 
     async def execute(
         self,
@@ -824,33 +676,7 @@ class CLIAgent:
                     status_callback=status_callback,
                     tool_context_task=task,
                 )
-            response = self._normalize_cli_response(response)
-            # If CLI used a server-like launch command in tool calls, auto-persist it.
-            # This avoids "it said localhost is up, but the process already exited".
-            if response.tool_calls:
-                promoted = await self._maybe_promote_server_launch_from_tool_calls(task, response)
-                if promoted is not None:
-                    return promoted
-            localhost_claim_error = await self._validate_local_server_claim(response.output)
-            if localhost_claim_error:
-                # Last chance: if tool traces exist, try one more promotion pass
-                # before failing the chain on localhost reachability.
-                if response.tool_calls:
-                    promoted = await self._maybe_promote_server_launch_from_tool_calls(task, response)
-                    if promoted is not None:
-                        return promoted
-                return {
-                    "success": False,
-                    "result": response.output,
-                    "error": localhost_claim_error,
-                    "tool_calls": response.tool_calls,
-                }
-            return {
-                "success": response.success,
-                "result": response.output,
-                "error": response.error,
-                "tool_calls": response.tool_calls,
-            }
+            return await self._finalize_cli_response(task, response)
         except asyncio.TimeoutError:
             return {
                 "success": False,
@@ -935,6 +761,8 @@ class CLIAgent:
 
         Returns structured response parsed from JSON output.
         """
+        self._vendor_validation = validate_gemini_cli_vendor(self.gemini_cli_path)
+        self.cli_bin = str(self._vendor_validation.entrypoint_path)
         cmd = self._build_command(task, tool_context_task=tool_context_task)
         session_id = uuid.uuid4().hex[:8]
 
@@ -993,17 +821,27 @@ class CLIAgent:
         wait_task = asyncio.create_task(process.wait())
 
         try:
-            await asyncio.wait_for(
-                asyncio.gather(stdout_task, stderr_task, wait_task),
+            wait_outcome = await await_foreground_process_operation(
+                process=process,
                 timeout=timeout,
+                operation=asyncio.gather(stdout_task, stderr_task, wait_task),
+                cleanup=lambda: asyncio.gather(
+                    stdout_task,
+                    stderr_task,
+                    wait_task,
+                    return_exceptions=True,
+                ),
+                terminate_process_tree=self._terminate_process_tree_sync,
             )
+            timed_out = wait_outcome.timed_out
+            if timed_out:
+                await self._emit_terminal_event(
+                    session_id,
+                    kind="session_error",
+                    text=f"CLI session timed out after {timeout} seconds.",
+                    status="error",
+                )
         except asyncio.CancelledError:
-            self._terminate_process_tree_sync({"pid": process.pid})
-            try:
-                await process.wait()
-            except Exception:
-                pass
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
             await self._emit_terminal_event(
                 session_id,
                 kind="session_stopped",
@@ -1011,20 +849,6 @@ class CLIAgent:
                 status="stopped",
             )
             raise
-        except asyncio.TimeoutError:
-            timed_out = True
-            self._terminate_process_tree_sync({"pid": process.pid})
-            try:
-                await process.wait()
-            except Exception:
-                pass
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            await self._emit_terminal_event(
-                session_id,
-                kind="session_error",
-                text=f"CLI session timed out after {timeout} seconds.",
-                status="error",
-            )
         finally:
             self._unregister_foreground_process(session_id)
 
@@ -1091,13 +915,19 @@ class CLIAgent:
 
         timed_out = False
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            command_outcome = await await_foreground_process_operation(
+                process=process,
+                timeout=timeout,
+                operation=process.communicate(),
+                terminate_process_tree=self._terminate_process_tree_sync,
+            )
+            timed_out = command_outcome.timed_out
+            if timed_out:
+                stdout = b""
+                stderr = f"Command timed out after {timeout} seconds".encode("utf-8")
+            else:
+                stdout, stderr = command_outcome.value or (b"", b"")
         except asyncio.CancelledError:
-            self._terminate_process_tree_sync({"pid": process.pid})
-            try:
-                await process.wait()
-            except Exception:
-                pass
             await self._emit_terminal_event(
                 session_id,
                 kind="session_stopped",
@@ -1105,15 +935,6 @@ class CLIAgent:
                 status="stopped",
             )
             raise
-        except asyncio.TimeoutError:
-            timed_out = True
-            self._terminate_process_tree_sync({"pid": process.pid})
-            try:
-                await process.wait()
-            except Exception:
-                pass
-            stdout = b""
-            stderr = f"Command timed out after {timeout} seconds".encode("utf-8")
         finally:
             self._unregister_foreground_process(session_id)
 
@@ -1196,15 +1017,14 @@ class CLIAgent:
             stderr=asyncio.subprocess.PIPE,
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+        command_outcome = await await_foreground_process_operation(
+            process=process,
+            timeout=timeout,
+            operation=process.communicate(),
+        )
+        if command_outcome.timed_out:
             return "", "Command timed out", -1
+        stdout, stderr = command_outcome.value or (b"", b"")
 
         return (
             stdout.decode("utf-8", errors="replace"),

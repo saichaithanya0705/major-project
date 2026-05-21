@@ -9,17 +9,21 @@ import re
 from pathlib import Path
 
 
-def compute_workspace_dirs() -> list[str]:
+def compute_workspace_dirs(*, full_trust: bool = False) -> list[str]:
     """
-    Include common directories so workspace-scoped tools (ls/glob/read/write)
-    can operate beyond the gemini-cli subfolder.
+    Return the default workspace scope for CLI tasks.
+
+    Scoped mode stays anchored to the current project root. Full-trust mode can
+    widen to the user's common home locations.
     """
-    paths = [
-        str(Path.cwd().resolve()),
-        str(Path.home().resolve()),
-        str((Path.home() / "Desktop").resolve()),
-        "/tmp",
-    ]
+    paths = [str(Path.cwd().resolve())]
+    if full_trust:
+        paths.extend(
+            [
+                str(Path.home().resolve()),
+                str((Path.home() / "Desktop").resolve()),
+            ]
+        )
     deduped: list[str] = []
     for path in paths:
         if path not in deduped and Path(path).exists():
