@@ -1,5 +1,47 @@
 # AI Slop Audit
 
+## 2026-05-22 CUA Implementation Verification Pass
+
+Scope: verification of the CUA controller-runtime implementation currently in the working tree, including `VisionAgent`, `CuaController`, `PyAutoGuiComputerBackend`, provider planner/critic/runtime helpers, and focused CUA/routing tests. This pass checked whether the implementation and anti-slop cleanup are actually in place; it did not re-rate the whole repository. A pre-commit continuation pass on `main` repeated the Graphify triage and focused validation before the `correction` commit.
+
+Graphify prerequisites completed for this pass:
+- Re-read `graphify-out/GRAPH_REPORT.md` before source inspection. The relevant graph targets remain low-cohesion Community 3 (`single_call`/CUA loop policy), Community 4 (model policy/controller/routing policy), Community 57 (accessibility provider), and Community 80 (routed CUA completion semantics).
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Pre-commit triage output remained `62/100` graph-only and `100/100` source-augmented. As before, the severe source score is repo-wide and dominated by unrelated vendored/browser/CLI hotspots; source inspection was scoped to the CUA implementation.
+
+**Verdict**
+
+Score: 5/100, Minimal slop risk for the scoped CUA implementation currently in place.
+
+Confidence: High for this slice.
+
+**Evidence**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Result |
+|---|---|---|---|---|
+| Live task execution uses the controller runtime, not the legacy single-call engine. | Community 3 remains the legacy CUA hotspot, so the production entrypoint was inspected directly. | `agents/cua_vision/agent.py` defaults to `CuaController`; `SingleCallVisionEngine` is only used when `CUA_VISION_USE_LEGACY_ENGINE` is truthy or by look/watch helper methods. | Healthy architecture signal. | Implementation is in place. |
+| Planner and critic share one provider config/payload boundary. | Provider/fallback code is a scanner-sensitive hotspot and was the fresh duplication signal in the prior pass. | `agents/cua_vision/provider_runtime.py` owns provider order/config, screenshot data URLs, provider failure formatting, and trimming; `provider_planner.py` and `semantic_judge.py` both consume it. | Healthy architecture signal. | Prior slop fix remains in place. |
+| Completion claims require independent semantic review. | Community 4 links CUA model policy, controller behavior, and completion semantics. | `VisionAgent` wires `ProviderSemanticJudge` through `CuaCriticizer`; planner completion claims do not directly mark the run complete. | Healthy architecture signal. | Implementation is in place. |
+| Backend observation inputs are explicit. | Community 57 isolates accessibility concerns; routed screenshot handling connects into CUA runtime. | `PyAutoGuiComputerBackend` accepts `initial_screenshot` and `accessibility_provider`, consumes the supplied screenshot once, and preserves accessibility failure details. | Healthy architecture signal. | Implementation is in place. |
+| Controller terminal behavior and cleanup are deterministic. | Controller/model-policy nodes remain a low-cohesion inspection target. | `CuaController.run()` closes the backend in `finally`, treats `ABORT` as terminal incomplete, and records the current planner model name into trajectory records when available. | Healthy architecture signal. | Implementation is in place. |
+
+**Confirmed Slop Signals**
+
+- None new in this verification pass. The previous confirmed duplication between planner and critic provider setup remains fixed by `provider_runtime.py`.
+
+**Permanent Fixes Applied**
+
+- No production-code changes were required in this verification pass.
+- The audit report was updated with this evidence so the implementation check is recorded.
+
+**Validation**
+
+- Passed: `python -m py_compile agents/cua_vision/provider_runtime.py agents/cua_vision/provider_planner.py agents/cua_vision/semantic_judge.py agents/cua_vision/agent.py agents/cua_vision/controller.py agents/cua_vision/computer_backend.py agents/cua_vision/errors.py agents/cua_vision/single_call.py`
+- Passed: `$files = @(Get-ChildItem -LiteralPath 'tests' -Filter 'test_cua_vision_*.py' | ForEach-Object { $_.FullName }); python -m pytest @files 'tests/test_agent_step_runner_cua_completion.py' -q` -> 108 passed.
+- Passed: `python -m pytest tests/test_router_chaining.py tests/test_rapid_state_boundary.py tests/test_agent_step_runner_latency.py tests/test_screenshot_store_boundary.py tests/test_routing_contracts.py tests/test_routing_policy.py tests/test_routing_policy_module_boundaries.py tests/test_routing_payload_parser_boundary.py -q` -> 89 passed.
+- Passed: `git diff --check` -> no whitespace errors; Git reported only LF-to-CRLF normalization warnings for touched files.
+- Process hygiene: no pytest or Graphify scanner process remained from this pass; separate MCP-managed processes already existed outside this commit task.
+
 ## 2026-05-18 CUA Failure Recovery Audit And Repair
 
 Scope: code changed during this prompt plus directly connected CUA vision, screenshot-preparation, screen-context recovery, and router incomplete-step architecture. This was not a whole-codebase re-rating.

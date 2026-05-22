@@ -35,6 +35,23 @@ class _FakeFrame:
         }
 
 
+class _ProvidedFrame:
+    image = Image.new("RGB", (3, 3), color="black")
+
+    def context_dict(self):
+        return {
+            "width": 3,
+            "height": 3,
+            "logical_width": 3,
+            "logical_height": 3,
+            "offset_x": 0,
+            "offset_y": 0,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "mode": "provided_full_screen",
+        }
+
+
 class _FakePyAutoGui:
     def __init__(self):
         self.calls = []
@@ -72,6 +89,22 @@ def test_observe_returns_typed_screen_observation() -> None:
     assert observation.screenshot_png_base64
     assert observation.active_window_title == "Test Window"
     assert observation.capture_context["mode"] == "test"
+
+
+def test_observe_uses_initial_screenshot_once() -> None:
+    original_capture, original_title = _install_observe_fakes()
+    original_register = backend_module.register_provided_screenshot_frame
+    backend_module.register_provided_screenshot_frame = lambda _image: _ProvidedFrame()
+    try:
+        backend = PyAutoGuiComputerBackend(initial_screenshot=Image.new("RGB", (3, 3)))
+        first = backend.observe()
+        second = backend.observe()
+    finally:
+        _restore_observe_fakes(original_capture, original_title)
+        backend_module.register_provided_screenshot_frame = original_register
+
+    assert first.capture_context["mode"] == "provided_full_screen"
+    assert second.capture_context["mode"] == "test"
 
 
 def test_observe_preserves_screenshot_when_accessibility_provider_fails() -> None:
@@ -277,6 +310,7 @@ def test_execute_keypress_uses_pyautogui_press() -> None:
 
 def run_checks() -> None:
     test_observe_returns_typed_screen_observation()
+    test_observe_uses_initial_screenshot_once()
     test_observe_preserves_screenshot_when_accessibility_provider_fails()
     test_execute_coordinate_click_returns_action_result()
     test_execute_returns_failure_when_pre_observation_fails()

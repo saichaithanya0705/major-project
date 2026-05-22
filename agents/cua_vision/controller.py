@@ -51,6 +51,12 @@ class CuaController:
 
     async def run(self, task: str) -> dict[str, Any]:
         try:
+            return await self._run(task)
+        finally:
+            self._close_backend()
+
+    async def _run(self, task: str) -> dict[str, Any]:
+        try:
             observation = self.backend.observe()
         except Exception as exc:
             return _run_result(False, False, error=f"Failed to observe screen: {exc}")
@@ -100,7 +106,7 @@ class CuaController:
                     result=result,
                     verdict=verdict,
                     grounding=grounding,
-                    model_name=self.model_name,
+                    model_name=self._model_name_for_step(),
                 )
                 return _verdict_result(verdict, result)
 
@@ -115,6 +121,24 @@ class CuaController:
                         "unexpected_window_change": True,
                     },
                 )
+            if executable_action.action_type == ActionType.ABORT:
+                verdict = CriticVerdict(
+                    complete=False,
+                    should_continue=False,
+                    confidence=0.8,
+                    reason=executable_action.text or result.message or "Planner aborted the task.",
+                    next_hint=None,
+                )
+                session.record_action_result(executable_action, result, critic=verdict)
+                self.trajectory.record(
+                    session=session,
+                    action=executable_action,
+                    result=result,
+                    verdict=verdict,
+                    grounding=grounding,
+                    model_name=self._model_name_for_step(),
+                )
+                return _verdict_result(verdict, result)
             verdict = await self.criticizer.review(
                 task=task,
                 action=executable_action,
@@ -131,7 +155,7 @@ class CuaController:
                 result=result,
                 verdict=verdict,
                 grounding=grounding,
-                model_name=self.model_name,
+                model_name=self._model_name_for_step(),
             )
 
             if verdict.complete:
@@ -208,6 +232,18 @@ class CuaController:
                 before=observation,
                 after=observation,
             )
+
+    def _close_backend(self) -> None:
+        try:
+            self.backend.close()
+        except Exception:
+            return None
+
+    def _model_name_for_step(self) -> str | None:
+        planner_model = getattr(self.planner, "last_model_name", None)
+        if isinstance(planner_model, str) and planner_model.strip():
+            return planner_model
+        return self.model_name
 
 
 def _verdict_result(verdict: CriticVerdict, result: ActionResult) -> dict[str, Any]:

@@ -122,12 +122,33 @@ def test_controller_returns_incomplete_when_reobserve_fails_after_action() -> No
     assert "Failed to observe after action" in result["result"]
 
 
+def test_abort_is_terminal_incomplete_result() -> None:
+    backend = FakeComputerBackend()
+    planner = FakePlanner(
+        [
+            ComputerAction(
+                ActionType.ABORT,
+                text="The requested app is not available.",
+            )
+        ]
+    )
+
+    result = asyncio.run(CuaController(backend=backend, planner=planner).run("Open MissingApp"))
+
+    assert result["success"] is True
+    assert result["complete"] is False
+    assert result["result"] == "The requested app is not available."
+    assert planner.calls == 1
+    assert [action.action_type for action in backend.executed_actions] == [ActionType.ABORT]
+
+
 def run_checks() -> None:
     test_false_completion_is_rejected()
     test_click_then_evidenced_completion_succeeds()
     test_invalid_planner_action_returns_incomplete_result()
     test_ungrounded_description_requests_stronger_model()
     test_controller_returns_incomplete_when_reobserve_fails_after_action()
+    test_abort_is_terminal_incomplete_result()
 
 
 if __name__ == "__main__":

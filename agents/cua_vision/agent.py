@@ -5,13 +5,19 @@ This agent can see the user's screen and interact with it by clicking elements,
 typing, and using keyboard shortcuts. It uses a vision model to understand
 what's on screen and decide what actions to take.
 """
-import time
 import inspect
+import os
+import time
+from collections.abc import Mapping
 from dataclasses import asdict
+from pathlib import Path
 
 from dotenv import load_dotenv
 from PIL import Image
 
+from agents.cua_vision.accessibility import build_accessibility_provider
+from agents.cua_vision.computer_backend import PyAutoGuiComputerBackend
+from agents.cua_vision.controller import CuaController
 from agents.cua_vision.tools import (
     reset_state,
     clear_stop_request,
@@ -22,15 +28,49 @@ from agents.cua_vision.tools import (
 )
 from integrations.audio import tts_speak
 from agents.cua_vision.contracts import CuaRunResult
-from agents.cua_vision.single_call import OpenRouterFallbackError, SingleCallVisionEngine
+from agents.cua_vision.criticizer import CuaCriticizer
+from agents.cua_vision.errors import OpenRouterFallbackError
+from agents.cua_vision.model_policy import CuaModelPolicy
+from agents.cua_vision.provider_planner import ProviderVisionPlanner
+from agents.cua_vision.semantic_judge import ProviderSemanticJudge
+from agents.cua_vision.single_call import SingleCallVisionEngine
 from agents.cua_vision.tool_declarations import VISION_FUNCTION_DECLARATIONS
 from agents.cua_vision.prompts import (
     LOOK_AT_SCREEN_PROMPT,
     WATCH_SCREEN_PROMPT,
 )
 from agents.cua_vision.image import image_change, reset_image_state
+from agents.cua_vision.trajectory import CuaTrajectoryRecorder
 
 load_dotenv()
+
+
+def _truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, ""))
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+def _build_trajectory_recorder() -> CuaTrajectoryRecorder:
+    directory_text = str(os.getenv("CUA_VISION_TRAJECTORY_DIR") or "").strip()
+    enabled = _truthy_env(os.getenv("CUA_VISION_TRACE")) or bool(directory_text)
+    directory = Path(directory_text) if directory_text else Path(".cua_vision_traces")
+    return CuaTrajectoryRecorder(enabled=enabled, directory=directory)
+
+
+def _critic_payload(value):
+    if value is None or isinstance(value, Mapping):
+        return value
+    try:
+        return asdict(value)
+    except TypeError:
+        return value
 
 
 class VisionAgent:
@@ -106,6 +146,14 @@ class VisionAgent:
                     "error": loop_result.error,
                     "critic": asdict(loop_result.critic) if loop_result.critic else None,
                 }
+            if isinstance(loop_result, Mapping):
+                return {
+                    "success": bool(loop_result.get("success", True)),
+                    "complete": bool(loop_result.get("complete", False)),
+                    "result": loop_result.get("result"),
+                    "error": loop_result.get("error"),
+                    "critic": _critic_payload(loop_result.get("critic")),
+                }
             return {
                 "success": True,
                 "complete": True,
@@ -162,10 +210,34 @@ class VisionAgent:
         return await interact(task)
 
     async def _interact_with_screen(self, task: str, screenshot: Image.Image = None):
-        """Run the primary single-call execution loop for screen interaction."""
-        print('[VisionAgent] Starting single-call screen interaction...')
-        engine = SingleCallVisionEngine(self)
-        return await engine.run(task, initial_screenshot=screenshot)
+        """Run the primary typed controller loop for screen interaction."""
+        if _truthy_env(os.getenv("CUA_VISION_USE_LEGACY_ENGINE")):
+            print('[VisionAgent] Starting legacy single-call screen interaction...')
+            engine = SingleCallVisionEngine(self)
+            return await engine.run(task, initial_screenshot=screenshot)
+
+        print('[VisionAgent] Starting controller-based screen interaction...')
+        model_policy = CuaModelPolicy.from_env()
+        planner = ProviderVisionPlanner(model_policy=model_policy)
+        semantic_judge = ProviderSemanticJudge(model_policy=model_policy)
+        controller = CuaController(
+            backend=PyAutoGuiComputerBackend(
+                accessibility_provider=build_accessibility_provider(),
+                initial_screenshot=screenshot,
+            ),
+            planner=planner,
+            criticizer=CuaCriticizer(semantic_judge=semantic_judge),
+            trajectory=_build_trajectory_recorder(),
+            max_actions=_env_int(
+                "CUA_VISION_MAX_ACTIONS",
+                _env_int("CUA_VISION_MAX_STEPS", 25, minimum=1, maximum=100),
+                minimum=1,
+                maximum=100,
+            ),
+            max_retries=_env_int("CUA_VISION_MAX_RETRIES", self.max_retries, minimum=0, maximum=20),
+            model_name=self.model_name,
+        )
+        return await controller.run(task)
 
     async def look_at_screen_and_respond(self, prompt: str) -> str:
         """

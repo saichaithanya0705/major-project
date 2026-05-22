@@ -38,6 +38,7 @@ from agents.cua_vision.contracts import (
     TargetRef,
 )
 from agents.cua_vision.criticizer import CuaCriticizer
+from agents.cua_vision.errors import OpenRouterFallbackError
 from agents.cua_vision.model_policy import CuaModelPolicy, ModelPolicyContext, ModelRole
 from agents.cua_vision.prompts import (
     VISION_AGENT_SYSTEM_PROMPT,
@@ -171,10 +172,6 @@ class DebugStopAfterFirstGoTo(RuntimeError):
 
 class RepeatedNoopActionError(RuntimeError):
     """Raised when a repeated non-click action is visibly doing nothing."""
-
-
-class OpenRouterFallbackError(RuntimeError):
-    """Raised when no configured vision provider responds."""
 
 
 class SingleCallVisionEngine:

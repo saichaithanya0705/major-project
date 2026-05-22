@@ -28,7 +28,11 @@ from agents.cua_vision.keyboard import (
     move_cursor,
     pyautogui,
 )
-from agents.cua_vision.screen_context import capture_active_window_frame, get_active_window_title
+from agents.cua_vision.screen_context import (
+    capture_active_window_frame,
+    get_active_window_title,
+    register_provided_screenshot_frame,
+)
 from agents.cua_vision.tools import execute_tool_call
 
 
@@ -50,11 +54,16 @@ class ComputerBackend(Protocol):
 class PyAutoGuiComputerBackend:
     """Adapter from typed CUA actions to the current PyAutoGUI implementation."""
 
-    def __init__(self, accessibility_provider=None):
+    def __init__(self, accessibility_provider=None, initial_screenshot=None):
         self.accessibility_provider = accessibility_provider
+        self._initial_frame = (
+            register_provided_screenshot_frame(initial_screenshot)
+            if initial_screenshot is not None
+            else None
+        )
 
     def observe(self) -> ScreenObservation:
-        frame = capture_active_window_frame()
+        frame = self._consume_initial_frame() or capture_active_window_frame()
         accessibility_tree = None
         elements = ()
         capabilities: dict = {}
@@ -119,6 +128,11 @@ class PyAutoGuiComputerBackend:
 
     def close(self) -> None:
         return None
+
+    def _consume_initial_frame(self):
+        frame = self._initial_frame
+        self._initial_frame = None
+        return frame
 
     def _safe_observe(self) -> tuple[ScreenObservation | None, str | None]:
         try:
