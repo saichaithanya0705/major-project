@@ -17,7 +17,7 @@ def _run_artifact_lifecycle_eval(artifact_dir: Path, body: str):
     script = (
         "const fs = require('fs');\n"
         "const path = require('path');\n"
-        "const { cleanupVisionArtifactImages } = require(path.join(process.cwd(), 'ui', 'artifact_lifecycle.js'));\n"
+        "const { cleanupVisionArtifactImages } = require(path.join(process.cwd(), 'ui', 'main', 'artifact_lifecycle.js'));\n"
         "const artifactDir = process.env.ARTIFACT_DIR;\n"
         f"{body}\n"
     )

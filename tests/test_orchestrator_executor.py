@@ -65,7 +65,7 @@ async def test_execute_plan_runs_ready_non_conflicting_tasks_in_batches() -> Non
     plan = plan_with(
         task("cli", agent="cua_cli", resources=(ResourceLock.CLI,)),
         task("cli-conflict", agent="cua_cli", resources=(ResourceLock.CLI,)),
-        task("web", agent="web_qa", resources=(ResourceLock.WEB_QA,)),
+        task("web", agent="browser", resources=(ResourceLock.BROWSER, ResourceLock.MODEL_ROUTER)),
         max_parallel=3,
     )
 
@@ -96,7 +96,7 @@ async def test_execute_plan_turns_runner_exceptions_into_failed_outcomes_and_ski
     result = await execute_plan(
         plan_with(
             task("root", agent="cua_cli"),
-            task("child", agent="web_qa", depends_on=("root",)),
+            task("child", agent="browser", depends_on=("root",)),
         ),
         runner,
     )
@@ -207,7 +207,7 @@ async def test_execute_plan_passes_dependency_outcomes_and_artifacts_to_dependen
 
     result = await execute_plan(
         plan_with(
-            task("research", agent="web_qa"),
+            task("research", agent="browser"),
             task("patch", agent="cua_cli", depends_on=("research",)),
         ),
         runner,
@@ -265,7 +265,7 @@ async def test_execute_plan_records_plan_trace_events_for_batches_waiting_and_sk
             plan_with(
                 task("root", agent="cua_cli", resources=(ResourceLock.CLI,)),
                 task("cli-conflict", agent="cua_cli", resources=(ResourceLock.CLI,)),
-                task("child", agent="web_qa", depends_on=("root",)),
+                task("child", agent="browser", depends_on=("root",)),
                 max_parallel=2,
             ),
             runner,

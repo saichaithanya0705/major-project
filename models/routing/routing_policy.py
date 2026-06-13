@@ -29,8 +29,8 @@ from models.routing_surface_policy import (
 from models.routing_question_policy import (
     VISUAL_EXPLAIN_MARKERS as _VISUAL_EXPLAIN_MARKERS,
     is_direct_qa_request as _is_direct_qa_request,
+    is_source_grounded_qa_request as _is_source_grounded_qa_request,
     is_visual_explanation_request as _is_visual_explanation_request,
-    is_web_qa_request as _is_web_qa_request,
 )
 from models.routing_step_identity import (
     routing_signature as _routing_signature,

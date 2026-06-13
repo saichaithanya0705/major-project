@@ -14,7 +14,6 @@ from models.routing_payload_parser import (
 
 GuardrailRewriteReason = Literal[
     "browser_resume",
-    "source_grounded_web_qa",
     "screen_context_to_actionable_agent",
     "execution_request_needs_actionable_agent",
     "browser_needs_desktop_control_surface",
@@ -24,7 +23,6 @@ BuildBrowserResumeRoute = Callable[[str], RoutePayload | None]
 CleanText = Callable[[object, str, int | None], str]
 ChooseActionableAgent = Callable[[str, ScreenContextPayload | None], RouteAgentName]
 IsExecutionRequest = Callable[[str], bool]
-IsWebQaRequest = Callable[[str], bool]
 RequiresDesktopControlSurface = Callable[[str], bool]
 RoutingTaskText = Callable[[RoutePayload], str]
 
@@ -66,12 +64,10 @@ def _resolve_policy_helpers() -> tuple[
     CleanText,
     ChooseActionableAgent,
     IsExecutionRequest,
-    IsWebQaRequest,
     RequiresDesktopControlSurface,
     RoutingTaskText,
 ]:
     from models import routing_policy as policy
-    from models import routing_question_policy as question_policy
     from models import routing_surface_policy as surface_policy
 
     return (
@@ -79,7 +75,6 @@ def _resolve_policy_helpers() -> tuple[
         policy._clean_text,
         surface_policy.choose_actionable_agent,
         surface_policy.is_execution_request,
-        question_policy.is_web_qa_request,
         surface_policy.requires_desktop_control_surface,
         policy._routing_task_text,
     )
@@ -94,7 +89,6 @@ def apply_routing_guardrails(
     clean_text: CleanText | None = None,
     choose_actionable_agent: ChooseActionableAgent | None = None,
     is_execution_request: IsExecutionRequest | None = None,
-    is_web_qa_request: IsWebQaRequest | None = None,
     requires_desktop_control_surface: RequiresDesktopControlSurface | None = None,
     routing_task_text: RoutingTaskText | None = None,
 ) -> GuardrailApplication:
@@ -103,7 +97,6 @@ def apply_routing_guardrails(
         or clean_text is None
         or choose_actionable_agent is None
         or is_execution_request is None
-        or is_web_qa_request is None
         or requires_desktop_control_surface is None
         or routing_task_text is None
     ):
@@ -112,7 +105,6 @@ def apply_routing_guardrails(
             default_clean_text,
             default_choose_actionable_agent,
             default_is_execution_request,
-            default_is_web_qa_request,
             default_requires_desktop_control_surface,
             default_routing_task_text,
         ) = _resolve_policy_helpers()
@@ -120,7 +112,6 @@ def apply_routing_guardrails(
         clean_text = clean_text or default_clean_text
         choose_actionable_agent = choose_actionable_agent or default_choose_actionable_agent
         is_execution_request = is_execution_request or default_is_execution_request
-        is_web_qa_request = is_web_qa_request or default_is_web_qa_request
         requires_desktop_control_surface = (
             requires_desktop_control_surface or default_requires_desktop_control_surface
         )
@@ -136,18 +127,6 @@ def apply_routing_guardrails(
             resume_route,
             rewritten_from=original_route,
             reason="browser_resume",
-        )
-
-    if is_web_qa_request(user_prompt) and agent in {"direct", "browser"}:
-        task_text = clean_text(user_prompt, "", max_len=420)
-        print("[Router][Guardrail] Re-routing source-grounded Q&A request -> web_qa")
-        return _rewritten(
-            {
-                "agent": "web_qa",
-                "task": task_text,
-            },
-            rewritten_from=original_route,
-            reason="source_grounded_web_qa",
         )
 
     if execution_request and agent == "screen_context" and latest_screen_context:
@@ -219,7 +198,6 @@ def apply_routing_guardrails_route(
     clean_text: CleanText | None = None,
     choose_actionable_agent: ChooseActionableAgent | None = None,
     is_execution_request: IsExecutionRequest | None = None,
-    is_web_qa_request: IsWebQaRequest | None = None,
     requires_desktop_control_surface: RequiresDesktopControlSurface | None = None,
     routing_task_text: RoutingTaskText | None = None,
 ) -> RoutePayload:
@@ -231,7 +209,6 @@ def apply_routing_guardrails_route(
         clean_text=clean_text,
         choose_actionable_agent=choose_actionable_agent,
         is_execution_request=is_execution_request,
-        is_web_qa_request=is_web_qa_request,
         requires_desktop_control_surface=requires_desktop_control_surface,
         routing_task_text=routing_task_text,
     ).route

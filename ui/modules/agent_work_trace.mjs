@@ -4,15 +4,14 @@ const MAX_TRACE_TEXT_CHARS = 1400;
 const VALID_TRACE_STATUSES = new Set(['idle', 'waiting', 'running', 'completed', 'failed', 'skipped']);
 
 const SOURCE_LABELS = new Map([
-  ['jarvis', 'JARVIS'],
-  ['jarvis_completion', 'JARVIS'],
-  ['browser', 'Browser'],
-  ['browser_use', 'Browser'],
-  ['cua_cli', 'CLI'],
-  ['cua_vision', 'Computer'],
-  ['screen_context', 'Screen'],
-  ['screen_judge', 'Screen'],
-  ['web_qa', 'Web QA'],
+  ['jarvis', 'JARVIS Agent'],
+  ['jarvis_completion', 'JARVIS Agent'],
+  ['browser', 'Browser Agent'],
+  ['browser_use', 'Browser Agent'],
+  ['cua_cli', 'CLI Agent'],
+  ['cua_vision', 'Computer Agent'],
+  ['screen_context', 'Screen Context Agent'],
+  ['screen_judge', 'Screen Context Agent'],
 ]);
 
 function truncateText(value, maxChars = MAX_TRACE_TEXT_CHARS) {

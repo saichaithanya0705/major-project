@@ -1,4 +1,4 @@
-"""Direct-QA fast-path flow for the rapid orchestrator."""
+"""Direct-chat fast-path flow for the rapid orchestrator."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Sequence
 
 from models.rapid_orchestrator_contracts import (
     RapidAgentStepResult,
-    RapidDirectQaFlowDeps,
+    RapidDirectChatFlowDeps,
     RapidModel,
 )
 
@@ -26,17 +26,17 @@ def _raise_structural_subflow_error(exc: Exception) -> None:
         raise exc
 
 
-async def try_handle_direct_qa_request(
+async def try_handle_direct_chat_request(
     *,
     model: RapidModel,
     user_prompt: str,
     request_id: str,
-    deps: RapidDirectQaFlowDeps,
+    deps: RapidDirectChatFlowDeps,
     chain_steps: Sequence[RapidAgentStepResult],
 ) -> bool:
     direct_started = time.monotonic()
     try:
-        direct_answer = await deps.answer_direct_request(
+        direct_answer = await deps.answer_direct_chat_request(
             model=model,
             user_prompt=user_prompt,
             history_block=deps.format_rapid_history_for_prompt(),
@@ -49,10 +49,10 @@ async def try_handle_direct_qa_request(
         deps.log_assistant_event(
             "router_decision",
             request_id=request_id,
-            agent="direct",
+            agent="direct_chat",
             task=deps.clean_text(user_prompt, "", 420),
             duration_seconds=time.monotonic() - direct_started,
-            metadata={"step_index": 0, "reason": "direct_qa_fast_path"},
+            metadata={"step_index": 0, "reason": "direct_chat_fast_path"},
         )
         tool = deps.router_tool_map.get("direct_response")
         if tool:
@@ -61,21 +61,21 @@ async def try_handle_direct_qa_request(
         deps.log_assistant_event(
             "request_completed",
             request_id=request_id,
-            agent="direct",
+            agent="direct_chat",
             task=deps.clean_text(user_prompt, "", 420),
             message=direct_text,
             success=True,
             duration_seconds=time.monotonic() - direct_started,
-            metadata={"delegated_steps": 0, "fast_direct_qa": True},
+            metadata={"delegated_steps": 0, "fast_direct_chat": True},
         )
         return True
     except Exception as exc:
         _raise_structural_subflow_error(exc)
         error_text = deps.clean_text(str(exc), "Direct answer failed.", 420)
         deps.log_assistant_event(
-            "direct_answer_failed",
+            "direct_chat_failed",
             request_id=request_id,
-            agent="direct",
+            agent="direct_chat",
             task=deps.clean_text(user_prompt, "", 420),
             message=error_text,
             error=str(exc),

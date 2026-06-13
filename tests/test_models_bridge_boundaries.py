@@ -11,36 +11,36 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
 import models.models as model_module
-import models.browser_resume_route as browser_resume_route
-import models.direct_answer_runtime as direct_answer_runtime
-import models.jarvis_response_runtime as jarvis_response_runtime
-import models.model_initialization as model_initialization
-import models.openrouter_runtime as openrouter_runtime
-import models.rapid_orchestrator_deps as rapid_orchestrator_deps
-import models.request_agent_step_runtime as request_agent_step_runtime
-import models.request_entrypoint as request_entrypoint
-import models.router_provider_calls as router_provider_calls
-import models.router_provider_policy as router_provider_policy
-import models.router_execution_policy as router_execution_policy
-import models.router_runtime as router_runtime
-import models.router_runtime_contracts as router_runtime_contracts
-import models.routing_policy as routing_policy
-import models.screen_context_runtime as screen_context_runtime
+import models.runtime.browser_resume_route as browser_resume_route
+import models.runtime.direct_answer_runtime as direct_answer_runtime
+import models.runtime.jarvis_response_runtime as jarvis_response_runtime
+import models.shared.model_initialization as model_initialization
+import models.shared.openrouter_runtime as openrouter_runtime
+import models.orchestrator.rapid_orchestrator_deps as rapid_orchestrator_deps
+import models.runtime.request_agent_step_runtime as request_agent_step_runtime
+import models.runtime.request_entrypoint as request_entrypoint
+import models.routing.router_provider_calls as router_provider_calls
+import models.routing.router_provider_policy as router_provider_policy
+import models.routing.router_execution_policy as router_execution_policy
+import models.routing.router_runtime as router_runtime
+import models.routing.router_runtime_contracts as router_runtime_contracts
+import models.routing.routing_policy as routing_policy
+import models.runtime.screen_context_runtime as screen_context_runtime
 
 
 def test_screenshot_public_api_is_extracted_from_models_bridge() -> None:
-    assert model_module.store_screenshot.__module__ == "models.screenshot_store"
-    assert model_module.get_stored_screenshot.__module__ == "models.screenshot_store"
-    assert model_module.prepare_vision_screenshot.__module__ == "models.screenshot_store"
+    assert model_module.store_screenshot.__module__ == "models.shared.screenshot_store"
+    assert model_module.get_stored_screenshot.__module__ == "models.shared.screenshot_store"
+    assert model_module.prepare_vision_screenshot.__module__ == "models.shared.screenshot_store"
 
 
 def test_models_bridge_does_not_reexport_browser_resume_helper() -> None:
     assert not hasattr(model_module, "_resume_interrupted_agent_route")
-    assert browser_resume_route.build_browser_resume_route.__module__ == "models.browser_resume_route"
+    assert browser_resume_route.build_browser_resume_route.__module__ == "models.runtime.browser_resume_route"
 
 
 def test_preflight_public_api_is_extracted_from_models_bridge() -> None:
-    assert model_module.preflight_router_configuration.__module__ == "models.router_preflight"
+    assert model_module.preflight_router_configuration.__module__ == "models.routing.router_preflight"
 
 
 def test_model_initialization_runtime_is_extracted_from_models_bridge() -> None:
@@ -111,7 +111,7 @@ def test_models_bridge_does_not_export_default_rapid_history_alias() -> None:
 
 def test_models_bridge_does_not_reexport_request_step_runner() -> None:
     assert not hasattr(model_module, "_run_routed_agent_step")
-    assert request_agent_step_runtime.run_request_agent_step.__module__ == "models.request_agent_step_runtime"
+    assert request_agent_step_runtime.run_request_agent_step.__module__ == "models.runtime.request_agent_step_runtime"
     hints = get_type_hints(request_agent_step_runtime.run_request_agent_step)
     assert hints["routing_result"] == rapid_orchestrator_deps.RapidRouteResult
     assert hints["return"] == rapid_orchestrator_deps.RapidAgentStepResult
@@ -141,7 +141,7 @@ def test_openrouter_fallback_runtime_is_extracted_from_models_bridge() -> None:
 
 def test_direct_answer_runtime_is_extracted_from_models_bridge() -> None:
     assert model_module.GeminiModel.answer_direct_request is direct_answer_runtime.answer_direct_request
-    assert model_module.GeminiModel.answer_web_qa_request is direct_answer_runtime.answer_web_qa_request
+    assert not hasattr(model_module.GeminiModel, "answer_web_qa_request")
 
 
 def test_screen_context_runtime_is_extracted_from_models_bridge() -> None:

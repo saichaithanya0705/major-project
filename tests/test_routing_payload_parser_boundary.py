@@ -54,7 +54,7 @@ def test_copy_plan_task_payload_normalizes_direct_args_and_sequences() -> None:
         "agent": "direct",
         "direct_response_args": {"text": "Done.", "variant": "compact"},
         "depends_on": " research ",
-        "resources": ["cli", " ", "web_qa"],
+        "resources": ["cli", " ", "browser"],
         "max_attempts": "2",
     }
 
@@ -66,6 +66,6 @@ def test_copy_plan_task_payload_normalizes_direct_args_and_sequences() -> None:
         "response_text": "Done.",
         "direct_response_args": {"variant": "compact"},
         "depends_on": ["research"],
-        "resources": ["cli", "web_qa"],
+        "resources": ["cli", "browser"],
         "max_attempts": 2,
     }

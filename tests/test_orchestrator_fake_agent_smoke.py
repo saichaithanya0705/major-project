@@ -14,12 +14,12 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_fake_agent_smoke_runs_web_qa_to_cli_to_direct_with_trace_artifacts_and_leases() -> None:
+async def test_fake_agent_smoke_runs_browser_to_cli_to_direct_with_trace_artifacts_and_leases() -> None:
     plan = normalize_orchestration_plan_payload(
         "research release notes and update changelog",
         {
             "tasks": [
-                {"id": "research", "agent": "web_qa", "task": "Find release notes with sources"},
+                {"id": "research", "agent": "browser", "task": "Find release notes with sources"},
                 {
                     "id": "patch",
                     "agent": "cua_cli",

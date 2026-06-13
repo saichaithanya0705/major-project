@@ -51,8 +51,8 @@ RapidRoutingGuardrails: TypeAlias = Callable[[str, RoutePayload, ScreenContextPa
 RapidRoutingTaskText: TypeAlias = Callable[[RoutePayload], str]
 RapidRoutingSignature: TypeAlias = Callable[[RoutePayload], BlockedStepSignature]
 RapidRepeatPredicate: TypeAlias = Callable[[str], bool]
-RapidDirectQaPredicate: TypeAlias = Callable[[str], bool]
-RapidDirectAnswerer: TypeAlias = Callable[..., Awaitable[str]]
+RapidDirectChatPredicate: TypeAlias = Callable[[str], bool]
+RapidDirectChatAnswerer: TypeAlias = Callable[..., Awaitable[str]]
 RapidScreenContextMessage: TypeAlias = Callable[[ScreenContextPayload], str]
 RapidAssistantLogger: TypeAlias = Callable[..., None]
 RapidToolMap: TypeAlias = dict[str, Callable[..., Any]]
@@ -101,9 +101,9 @@ class RapidModel(Protocol):
 RapidModelFactory: TypeAlias = Callable[[str, str], RapidModel]
 
 
-class RapidDirectQaFlowDeps(Protocol):
+class RapidDirectChatFlowDeps(Protocol):
     append_rapid_history: RapidHistoryAppender
-    answer_direct_request: RapidDirectAnswerer
+    answer_direct_chat_request: RapidDirectChatAnswerer
     clean_text: RapidTextCleaner
     finalize_direct_response_text: RapidDirectResponseFinalizer
     format_rapid_history_for_prompt: RapidHistoryFormatter
@@ -139,9 +139,9 @@ __all__ = [
     "RapidAgentStepResult",
     "RapidAssistantLogger",
     "RapidChainFormatter",
-    "RapidDirectAnswerer",
-    "RapidDirectQaFlowDeps",
-    "RapidDirectQaPredicate",
+    "RapidDirectChatAnswerer",
+    "RapidDirectChatFlowDeps",
+    "RapidDirectChatPredicate",
     "RapidDirectResponseFinalizer",
     "RapidHistoryAppender",
     "RapidHistoryFormatter",

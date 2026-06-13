@@ -1,9 +1,9 @@
 const { app, BrowserWindow, screen, ipcMain, Menu, Tray, nativeImage, globalShortcut, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { createChatSessionManager } = require('./chat_sessions');
-const { getServerConfig: resolveServerConfig } = require('./server_config');
-const { cleanupVisionArtifactImages, getVisionArtifactImageDir } = require('./artifact_lifecycle');
+const { createChatSessionManager } = require('./main/chat_sessions');
+const { getServerConfig: resolveServerConfig } = require('./main/server_config');
+const { cleanupVisionArtifactImages, getVisionArtifactImageDir } = require('./main/artifact_lifecycle');
 
 let overlayWin;
 let inputWin;

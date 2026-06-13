@@ -11,7 +11,7 @@ from models.rapid_plan_orchestrator import execute_rapid_plan_payload, is_plan_p
 from models.rapid_completion_recovery_policy import (
     evaluate_incomplete_step_recovery,
 )
-from models.rapid_direct_answer_flow import try_handle_direct_qa_request
+from models.rapid_direct_chat_flow import try_handle_direct_chat_request
 from models.rapid_orchestrator_outcomes import (
     RapidRequestOutcomeReporter,
     raise_structural_subflow_error,
@@ -20,8 +20,8 @@ from models.rapid_orchestrator_contracts import (
     RapidAgentStepResult,
     RapidAssistantLogger,
     RapidChainFormatter,
-    RapidDirectAnswerer,
-    RapidDirectQaPredicate,
+    RapidDirectChatAnswerer,
+    RapidDirectChatPredicate,
     RapidDirectResponseFinalizer,
     RapidHistoryAppender,
     RapidHistoryFormatter,
@@ -61,8 +61,8 @@ class RapidOrchestratorDeps:
     routing_signature: RapidRoutingSignature
     user_requested_repeat: RapidRepeatPredicate
     finalize_direct_response_text: RapidDirectResponseFinalizer
-    is_direct_qa_request: RapidDirectQaPredicate
-    answer_direct_request: RapidDirectAnswerer
+    is_direct_chat_request: RapidDirectChatPredicate
+    answer_direct_chat_request: RapidDirectChatAnswerer
     screen_context_message: RapidScreenContextMessage
     router_tool_map: RapidToolMap
     log_assistant_event: RapidAssistantLogger
@@ -99,8 +99,8 @@ async def run_rapid_request(
         router_tool_map=deps.router_tool_map,
     )
 
-    if deps.is_direct_qa_request(user_prompt):
-        if await try_handle_direct_qa_request(
+    if deps.is_direct_chat_request(user_prompt):
+        if await try_handle_direct_chat_request(
             model=model,
             user_prompt=user_prompt,
             request_id=request_id,

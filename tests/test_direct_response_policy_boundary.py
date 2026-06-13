@@ -12,6 +12,7 @@ import models.direct_response_policy as direct_response_policy
 import models.rapid_orchestrator_deps as rapid_orchestrator_deps
 import models.routing_policy as routing_policy
 import models.text_normalization as text_normalization
+import agents.direct_chat.agent as direct_chat_agent
 
 
 def test_routing_policy_text_helpers_are_extracted() -> None:
@@ -27,16 +28,13 @@ def test_routing_policy_text_helpers_are_extracted() -> None:
 
 
 def test_runtime_modules_import_text_normalization_boundary_directly() -> None:
-    assert direct_answer_runtime._clean_text is text_normalization.clean_text
+    assert direct_answer_runtime.DirectChatAgent is direct_chat_agent.DirectChatAgent
+    assert direct_chat_agent._clean_text is text_normalization.clean_text
     assert (
-        direct_answer_runtime._format_direct_response_text
+        direct_chat_agent._format_direct_response_text
         is text_normalization.format_direct_response_text
     )
     assert agent_step_runner._clean_text is text_normalization.clean_text
-    assert (
-        agent_step_runner._format_direct_response_text
-        is text_normalization.format_direct_response_text
-    )
 
 
 def test_rapid_deps_builder_uses_direct_response_policy_boundary() -> None:

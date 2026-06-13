@@ -16,7 +16,6 @@ from typing import Protocol, cast
 from agents.cua_cli.agent import CLIAgent
 from agents.jarvis.artifact import build_jarvis_visual_artifact
 from agents.jarvis.prompts import JARVIS_SYSTEM_PROMPT
-from agents.web_qa.agent import WebQAAgent
 from core.assistant_logging import log_assistant_event
 from models.agent_step_execution_runtime import (
     AgentExecutionOutcome,
@@ -32,9 +31,6 @@ from models.rapid_orchestrator_contracts import RapidAgentStepResult, RapidRoute
 from models.rapid_step_payloads import RapidToolCallRecord
 from models.routing_step_identity import routing_task_text as _routing_task_text
 from models.text_normalization import clean_text as _clean_text
-from models.text_normalization import (
-    format_direct_response_text as _format_direct_response_text,
-)
 from ui.visualization_api.chat_artifact import send_chat_vision_artifact
 from ui.visualization_api.chat_visibility import send_vision_chat_restore
 from ui.visualization_api.status_bubble import (
@@ -129,13 +125,6 @@ def _browser_completion_message(execution: AgentExecutionOutcome | Mapping[str, 
     if summary:
         return summary
     return "Browser task completed."
-
-
-def _web_qa_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
-    execution = _as_execution_outcome(execution)
-    if not execution.success:
-        return _clean_text(execution.error, "Web QA task failed.")
-    return _format_direct_response_text(execution.result, "Web QA task completed.")
 
 
 def _vision_completion_message(execution: AgentExecutionOutcome | Mapping[str, object]) -> str:
@@ -424,41 +413,6 @@ async def run_routed_agent_step(
             success=execution.success,
             message=message,
             source="browser_use",
-            complete=execution.complete if execution.complete is not None else True,
-        )
-
-    if agent_name == "web_qa":
-        await _start_non_rapid_status("Searching the web...", source="web_qa")
-        task = str(routing_result.get("task") or "")
-        print(f"[Router] Web QA Agent answering: {task}")
-        started = time.monotonic()
-        execution = await execute_task_agent(
-            task=task,
-            agent_factory=lambda: WebQAAgent(model=model),
-            failure_complete=True,
-        )
-
-        message = _web_qa_completion_message(execution)
-        _log_non_rapid_agent_result(
-            request_id=request_id,
-            agent="web_qa",
-            task_text=task_text,
-            message=message,
-            started=started,
-            execution=execution,
-            failure_fallback="Web QA task failed.",
-        )
-        await _finish_non_rapid_status(
-            message,
-            execution.success,
-            source="web_qa",
-        )
-        return _step(
-            agent="web_qa",
-            task=task,
-            success=execution.success,
-            message=message,
-            source="web_qa",
             complete=execution.complete if execution.complete is not None else True,
         )
 

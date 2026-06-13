@@ -16,7 +16,7 @@ def _run_chat_sessions_eval(user_data_dir: Path, body: str):
 
     script = (
         "const path = require('path');\n"
-        "const { createChatSessionManager } = require(path.join(process.cwd(), 'ui', 'chat_sessions.js'));\n"
+        "const { createChatSessionManager } = require(path.join(process.cwd(), 'ui', 'main', 'chat_sessions.js'));\n"
         "const userDataDir = process.env.USER_DATA_DIR;\n"
         "const app = { getPath: (name) => (name === 'userData' ? userDataDir : userDataDir) };\n"
         "const manager = createChatSessionManager({ app });\n"

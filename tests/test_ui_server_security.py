@@ -244,7 +244,7 @@ def test_electron_server_config_returns_runtime_auth_token(tmp_path: Path) -> No
 
     script = (
         "const path = require('path');\n"
-        "const cfg = require(path.join(process.cwd(), 'ui', 'server_config.js'));\n"
+        "const cfg = require(path.join(process.cwd(), 'ui', 'main', 'server_config.js'));\n"
         "const result = cfg.getServerConfig({ projectRoot: process.env.PROJECT_ROOT });\n"
         "process.stdout.write(JSON.stringify(result));"
     )

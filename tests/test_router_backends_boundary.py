@@ -36,13 +36,13 @@ class _FakeOpenRouterFallbackModel:
 
 
 def test_legacy_router_text_tool_call_is_supported() -> None:
-    legacy_web_qa = backend_module._parse_router_text_tool_call(
-        'invoke_web_qa(task="What is the latest news about SpaceX?")'
+    legacy_direct = backend_module._parse_router_text_tool_call(
+        'direct_response(text="Hello from the router")'
     )
-    assert legacy_web_qa == {
-        "agent": "web_qa",
-        "task": "What is the latest news about SpaceX?",
-    }, legacy_web_qa
+    assert legacy_direct == {
+        "agent": "direct",
+        "response_text": "Hello from the router",
+    }, legacy_direct
 
 
 def test_openrouter_text_and_router_payloads_are_forwarded() -> None:
@@ -160,7 +160,7 @@ def test_openrouter_router_preserves_plan_payload_for_runtime_normalization() ->
                         "message": {
                             "content": (
                                 '{"tasks":['
-                                '{"id":"research","agent":"web_qa","task":"Find release notes"},'
+                                '{"id":"research","agent":"browser","task":"Find release notes"},'
                                 '{"id":"patch","agent":"cua_cli","task":"Update changelog","depends_on":["research"]}'
                                 '],"max_parallel":2}'
                             ),
@@ -188,7 +188,7 @@ def test_openrouter_router_preserves_plan_payload_for_runtime_normalization() ->
             clean_text=_clean_text,
             parse_json_object_from_text=lambda _value: {
                 "tasks": [
-                    {"id": "research", "agent": "web_qa", "task": "Find release notes"},
+                    {"id": "research", "agent": "browser", "task": "Find release notes"},
                     {
                         "id": "patch",
                         "agent": "cua_cli",
@@ -204,7 +204,7 @@ def test_openrouter_router_preserves_plan_payload_for_runtime_normalization() ->
 
     assert payload == {
         "tasks": [
-            {"id": "research", "agent": "web_qa", "task": "Find release notes"},
+            {"id": "research", "agent": "browser", "task": "Find release notes"},
             {
                 "id": "patch",
                 "agent": "cua_cli",

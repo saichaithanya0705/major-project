@@ -26,12 +26,12 @@ from models.routing_step_identity import (
     routing_task_text as _routing_task_text,
 )
 from models.routing_guardrails import apply_routing_guardrails_route as _apply_routing_guardrails
-from models.routing_question_policy import is_direct_qa_request as _is_direct_qa_request
+from models.routing_question_policy import is_direct_chat_request as _is_direct_chat_request
 from models.screen_context_policy import screen_context_message
 from models.text_normalization import clean_text
 
 
-async def answer_direct_request_via_model(
+async def answer_direct_chat_via_model(
     *,
     model: Any,
     user_prompt: str,
@@ -103,8 +103,8 @@ def build_rapid_orchestrator_deps(
         routing_signature=_routing_signature,
         user_requested_repeat=user_requested_repeat,
         finalize_direct_response_text=finalize_direct_response_text,
-        is_direct_qa_request=_is_direct_qa_request,
-        answer_direct_request=answer_direct_request_via_model,
+        is_direct_chat_request=_is_direct_chat_request,
+        answer_direct_chat_request=answer_direct_chat_via_model,
         screen_context_message=screen_context_message,
         router_tool_map=ROUTER_TOOL_MAP,
         log_assistant_event=log_assistant_event,

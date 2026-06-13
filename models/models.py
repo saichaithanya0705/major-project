@@ -14,21 +14,20 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 from core.assistant_logging import log_assistant_event, new_assistant_request_id
-from models.function_calls import ROUTER_TOOL_MAP
-from models.jarvis_response_runtime import generate_jarvis_response
-from models.direct_answer_runtime import (
+from models.routing.function_calls import ROUTER_TOOL_MAP
+from models.runtime.jarvis_response_runtime import generate_jarvis_response
+from models.runtime.direct_answer_runtime import (
     answer_direct_request,
-    answer_web_qa_request,
 )
-from models.model_initialization import initialize_gemini_model_runtime
-from models.rapid_orchestrator import run_rapid_request
-from models.rapid_orchestrator_deps import build_rapid_orchestrator_deps
-from models.rapid_state import RAPID_SESSION_STATE
-import models.request_agent_step_runtime as request_agent_step_runtime
-from models.request_entrypoint import run_gemini_request
-from models.router_runtime import route_request
-from models.screen_context_runtime import generate_screen_context
-from models.openrouter_runtime import (
+from models.shared.model_initialization import initialize_gemini_model_runtime
+from models.orchestrator.rapid_orchestrator import run_rapid_request
+from models.orchestrator.rapid_orchestrator_deps import build_rapid_orchestrator_deps
+from models.runtime.rapid_state import RAPID_SESSION_STATE
+import models.runtime.request_agent_step_runtime as request_agent_step_runtime
+from models.runtime.request_entrypoint import run_gemini_request
+from models.routing.router_runtime import route_request
+from models.runtime.screen_context_runtime import generate_screen_context
+from models.shared.openrouter_runtime import (
     call_openrouter_text_sync as _call_openrouter_text_sync,
     call_openrouter_tool_sync as _call_openrouter_tool_sync,
     openrouter_enabled as _openrouter_enabled,
@@ -36,22 +35,22 @@ from models.openrouter_runtime import (
     try_openrouter_text_fallback as _try_openrouter_text_fallback,
     try_openrouter_tool_fallback as _try_openrouter_tool_fallback,
 )
-from models.router_preflight import (
+from models.routing.router_preflight import (
     preflight_router_configuration,
 )
-from models.router_provider_calls import (
+from models.routing.router_provider_calls import (
     call_ollama_router_sync as _call_ollama_router_sync,
     call_nvidia_router_sync as _call_nvidia_router_sync,
     call_openrouter_router_sync as _call_openrouter_router_sync,
 )
-from models.routing_decision_policy import (
+from models.routing.routing_decision_policy import (
     normalize_router_decision_payload as _normalize_router_decision_payload,
 )
-from models.routing_prompt_parser import (
+from models.routing.routing_prompt_parser import (
     extract_latest_request_from_router_prompt as _extract_latest_request,
 )
-from models.text_normalization import clean_text as _clean_text
-from models.screenshot_store import (
+from models.shared.text_normalization import clean_text as _clean_text
+from models.shared.screenshot_store import (
     get_stored_screenshot,
     prepare_vision_screenshot,
     store_screenshot,
@@ -247,7 +246,6 @@ class GeminiModel:
     _call_ollama_router_sync = _call_ollama_router_sync
 
     answer_direct_request = answer_direct_request
-    answer_web_qa_request = answer_web_qa_request
 
     def _normalize_router_decision(
         self,

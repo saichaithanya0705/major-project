@@ -125,17 +125,17 @@ def test_chat_response_command_finalizes_pending_assistant() -> None:
     assert "finalizePendingAssistant(responseText)" in input_window_js
 
 
-def test_web_qa_status_is_trace_only_until_router_chat_response() -> None:
+def test_direct_chat_status_is_trace_only_until_router_chat_response() -> None:
     input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
 
-    assert "from './chat_reply_policy.mjs'" in input_window_js
+    assert "from './modules/chat_reply_policy.mjs'" in input_window_js
     policy = _run_node_module(
         """
-        const policy = await import('./ui/chat_reply_policy.mjs');
+        const policy = await import('./ui/modules/chat_reply_policy.mjs');
         process.stdout.write(JSON.stringify({
           rapid: policy.shouldDisplayReplyInChat({ source: 'rapid_response' }),
           rapidCase: policy.shouldDisplayReplyInChat({ source: ' RAPID_RESPONSE ' }),
-          webQa: policy.shouldDisplayReplyInChat({ source: 'web_qa' }),
+          directChat: policy.shouldDisplayReplyInChat({ source: 'direct_chat' }),
           trace: policy.shouldDisplayReplyInChat({ source: 'agent_work_trace' }),
           missingSource: policy.shouldDisplayReplyInChat({}),
         }));
@@ -144,7 +144,7 @@ def test_web_qa_status_is_trace_only_until_router_chat_response() -> None:
     assert policy == {
         "rapid": True,
         "rapidCase": True,
-        "webQa": False,
+        "directChat": False,
         "trace": False,
         "missingSource": True,
     }

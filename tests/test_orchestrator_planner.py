@@ -25,7 +25,7 @@ def test_normalize_orchestration_plan_payload_builds_multi_task_plan() -> None:
         "tasks": [
             {
                 "id": "research",
-                "agent": "web_qa",
+                "agent": "browser",
                 "task": "Find current release notes with sources",
                 "max_attempts": 2,
             },
@@ -45,9 +45,9 @@ def test_normalize_orchestration_plan_payload_builds_multi_task_plan() -> None:
 
     assert plan.max_parallel == 2
     assert [task.id for task in plan.tasks] == ["research", "patch"]
-    assert [task.agent for task in plan.tasks] == ["web_qa", "cua_cli"]
+    assert [task.agent for task in plan.tasks] == ["browser", "cua_cli"]
     assert plan.tasks[0].max_attempts == 2
-    assert plan.tasks[0].resources == (ResourceLock.WEB_QA,)
+    assert plan.tasks[0].resources == (ResourceLock.BROWSER, ResourceLock.MODEL_ROUTER)
     assert plan.tasks[1].depends_on == ("research",)
     assert plan.tasks[1].resources == (ResourceLock.CLI,)
     assert plan.tasks[1].metadata["planner_index"] == 2
@@ -169,27 +169,31 @@ def test_normalize_orchestration_plan_payload_allows_extra_resource_locks() -> N
     payload = {
         "tasks": [
             {
-                "agent": "web_qa",
+                "agent": "browser",
                 "task": "Research the release notes",
-                "resources": ["web_qa", "cli"],
+                "resources": ["browser", "model_router", "cli"],
             },
             {
                 "agent": "cua_cli",
                 "task": "Prepare a patch from the release notes",
-                "depends_on": ["step-1-web-qa"],
+                "depends_on": ["step-1-browser"],
             }
         ]
     }
 
     plan = normalize_orchestration_plan_payload("research and prepare patch", payload)
 
-    assert plan.tasks[0].resources == (ResourceLock.WEB_QA, ResourceLock.CLI)
+    assert plan.tasks[0].resources == (
+        ResourceLock.BROWSER,
+        ResourceLock.MODEL_ROUTER,
+        ResourceLock.CLI,
+    )
 
 
 def test_normalize_orchestration_plan_payload_rejects_agent_parade_plans() -> None:
     payload = {
         "tasks": [
-            {"agent": "web_qa", "task": "Research docs"},
+            {"agent": "screen_context", "task": "Inspect visible docs"},
             {"agent": "browser", "task": "Open docs"},
             {"agent": "cua_cli", "task": "Patch files"},
             {"agent": "cua_vision", "task": "Click save"},
@@ -204,7 +208,7 @@ def test_normalize_orchestration_plan_payload_rejects_agent_parade_plans() -> No
 def test_normalize_orchestration_plan_payload_rejects_empty_executable_work() -> None:
     payload = {
         "tasks": [
-            {"agent": "web_qa", "task": ""},
+            {"agent": "browser", "task": ""},
             {"agent": "cua_cli", "task": "Patch files"},
         ]
     }

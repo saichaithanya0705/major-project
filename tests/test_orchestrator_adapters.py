@@ -87,7 +87,6 @@ def test_plan_from_route_and_route_from_task_round_trip_current_shapes() -> None
         {"agent": "screen_context", "task": "Look at the current page", "focus": "errors"},
         {"agent": "cua_cli", "task": "Run pytest"},
         {"agent": "cua_vision", "task": "Click the save button"},
-        {"agent": "web_qa", "task": "Find the latest release notes"},
         {"agent": "jarvis", "query": "Explain the screen"},
     )
 
@@ -183,8 +182,8 @@ def test_outcome_normalizes_cli_tool_calls_and_artifact_path() -> None:
     assert outcome.metadata["tool_calls"] == result["tool_calls"]
 
 
-def test_outcome_normalizes_web_qa_sourced_answer() -> None:
-    task = route_to_orchestrator_task({"agent": "web_qa", "task": "Latest project release"})
+def test_outcome_normalizes_sourced_answer_artifact() -> None:
+    task = route_to_orchestrator_task({"agent": "browser", "task": "Latest project release"})
     result = {
         "success": True,
         "answer": "Version 2 shipped today.",
@@ -195,7 +194,7 @@ def test_outcome_normalizes_web_qa_sourced_answer() -> None:
 
     assert outcome.message == "Version 2 shipped today."
     assert outcome.artifacts == {"sources": result["sources"]}
-    assert outcome.metadata["source"] == "web_qa"
+    assert outcome.metadata["source"] == "browser"
 
 
 def test_apply_outcome_to_plan_updates_completed_failed_and_incomplete_success() -> None:

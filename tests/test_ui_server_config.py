@@ -16,7 +16,7 @@ def _run_server_config_eval(project_root: Path, body: str, env_overrides: dict[s
 
     script = (
         "const path = require('path');\n"
-        "const serverConfig = require(path.join(process.cwd(), 'ui', 'server_config.js'));\n"
+        "const serverConfig = require(path.join(process.cwd(), 'ui', 'main', 'server_config.js'));\n"
         "const projectRoot = process.env.PROJECT_ROOT;\n"
         f"{body}\n"
     )

@@ -25,6 +25,8 @@ def test_rapid_orchestrator_deps_use_shared_contract_aliases() -> None:
     assert hints["apply_routing_guardrails"] == rapid_contracts.RapidRoutingGuardrails
     assert hints["routing_task_text"] == rapid_contracts.RapidRoutingTaskText
     assert hints["routing_signature"] == rapid_contracts.RapidRoutingSignature
+    assert hints["is_direct_chat_request"] == rapid_contracts.RapidDirectChatPredicate
+    assert hints["answer_direct_chat_request"] == rapid_contracts.RapidDirectChatAnswerer
     assert hints["screen_context_message"] == rapid_contracts.RapidScreenContextMessage
 
 

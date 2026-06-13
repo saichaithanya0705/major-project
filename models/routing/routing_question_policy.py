@@ -7,7 +7,7 @@ from __future__ import annotations
 from models.routing_intent_policy import (
     has_context_dependent_reference,
     is_direct_qa_request as classify_direct_qa_request,
-    is_web_qa_request as classify_web_qa_request,
+    is_source_grounded_qa_request as classify_source_grounded_qa_request,
 )
 from models.routing_surface_policy import (
     BROWSER_EXECUTION_MARKERS,
@@ -90,7 +90,7 @@ def is_visual_explanation_request(user_prompt: str) -> bool:
 def is_direct_qa_request(user_prompt: str) -> bool:
     return classify_direct_qa_request(
         user_prompt,
-        is_web_qa_request_predicate=is_web_qa_request,
+        is_source_grounded_qa_request_predicate=is_source_grounded_qa_request,
         is_execution_request=is_execution_request,
         is_visual_explanation_request=is_visual_explanation_request,
         has_context_dependent_reference_predicate=has_context_dependent_reference,
@@ -99,8 +99,12 @@ def is_direct_qa_request(user_prompt: str) -> bool:
     )
 
 
-def is_web_qa_request(user_prompt: str) -> bool:
-    return classify_web_qa_request(
+def is_direct_chat_request(user_prompt: str) -> bool:
+    return is_direct_qa_request(user_prompt)
+
+
+def is_source_grounded_qa_request(user_prompt: str) -> bool:
+    return classify_source_grounded_qa_request(
         user_prompt,
         is_visual_explanation_request=is_visual_explanation_request,
         has_context_dependent_reference_predicate=has_context_dependent_reference,
@@ -111,7 +115,8 @@ def is_web_qa_request(user_prompt: str) -> bool:
 
 __all__ = [
     "VISUAL_EXPLAIN_MARKERS",
+    "is_direct_chat_request",
     "is_direct_qa_request",
+    "is_source_grounded_qa_request",
     "is_visual_explanation_request",
-    "is_web_qa_request",
 ]

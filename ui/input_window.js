@@ -3,18 +3,18 @@ import {
   buildLifecycleSnapshot,
   getShortcutLabels,
   inferLifecycleSnapshot,
-} from './status_lifecycle.js';
+} from './modules/status_lifecycle.js';
 import {
   createAgentWorkTraceState,
   isAgentTraceSource,
   normalizeAgentTraceSnapshot,
-} from './agent_work_trace.mjs';
+} from './modules/agent_work_trace.mjs';
 import {
   buildGeneratingIndicatorView,
   isGeneratingPlaceholderText,
-} from './generating_indicator.mjs';
-import { getAssistantLifecycleOutcome } from './chat_outcome.mjs';
-import { shouldDisplayReplyInChat } from './chat_reply_policy.mjs';
+} from './modules/generating_indicator.mjs';
+import { getAssistantLifecycleOutcome } from './modules/chat_outcome.mjs';
+import { shouldDisplayReplyInChat } from './modules/chat_reply_policy.mjs';
 
 const commandInput = document.getElementById('command-input');
 const commandSend = document.getElementById('command-send');

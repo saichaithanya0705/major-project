@@ -271,7 +271,7 @@ def should_finish_after_successful_agent_step(
         return False
 
     agent = str(step_result.get("agent") or routing_result.get("agent") or "").strip().lower()
-    if agent not in {"browser", "cua_cli", "cua_vision", "web_qa"}:
+    if agent not in {"browser", "cua_cli", "cua_vision"}:
         return False
 
     requested = _normalized_task_text(user_prompt)

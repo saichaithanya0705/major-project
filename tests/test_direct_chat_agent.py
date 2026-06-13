@@ -1,8 +1,8 @@
 """
-Checks Web QA agent search and synthesis behavior.
+Checks DirectChatAgent answer synthesis and Tavily search behavior.
 
 Usage:
-    python tests/test_web_qa_agent.py
+    python tests/test_direct_chat_agent.py
 """
 
 import asyncio
@@ -13,12 +13,12 @@ from contextlib import AsyncExitStack
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
-from agents.web_qa.agent import WebQAAgent, ensure_sources_section, normalize_search_sources
-from agents.web_qa.mcp_client import TavilyMcpClient
-from agents.web_qa import mcp_client as mcp_client_module
+from agents.direct_chat import mcp_client as mcp_client_module
+from agents.direct_chat.agent import DirectChatAgent, ensure_sources_section, normalize_search_sources
+from agents.direct_chat.mcp_client import TavilyMcpClient
 
 
-async def test_web_qa_agent_builds_sourced_markdown_answer() -> None:
+async def test_direct_chat_agent_builds_sourced_markdown_answer() -> None:
     observed = {}
 
     class _FakeSearchClient:
@@ -39,24 +39,43 @@ async def test_web_qa_agent_builds_sourced_markdown_answer() -> None:
         async def close(self):
             observed["closed"] = True
 
-    async def _fake_synthesizer(*, query: str, sources: list[dict[str, str]]) -> str:
-        observed["synthesis_query"] = query
+    async def _fake_synthesizer(
+        *,
+        user_prompt: str,
+        history_block: str,
+        sources: list[dict[str, str]],
+        web_search_used: bool,
+    ) -> str:
+        observed["synthesis_prompt"] = user_prompt
+        observed["history_block"] = history_block
         observed["sources"] = sources
+        observed["web_search_used"] = web_search_used
         return "Fresh sourced fact from the web.\n\nSources:\n- [Example Result](https://example.com/result)"
 
-    agent = WebQAAgent(
+    agent = DirectChatAgent(
         search_client=_FakeSearchClient(),
         synthesizer=_fake_synthesizer,
+        search_predicate=lambda _prompt: True,
     )
 
     result = await agent.execute("latest example topic")
 
-    assert result == {
-        "success": True,
-        "result": "Fresh sourced fact from the web.\n\nSources:\n- [Example Result](https://example.com/result)",
-        "error": "",
-        "complete": True,
-    }, result
+    assert result["success"] is True, result
+    assert result["result"] == (
+        "Fresh sourced fact from the web.\n\nSources:\n- [Example Result](https://example.com/result)"
+    )
+    assert result["error"] == ""
+    assert result["complete"] is True
+    assert result["tool_calls"] == [
+        {
+            "name": "tavily_search",
+            "arguments": {
+                "query": "latest example topic",
+                "max_results": 5,
+                "search_depth": "basic",
+            },
+        }
+    ]
     assert observed["query"] == "latest example topic"
     assert observed["sources"] == [
         {
@@ -66,10 +85,55 @@ async def test_web_qa_agent_builds_sourced_markdown_answer() -> None:
         }
     ]
     assert observed["search_depth"] == "basic"
+    assert observed["web_search_used"] is True
     assert observed["closed"] is True
 
 
-async def test_web_qa_agent_accepts_tavily_text_payload() -> None:
+async def test_direct_chat_agent_skips_search_for_timeless_chat() -> None:
+    observed = {}
+
+    class _SearchClientShouldNotRun:
+        async def search(self, *_args, **_kwargs):
+            raise AssertionError("Search should not run for timeless direct chat.")
+
+        async def close(self):
+            observed["closed"] = True
+
+    async def _fake_synthesizer(
+        *,
+        user_prompt: str,
+        history_block: str,
+        sources: list[dict[str, str]],
+        web_search_used: bool,
+    ) -> str:
+        observed["user_prompt"] = user_prompt
+        observed["history_block"] = history_block
+        observed["sources"] = sources
+        observed["web_search_used"] = web_search_used
+        return "Recursion is a function calling itself."
+
+    agent = DirectChatAgent(
+        history_block="# Recent conversation\nUser said hello.",
+        search_client=_SearchClientShouldNotRun(),
+        synthesizer=_fake_synthesizer,
+        search_predicate=lambda _prompt: False,
+    )
+
+    result = await agent.execute("Explain recursion")
+
+    assert result == {
+        "success": True,
+        "result": "Recursion is a function calling itself.",
+        "error": "",
+        "complete": True,
+    }, result
+    assert observed["history_block"] == "# Recent conversation\nUser said hello."
+    assert observed["sources"] == []
+    assert observed["web_search_used"] is False
+    assert observed["closed"] is True
+
+
+async def test_direct_chat_agent_accepts_tavily_text_payload() -> None:
     class _FakeSearchClient:
         async def search(self, query: str, max_results: int = 5, search_depth: str = "basic"):
             return {
@@ -87,7 +151,13 @@ async def test_web_qa_agent_accepts_tavily_text_payload() -> None:
         async def close(self):
             pass
 
-    async def _fake_synthesizer(*, query: str, sources: list[dict[str, str]]) -> str:
+    async def _fake_synthesizer(
+        *,
+        user_prompt: str,
+        history_block: str,
+        sources: list[dict[str, str]],
+        web_search_used: bool,
+    ) -> str:
         assert sources == [
             {
                 "title": "Bill Gates Net Worth | Example Finance",
@@ -100,11 +170,13 @@ async def test_web_qa_agent_accepts_tavily_text_payload() -> None:
                 "content": "The estimate changes with markets and donations.",
             },
         ]
+        assert web_search_used is True
         return "Bill Gates has an estimated net worth of $105 billion."
 
-    agent = WebQAAgent(
+    agent = DirectChatAgent(
         search_client=_FakeSearchClient(),
         synthesizer=_fake_synthesizer,
+        search_predicate=lambda _prompt: True,
     )
 
     result = await agent.execute("what is the net worth of bill gates")
@@ -228,6 +300,12 @@ def test_tavily_client_ignores_os_env_without_project_env_key(monkeypatch, tmp_p
     assert client.is_configured() is False
 
 
+def test_tavily_client_uses_pinned_mcp_package_by_default() -> None:
+    client = TavilyMcpClient(api_key="test-key")
+
+    assert client.args == ["-y", "tavily-mcp@0.2.19"]
+
+
 async def test_tavily_client_tool_listing_times_out() -> None:
     class _SlowListSession:
         async def list_tools(self):
@@ -252,10 +330,12 @@ async def test_tavily_client_tool_listing_times_out() -> None:
 
 
 async def run_checks() -> None:
-    await test_web_qa_agent_builds_sourced_markdown_answer()
-    await test_web_qa_agent_accepts_tavily_text_payload()
+    await test_direct_chat_agent_builds_sourced_markdown_answer()
+    await test_direct_chat_agent_skips_search_for_timeless_chat()
+    await test_direct_chat_agent_accepts_tavily_text_payload()
     test_normalize_search_sources_parses_tavily_text_safely()
     test_ensure_sources_section_requires_real_section_heading()
+    test_tavily_client_uses_pinned_mcp_package_by_default()
     await test_tavily_client_connect_times_out_and_clears_cached_state()
     await test_tavily_client_opens_and_closes_session_in_same_task()
     await test_tavily_client_tool_listing_times_out()
@@ -263,4 +343,4 @@ async def run_checks() -> None:
 
 if __name__ == "__main__":
     asyncio.run(run_checks())
-    print("[test_web_qa_agent] All checks passed.")
+    print("[test_direct_chat_agent] All checks passed.")

@@ -67,7 +67,10 @@ def test_routing_policy_question_helpers_are_extracted() -> None:
         is routing_question_policy.is_visual_explanation_request
     )
     assert routing_policy._is_direct_qa_request is routing_question_policy.is_direct_qa_request
-    assert routing_policy._is_web_qa_request is routing_question_policy.is_web_qa_request
+    assert (
+        routing_policy._is_source_grounded_qa_request
+        is routing_question_policy.is_source_grounded_qa_request
+    )
 
 
 def test_routing_policy_guardrail_helpers_are_extracted() -> None:
@@ -98,7 +101,7 @@ def test_runtime_callers_use_extracted_prompt_and_screen_context_boundaries() ->
         model_module._normalize_router_decision_payload
         is routing_decision_policy.normalize_router_decision_payload
     )
-    assert rapid_orchestrator_deps._is_direct_qa_request is routing_question_policy.is_direct_qa_request
+    assert rapid_orchestrator_deps._is_direct_chat_request is routing_question_policy.is_direct_chat_request
     assert rapid_orchestrator_deps._apply_routing_guardrails is routing_guardrails.apply_routing_guardrails_route
 
 
@@ -108,14 +111,12 @@ def test_guardrail_defaults_use_extracted_surface_policy() -> None:
         _clean_text,
         choose_actionable_agent,
         is_execution_request,
-        is_web_qa_request,
         requires_desktop_control_surface,
         _routing_task_text,
     ) = routing_guardrails._resolve_policy_helpers()
 
     assert choose_actionable_agent is routing_surface_policy.choose_actionable_agent
     assert is_execution_request is routing_surface_policy.is_execution_request
-    assert is_web_qa_request is routing_question_policy.is_web_qa_request
     assert (
         requires_desktop_control_surface
         is routing_surface_policy.requires_desktop_control_surface

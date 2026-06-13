@@ -27,7 +27,7 @@ _DIRECT_QA_START_MARKERS = (
     "give me an overview of",
     "give me a summary of",
 )
-_WEB_QA_MARKERS = (
+_SOURCE_GROUNDED_MARKERS = (
     "as of today",
     "as of now",
     "current",
@@ -52,7 +52,7 @@ _WEB_QA_MARKERS = (
     "search the web",
     "look up",
 )
-_WEB_QA_DYNAMIC_SUBJECT_MARKERS = (
+_DYNAMIC_WEB_SUBJECT_MARKERS = (
     "ceo",
     "company",
     "companies",
@@ -158,7 +158,7 @@ def has_context_dependent_reference(text: str) -> bool:
 def is_direct_qa_request(
     user_prompt: str,
     *,
-    is_web_qa_request_predicate: TextPredicate | None = None,
+    is_source_grounded_qa_request_predicate: TextPredicate | None = None,
     is_execution_request: TextPredicate | None = None,
     is_visual_explanation_request: TextPredicate | None = None,
     has_context_dependent_reference_predicate: TextPredicate | None = None,
@@ -169,13 +169,14 @@ def is_direct_qa_request(
     if not lowered:
         return False
 
-    web_qa_predicate = is_web_qa_request_predicate or is_web_qa_request
+    web_search_predicate = (
+        is_source_grounded_qa_request_predicate
+        or is_source_grounded_qa_request
+    )
     execution_predicate = is_execution_request or (lambda _text: False)
     visual_predicate = is_visual_explanation_request or (lambda _text: False)
     context_predicate = has_context_dependent_reference_predicate or has_context_dependent_reference
 
-    if web_qa_predicate(lowered):
-        return False
     if execution_predicate(lowered):
         return False
     if visual_predicate(lowered):
@@ -187,7 +188,13 @@ def is_direct_qa_request(
     if matches_any_marker(lowered, browser_surface_markers):
         return False
 
+    if web_search_predicate(lowered):
+        return True
     if any(lowered.startswith(marker) for marker in _DIRECT_QA_START_MARKERS):
+        return True
+    if lowered in {"hi", "hello", "hey", "yo"}:
+        return True
+    if re.match(r"^(hi|hello|hey)\b", lowered):
         return True
     if " everything about " in f" {lowered} ":
         return True
@@ -196,7 +203,7 @@ def is_direct_qa_request(
     return False
 
 
-def is_web_qa_request(
+def is_source_grounded_qa_request(
     user_prompt: str,
     *,
     is_visual_explanation_request: TextPredicate | None = None,
@@ -218,12 +225,12 @@ def is_web_qa_request(
     if matches_any_marker(lowered, cli_execution_markers):
         return False
 
-    if matches_any_marker(lowered, _WEB_QA_MARKERS):
+    if matches_any_marker(lowered, _SOURCE_GROUNDED_MARKERS):
         if not matches_any_marker(lowered, browser_execution_markers):
             return True
         return not matches_any_marker(lowered, _BROWSER_AUTOMATION_MARKERS)
 
-    if matches_any_marker(lowered, _WEB_QA_DYNAMIC_SUBJECT_MARKERS):
+    if matches_any_marker(lowered, _DYNAMIC_WEB_SUBJECT_MARKERS):
         return bool(re.match(r"^(who|what|why|how|when|where|tell me|give me)\b", lowered))
     return False
 
@@ -232,6 +239,6 @@ __all__ = [
     "contains_phrase_or_word",
     "has_context_dependent_reference",
     "is_direct_qa_request",
-    "is_web_qa_request",
+    "is_source_grounded_qa_request",
     "matches_any_marker",
 ]

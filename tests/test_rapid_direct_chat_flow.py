@@ -1,4 +1,4 @@
-"""Checks extracted direct-QA fast-path flow for the rapid orchestrator."""
+"""Checks extracted direct-chat fast-path flow for the rapid orchestrator."""
 
 import asyncio
 import os
@@ -7,7 +7,7 @@ import sys
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
 
-from models.rapid_direct_answer_flow import try_handle_direct_qa_request
+from models.rapid_direct_chat_flow import try_handle_direct_chat_request
 
 
 class _FakeDeps:
@@ -17,7 +17,7 @@ class _FakeDeps:
         self.direct_calls: list[dict[str, object]] = []
         self.router_tool_map = {"direct_response": self._direct_response}
 
-    async def answer_direct_request(self, *, model, user_prompt: str, history_block: str = "") -> str:
+    async def answer_direct_chat_request(self, *, model, user_prompt: str, history_block: str = "") -> str:
         del model
         assert "Tell me everything about elon musk." in user_prompt
         assert "history block" in history_block
@@ -44,10 +44,10 @@ class _FakeDeps:
         self.direct_calls.append(dict(kwargs))
 
 
-def test_try_handle_direct_qa_request_returns_true_and_emits_response() -> None:
+def test_try_handle_direct_chat_request_returns_true_and_emits_response() -> None:
     async def _run() -> None:
         deps = _FakeDeps()
-        handled = await try_handle_direct_qa_request(
+        handled = await try_handle_direct_chat_request(
             model=object(),
             user_prompt="Tell me everything about elon musk.",
             request_id="req-1",
@@ -72,10 +72,10 @@ def test_try_handle_direct_qa_request_returns_true_and_emits_response() -> None:
     asyncio.run(_run())
 
 
-def test_try_handle_direct_qa_request_propagates_structural_error() -> None:
+def test_try_handle_direct_chat_request_propagates_structural_error() -> None:
     async def _run() -> None:
         class _BrokenDeps(_FakeDeps):
-            async def answer_direct_request(
+            async def answer_direct_chat_request(
                 self,
                 *,
                 model,
@@ -86,7 +86,7 @@ def test_try_handle_direct_qa_request_propagates_structural_error() -> None:
                 raise AttributeError("direct qa wiring bug")
 
         try:
-            await try_handle_direct_qa_request(
+            await try_handle_direct_chat_request(
                 model=object(),
                 user_prompt="Tell me everything about elon musk.",
                 request_id="req-2",

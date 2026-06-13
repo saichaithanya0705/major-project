@@ -1,5 +1,51 @@
 # AI Slop Audit
 
+## 2026-05-22 Direct Chat Agent Conversion Audit And Repair
+
+Scope: code changed during the direct normal-chat conversion from a single model call to `DirectChatAgent`, plus directly connected routing contracts, guardrails, Tavily MCP search access, and UI agent labels. This was not a whole-repository re-rating.
+
+Graphify prerequisites completed for this pass:
+- Re-read `graphify-out/GRAPH_REPORT.md` before raw source inspection. The report is dated `2026-05-17` and lists `14807` nodes, `43230` edges, `119` communities, and `35%` inferred edges. Relevant graph targets for this scoped pass were Community 4 routing policy/runtime nodes, Community 5 delegated-agent execution nodes, and Community 17 UI status/trace nodes.
+- Ran `.\\.venv\\Scripts\\python.exe C:\\Users\\SAI\\.codex\\skills\\audit-ai-slop\\scripts\\graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Triage output was `62/100` graph-only and `100/100` source-augmented. This remains a repo-wide triage score dominated by unrelated browser/CLI/generated hotspots; final scoring below is source-confirmed only for this conversion slice.
+
+**Verdict**
+
+Score: 8/100, Minimal slop risk for the scoped direct-chat conversion after repair.
+
+Confidence: High for this slice. The source inspection covered the changed agent, routing, guardrail, prompt, UI trace, and focused tests, and validation passed after fixes.
+
+**Evidence**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Fix |
+|---|---|---|---|---|
+| Direct chat now has a real agent boundary instead of a duplicated model-call path. | Community 5 includes delegated-agent execution nodes, so the direct bridge and shared execution runtime were inspected together. | `models/direct_answer_runtime.py:21` delegates through `execute_task_agent(...)`; `agents/direct_chat/agent.py:251` owns direct chat, optional Tavily search, synthesis, source formatting, and tool-call metadata. | Healthy architecture signal. | The old single-call runtime and separate web-QA synthesis path were consolidated behind `DirectChatAgent`. |
+| The first conversion briefly left a guardrail that could fabricate a final direct response instead of invoking the direct agent. | Community 4 ties routing guardrails to question-policy behavior, making fake route rewrites high-risk. | Before this audit repair, `models/routing_guardrails.py` rewrote non-execution browser routes for source-grounded Q&A into a direct route with internal text about DirectChatAgent. After repair, `models/routing_guardrails.py:15` no longer has that rewrite reason, `_resolve_policy_helpers()` no longer imports source-grounded Q&A policy, and `models/routing_guardrails.py:189` leaves unrelated routes unchanged. | Confirmed slop signal, fixed. | Removed the fake direct-response rewrite. Source-grounded Q&A is owned by the direct fast path and `DirectChatAgent`; guardrails only perform actionable routing repairs. |
+| Router prompts contained internal implementation prose as a possible user-facing response. | Community 4 prompt/routing nodes are a low-cohesion hotspot, so prompt examples were inspected as part of runtime behavior. | The stale examples said the DirectChatAgent should answer before routing. `models/prompts.py:155` now states the real rule: do not manufacture current/source-grounded answers without Tavily sources. `tests/test_routing_policy.py:87` prevents that placeholder prose from reappearing. | Confirmed prompt slop signal, fixed. | Removed architecture-explainer examples from router outputs and replaced them with a source-evidence rule. |
+| Tavily MCP was launched through an unpinned `@latest` package in the moved client. | The scanner flags dependency supply-chain looseness as a high-severity source bucket, and this touched an agentic MCP boundary. | `agents/direct_chat/mcp_client.py:21` defines `_DEFAULT_TAVILY_MCP_PACKAGE = "tavily-mcp@0.2.19"` and `agents/direct_chat/mcp_client.py:118` uses that pinned package by default. `tests/test_direct_chat_agent.py` covers the default args. | Confirmed supply-chain slop signal, fixed. | Pinned the Tavily MCP package used by the direct chat agent while preserving explicit args override for controlled upgrades. |
+| UI labels still used generic short names after the architecture changed to named agents. | Community 17 contains status/trace UI nodes, so the trace label map was inspected. | `ui/agent_work_trace.mjs:6` now maps sources to `JARVIS Agent`, `Browser Agent`, `CLI Agent`, `Computer Agent`, and `Screen Context Agent`; `tests/test_ui_agent_work_trace.py:55` and related assertions pin the naming. | Healthy UI consistency repair. | Updated user-facing work trace naming to match the agent architecture. |
+| The obsolete `web_qa` route/tool/package was removed from live code. | The stale Graphify report still includes old `agents/web_qa` nodes, so source inspection had to verify the current tree directly. | `rg` over `models agents tests ui README.md` found no live `web_qa`, `invoke_web_qa`, `answer_web_qa_request`, or `agents/web_qa` references after the conversion. | Healthy cleanup signal. | Deleted the old package and removed route/tool/contract/UI references. |
+
+**Aggressive Review Targets**
+
+- The repo-wide Graphify scan still reports severe source-augmented triage risk across unrelated vendored/browser/CLI areas. Those were intentionally out of scope for this hook pass and should not be attributed to the direct-chat conversion.
+- `DirectChatAgent` still depends on an MCP server launched via `npx`; the package is now pinned, but future hardening could vendor or install it as a project-local dependency if runtime startup stability becomes a problem.
+
+**Permanent Fixes Applied**
+
+- Removed the source-grounded Q&A guardrail rewrite that produced a fake final direct answer.
+- Removed internal DirectChatAgent placeholder prose from router prompt examples and added a prompt/test guard against source-free current answers.
+- Pinned the Tavily MCP package to `tavily-mcp@0.2.19`.
+- Updated UI work-trace agent labels to explicit agent names.
+- Strengthened tests for the direct-chat MCP package pin, prompt placeholder removal, and UI naming.
+
+**Validation**
+
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest tests/test_direct_chat_agent.py tests/test_routing_policy.py tests/test_routing_policy_module_boundaries.py tests/test_routing_contracts.py tests/test_ui_agent_work_trace.py -q` -> 56 passed.
+- Passed: `.\\.venv\\Scripts\\python.exe -m pytest -q` -> 474 passed.
+- Passed: `git diff --check` -> no whitespace errors; Git printed LF-to-CRLF normalization warnings for touched files.
+- Process hygiene: transient `cmd`/`node`/`pwsh` children from this pass exited on follow-up check; a separate `npm --prefix extension run test:validation:focused` process was observed and was not created or modified by this pass.
+
 ## 2026-05-22 CUA Implementation Verification Pass
 
 Scope: verification of the CUA controller-runtime implementation currently in the working tree, including `VisionAgent`, `CuaController`, `PyAutoGuiComputerBackend`, provider planner/critic/runtime helpers, and focused CUA/routing tests. This pass checked whether the implementation and anti-slop cleanup are actually in place; it did not re-rate the whole repository. A pre-commit continuation pass on `main` repeated the Graphify triage and focused validation before the `correction` commit.

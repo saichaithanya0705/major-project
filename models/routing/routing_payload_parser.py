@@ -20,7 +20,6 @@ RouteAgentName = Literal[
     "cua_cli",
     "cua_vision",
     "screen_context",
-    "web_qa",
 ]
 ScreenContextRecommendedAgent = RouteAgentName | Literal[""]
 BlockedStepSignature: TypeAlias = tuple[RouteAgentName, str]
@@ -392,7 +391,6 @@ ROUTE_AGENT_NAMES: tuple[RouteAgentName, ...] = (
     "cua_cli",
     "cua_vision",
     "screen_context",
-    "web_qa",
 )
 
 

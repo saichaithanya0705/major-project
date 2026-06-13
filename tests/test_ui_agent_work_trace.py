@@ -18,7 +18,7 @@ def _run_agent_trace_eval(body: str):
         "const path = require('path');\n"
         "const { pathToFileURL } = require('url');\n"
         "(async () => {\n"
-        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'agent_work_trace.mjs')).href;\n"
+        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'modules', 'agent_work_trace.mjs')).href;\n"
         "  const traceModule = await import(modulePath);\n"
         f"{body}\n"
         "})().catch((error) => {\n"
@@ -44,8 +44,7 @@ def test_agent_trace_sources_exclude_router_replies() -> None:
             "  rapid: traceModule.isAgentTraceSource('rapid_response'),\n"
             "  cli: traceModule.isAgentTraceSource('cua_cli'),\n"
             "  browserLabel: traceModule.getAgentTraceSourceLabel('browser_use'),\n"
-            "  webQa: traceModule.isAgentTraceSource('web_qa'),\n"
-            "  webQaLabel: traceModule.getAgentTraceSourceLabel('web_qa'),\n"
+            "  directChat: traceModule.isAgentTraceSource('direct_chat'),\n"
             "}));"
         ),
     )
@@ -53,9 +52,8 @@ def test_agent_trace_sources_exclude_router_replies() -> None:
     assert result == {
         "rapid": False,
         "cli": True,
-        "browserLabel": "Browser",
-        "webQa": True,
-        "webQaLabel": "Web QA",
+        "browserLabel": "Browser Agent",
+        "directChat": False,
     }
 
 
@@ -74,29 +72,29 @@ def test_agent_trace_opens_while_running_and_collapses_after_success() -> None:
     assert result["first"]["status"] == "running"
     assert result["second"]["isOpen"] is True
     assert result["second"]["summary"] == "Checking files"
-    assert result["second"]["entries"][-1]["label"] == "CLI"
+    assert result["second"]["entries"][-1]["label"] == "CLI Agent"
     assert result["done"]["isOpen"] is False
     assert result["done"]["status"] == "completed"
     assert result["done"]["summary"] == "CLI task completed."
 
 
-def test_web_qa_trace_records_sourced_answer_without_router_reply_source() -> None:
+def test_browser_trace_records_answer_without_router_reply_source() -> None:
     result = _run_agent_trace_eval(
         (
             "const trace = traceModule.createAgentWorkTraceState();\n"
-            "const running = trace.applyEvent({ command: 'show_status_bubble', source: 'web_qa', text: 'Searching the web...' });\n"
-            "const done = trace.applyEvent({ command: 'complete_status_bubble', source: 'web_qa', doneText: 'Task done', responseText: 'Sourced answer\\n\\nSources:\\n- [Example](https://example.com)' });\n"
+            "const running = trace.applyEvent({ command: 'show_status_bubble', source: 'browser_use', text: 'Running browser task...' });\n"
+            "const done = trace.applyEvent({ command: 'complete_status_bubble', source: 'browser_use', doneText: 'Task done', responseText: 'Browser answer' });\n"
             "const ignored = trace.applyEvent({ command: 'chat_response', source: 'rapid_response', text: 'Sourced answer\\n\\nSources:\\n- [Example](https://example.com)' });\n"
             "process.stdout.write(JSON.stringify({ running, done, ignored }));"
         ),
     )
 
     assert result["running"]["isOpen"] is True
-    assert result["running"]["entries"][-1]["label"] == "Web QA"
+    assert result["running"]["entries"][-1]["label"] == "Browser Agent"
     assert result["done"]["isOpen"] is False
     assert result["done"]["status"] == "completed"
-    assert result["done"]["entries"][-1]["source"] == "web_qa"
-    assert result["done"]["summary"] == "Sourced answer Sources: - [Example](https://example.com)"
+    assert result["done"]["entries"][-1]["source"] == "browser_use"
+    assert result["done"]["summary"] == "Browser answer"
     assert result["ignored"] == result["done"]
 
 
@@ -135,7 +133,7 @@ def test_orchestrator_plan_snapshot_normalizes_to_ui_trace_rows() -> None:
             "const trace = traceModule.createAgentWorkTraceState();\n"
             "const state = trace.applyEvent({ command: 'orchestrator_plan_snapshot', plan: {\n"
             "  tasks: [\n"
-            "    { id: 'research', agent: 'web_qa', task: 'Find sources', status: 'completed' },\n"
+            "    { id: 'research', agent: 'browser', task: 'Find sources', status: 'completed' },\n"
             "    { id: 'patch', agent: 'cua_cli', task: 'Patch files', status: 'running', depends_on: ['research'] }\n"
             "  ]\n"
             "} });\n"
@@ -148,8 +146,8 @@ def test_orchestrator_plan_snapshot_normalizes_to_ui_trace_rows() -> None:
     assert result["entries"] == [
         {
             "id": 1,
-            "source": "web_qa",
-            "label": "Web QA",
+            "source": "browser",
+            "label": "Browser Agent",
             "status": "completed",
             "text": "research · Find sources",
             "taskId": "research",
@@ -158,7 +156,7 @@ def test_orchestrator_plan_snapshot_normalizes_to_ui_trace_rows() -> None:
         {
             "id": 2,
             "source": "cua_cli",
-            "label": "CLI",
+            "label": "CLI Agent",
             "status": "running",
             "text": "patch · Patch files",
             "taskId": "patch",

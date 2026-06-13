@@ -129,16 +129,19 @@ def test_extracted_prompt_and_screen_context_boundaries_keep_typed_contracts() -
 
 
 def test_extracted_question_policy_helpers_keep_bool_contracts() -> None:
+    direct_chat_hints = get_type_hints(routing_question_policy.is_direct_chat_request)
     direct_hints = get_type_hints(routing_question_policy.is_direct_qa_request)
     visual_hints = get_type_hints(routing_question_policy.is_visual_explanation_request)
-    web_hints = get_type_hints(routing_question_policy.is_web_qa_request)
+    source_hints = get_type_hints(routing_question_policy.is_source_grounded_qa_request)
 
+    assert direct_chat_hints["user_prompt"] is str
+    assert direct_chat_hints["return"] is bool
     assert direct_hints["user_prompt"] is str
     assert direct_hints["return"] is bool
     assert visual_hints["user_prompt"] is str
     assert visual_hints["return"] is bool
-    assert web_hints["user_prompt"] is str
-    assert web_hints["return"] is bool
+    assert source_hints["user_prompt"] is str
+    assert source_hints["return"] is bool
 
 
 def test_agent_execution_runtime_uses_typed_json_safe_payload_contracts() -> None:

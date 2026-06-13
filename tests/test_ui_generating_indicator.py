@@ -16,7 +16,7 @@ def _run_generating_indicator_eval(body: str):
         "const path = require('path');\n"
         "const { pathToFileURL } = require('url');\n"
         "(async () => {\n"
-        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'generating_indicator.mjs')).href;\n"
+        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'modules', 'generating_indicator.mjs')).href;\n"
         "  const indicator = await import(modulePath);\n"
         f"{body}\n"
         "})().catch((error) => {\n"

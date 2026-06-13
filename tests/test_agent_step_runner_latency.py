@@ -43,62 +43,6 @@ async def test_completion_status_uses_short_delay() -> None:
     assert captured["response_text"] == "Finished quickly.", captured
 
 
-async def test_web_qa_step_returns_sourced_answer() -> None:
-    captured_status = {}
-    original_start = runner_module._start_non_rapid_status
-    original_finish = runner_module._finish_non_rapid_status
-    original_web_qa_agent = runner_module.WebQAAgent
-
-    class _FakeWebQAAgent:
-        def __init__(self, model):
-            self.model = model
-
-        async def execute(self, task: str):
-            return {
-                "success": True,
-                "result": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
-                "error": "",
-                "complete": True,
-            }
-
-    async def _fake_start(text: str, source: str):
-        captured_status["start"] = {"text": text, "source": source}
-
-    async def _fake_finish(message: str, success: bool, source: str):
-        captured_status["finish"] = {
-            "message": message,
-            "success": success,
-            "source": source,
-        }
-
-    runner_module.WebQAAgent = _FakeWebQAAgent
-    runner_module._start_non_rapid_status = _fake_start
-    runner_module._finish_non_rapid_status = _fake_finish
-    try:
-        result = await runner_module.run_routed_agent_step(
-            model=object(),
-            routing_result={"agent": "web_qa", "task": "latest AI news"},
-            jarvis_model="jarvis",
-            request_id="req-web",
-            get_stored_screenshot=lambda: None,
-        )
-    finally:
-        runner_module.WebQAAgent = original_web_qa_agent
-        runner_module._start_non_rapid_status = original_start
-        runner_module._finish_non_rapid_status = original_finish
-
-    assert result == {
-        "agent": "web_qa",
-        "task": "latest AI news",
-        "success": True,
-        "message": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
-        "source": "web_qa",
-        "complete": True,
-    }, result
-    assert captured_status["start"]["source"] == "web_qa", captured_status
-    assert captured_status["finish"]["source"] == "web_qa", captured_status
-
-
 async def test_cli_step_preserves_tool_calls_for_artifact_tracking() -> None:
     original_start = runner_module._start_non_rapid_status
     original_finish = runner_module._finish_non_rapid_status
@@ -196,7 +140,6 @@ async def test_cli_step_reports_created_file_from_tool_call_when_output_is_gener
 
 if __name__ == "__main__":
     asyncio.run(test_completion_status_uses_short_delay())
-    asyncio.run(test_web_qa_step_returns_sourced_answer())
     asyncio.run(test_cli_step_preserves_tool_calls_for_artifact_tracking())
     asyncio.run(test_cli_step_reports_created_file_from_tool_call_when_output_is_generic())
     print("[test_agent_step_runner_latency] All checks passed.")

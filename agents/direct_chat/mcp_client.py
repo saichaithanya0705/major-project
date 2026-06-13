@@ -18,6 +18,7 @@ class TavilyMcpConfigurationError(RuntimeError):
 
 _PROJECT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _TAVILY_PLACEHOLDERS = {"", "YOUR_TAVILY_API_KEY"}
+_DEFAULT_TAVILY_MCP_PACKAGE = "tavily-mcp@0.2.19"
 
 
 def _read_tavily_api_key_from_project_env() -> str:
@@ -114,7 +115,7 @@ class TavilyMcpClient:
     ) -> None:
         self.api_key = (api_key if api_key is not None else _read_tavily_api_key_from_project_env()).strip()
         self.command = command
-        self.args = list(args) if args is not None else ["-y", "tavily-mcp@latest"]
+        self.args = list(args) if args is not None else ["-y", _DEFAULT_TAVILY_MCP_PACKAGE]
         self.timeout_seconds = float(timeout_seconds)
         self._session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -127,7 +128,7 @@ class TavilyMcpClient:
     async def _open_session(self) -> tuple[ClientSession, AsyncExitStack]:
         if not self.is_configured():
             raise TavilyMcpConfigurationError(
-                "Tavily web search is not configured. Set TAVILY_API_KEY to enable source-grounded web Q&A."
+                "Tavily web search is not configured. Set TAVILY_API_KEY to enable source-grounded direct chat."
             )
 
         exit_stack = AsyncExitStack()

@@ -17,13 +17,12 @@ import models.models as model_module
 from models.function_calls import (
     invoke_cua_cli_declaration,
     invoke_cua_vision_declaration,
-    invoke_web_qa_declaration,
 )
 from models.prompts import OLLAMA_ROUTER_SYSTEM_PROMPT, RAPID_RESPONSE_SYSTEM_PROMPT
 from models.routing_intent_policy import (
     has_context_dependent_reference,
     is_direct_qa_request,
-    is_web_qa_request,
+    is_source_grounded_qa_request,
 )
 from models.routing_guardrails import apply_routing_guardrails
 from models.routing_prompt_parser import extract_latest_request_from_router_prompt
@@ -37,7 +36,7 @@ from models.routing_policy import (
     _apply_routing_guardrails,
     _extract_latest_request,
     _is_direct_qa_request,
-    _is_web_qa_request,
+    _is_source_grounded_qa_request,
     _parse_json_object_boundary_from_text,
     _parse_json_object_from_text,
     _router_provider_order,
@@ -72,39 +71,40 @@ def test_router_tool_descriptions_distinguish_shell_state_from_visual_ui() -> No
     assert "shell command can inspect" in vision_description
 
 
-def test_router_prompt_exposes_web_qa_for_source_grounded_questions() -> None:
+def test_router_prompt_exposes_direct_chat_for_source_grounded_questions() -> None:
     combined = "\n".join(
         [
             RAPID_RESPONSE_SYSTEM_PROMPT,
             OLLAMA_ROUTER_SYSTEM_PROMPT,
-            str(invoke_web_qa_declaration.get("description", "")),
         ]
     ).lower()
 
-    assert "web_qa" in combined
+    assert "directchatagent" in combined
     assert "tavily" in combined
     assert "current" in combined
     assert "sources" in combined
+    assert "directchatagent should answer this before routing" not in combined
+    assert "live web search belongs to direct chat" not in combined
 
 
-def test_web_qa_intent_bypasses_direct_fast_path() -> None:
+def test_source_grounded_intent_uses_direct_fast_path() -> None:
     current_prompt = "What is the latest news about Elon Musk?"
     sourced_prompt = "Tell me everything about Elon Musk with sources."
     timeless_prompt = "Explain what recursion is."
 
-    assert _is_web_qa_request(current_prompt) is True
-    assert _is_web_qa_request(sourced_prompt) is True
-    assert _is_direct_qa_request(current_prompt) is False
-    assert _is_direct_qa_request(sourced_prompt) is False
-    assert _is_web_qa_request(timeless_prompt) is False
+    assert _is_source_grounded_qa_request(current_prompt) is True
+    assert _is_source_grounded_qa_request(sourced_prompt) is True
+    assert _is_direct_qa_request(current_prompt) is True
+    assert _is_direct_qa_request(sourced_prompt) is True
+    assert _is_source_grounded_qa_request(timeless_prompt) is False
     assert _is_direct_qa_request(timeless_prompt) is True
 
 
-def test_web_qa_intent_is_not_blocked_by_bare_deictic_subject() -> None:
+def test_source_grounded_intent_is_not_blocked_by_bare_deictic_subject() -> None:
     prompt = "What is the latest news about this company with sources?"
 
-    assert _is_web_qa_request(prompt) is True
-    assert _is_direct_qa_request(prompt) is False
+    assert _is_source_grounded_qa_request(prompt) is True
+    assert _is_direct_qa_request(prompt) is True
 
 
 def test_intent_policy_boundary_separates_local_deixis_from_dynamic_subjects() -> None:
@@ -113,9 +113,11 @@ def test_intent_policy_boundary_separates_local_deixis_from_dynamic_subjects() -
 
     assert has_context_dependent_reference(dynamic_subject_prompt) is False
     assert has_context_dependent_reference(local_reference_prompt) is True
-    assert is_web_qa_request(dynamic_subject_prompt) is True
-    assert is_direct_qa_request(dynamic_subject_prompt) is False
-    assert _is_web_qa_request(dynamic_subject_prompt) == is_web_qa_request(dynamic_subject_prompt)
+    assert is_source_grounded_qa_request(dynamic_subject_prompt) is True
+    assert is_direct_qa_request(dynamic_subject_prompt) is True
+    assert _is_source_grounded_qa_request(
+        dynamic_subject_prompt
+    ) == is_source_grounded_qa_request(dynamic_subject_prompt)
     assert _is_direct_qa_request(dynamic_subject_prompt) == is_direct_qa_request(dynamic_subject_prompt)
 
 
@@ -167,7 +169,7 @@ def test_latest_request_extraction_is_shared_router_prompt_boundary() -> None:
     assert _extract_latest_request(prompt) == "open localhost 3000"
 
 
-def test_source_grounded_direct_route_is_repaired_to_web_qa() -> None:
+def test_source_grounded_direct_route_stays_direct() -> None:
     prompt = "Tell me the latest about Elon Musk with sources."
     route = _apply_routing_guardrails(
         user_prompt=prompt,
@@ -175,7 +177,7 @@ def test_source_grounded_direct_route_is_repaired_to_web_qa() -> None:
         latest_screen_context=None,
     )
 
-    assert route == {"agent": "web_qa", "task": prompt}, route
+    assert route == {"agent": "direct", "response_text": "Elon Musk is a business executive."}, route
 
 
 def test_browser_route_with_desktop_app_profile_requirement_is_repaired_to_vision() -> None:
@@ -330,7 +332,7 @@ async def test_route_request_normalizes_plan_payload_from_provider() -> None:
     def _plan_openrouter_router(prompt: str) -> dict:
         return {
             "tasks": [
-                {"id": "research", "agent": "web_qa", "task": "Find release notes"},
+                {"id": "research", "agent": "browser", "task": "Find release notes"},
                 {
                     "id": "patch",
                     "agent": "cua_cli",
@@ -357,9 +359,9 @@ async def test_route_request_normalizes_plan_payload_from_provider() -> None:
         "tasks": [
             {
                 "id": "research",
-                "agent": "web_qa",
+                "agent": "browser",
                 "task": "Find release notes",
-                "resources": ["web_qa"],
+                "resources": ["browser", "model_router"],
             },
             {
                 "id": "patch",
@@ -395,9 +397,9 @@ async def test_route_request_rejects_unknown_router_provider_value() -> None:
 if __name__ == "__main__":
     test_router_prompt_uses_general_capability_fit_not_surface_hardcoding()
     test_router_tool_descriptions_distinguish_shell_state_from_visual_ui()
-    test_router_prompt_exposes_web_qa_for_source_grounded_questions()
-    test_web_qa_intent_bypasses_direct_fast_path()
-    test_source_grounded_direct_route_is_repaired_to_web_qa()
+    test_router_prompt_exposes_direct_chat_for_source_grounded_questions()
+    test_source_grounded_intent_uses_direct_fast_path()
+    test_source_grounded_direct_route_stays_direct()
     test_browser_route_with_desktop_app_profile_requirement_is_repaired_to_vision()
     test_plain_web_automation_still_routes_to_browser()
     asyncio.run(test_route_request_calls_llm_even_for_deterministic_looking_prompt())

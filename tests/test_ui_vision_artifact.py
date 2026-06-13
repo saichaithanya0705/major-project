@@ -46,7 +46,7 @@ def test_vision_artifact_prefers_native_image_viewer() -> None:
     input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
     preload_js = (ROOT_DIR / "ui" / "preload.js").read_text(encoding="utf-8")
     main_js = (ROOT_DIR / "ui" / "main.js").read_text(encoding="utf-8")
-    artifact_lifecycle_js = (ROOT_DIR / "ui" / "artifact_lifecycle.js").read_text(encoding="utf-8")
+    artifact_lifecycle_js = (ROOT_DIR / "ui" / "main" / "artifact_lifecycle.js").read_text(encoding="utf-8")
 
     assert "openVisionArtifactImage" in input_window_js
     assert "window.api?.openVisionArtifactImage" in input_window_js

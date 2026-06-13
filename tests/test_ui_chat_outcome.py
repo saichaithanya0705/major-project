@@ -16,7 +16,7 @@ def _run_chat_outcome_eval(body: str):
         "const path = require('path');\n"
         "const { pathToFileURL } = require('url');\n"
         "(async () => {\n"
-        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'chat_outcome.mjs')).href;\n"
+        "  const modulePath = pathToFileURL(path.join(process.cwd(), 'ui', 'modules', 'chat_outcome.mjs')).href;\n"
         "  const outcome = await import(modulePath);\n"
         f"{body}\n"
         "})().catch((error) => {\n"

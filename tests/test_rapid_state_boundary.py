@@ -70,7 +70,7 @@ def run_checks() -> None:
     context_state.append_history(
         role="assistant",
         text="Substantive answer to preserve.",
-        source="web_qa",
+        source="direct_chat",
         cleaner=lambda value: value.strip(),
         session_id="chat-context",
     )
@@ -89,7 +89,7 @@ def run_checks() -> None:
     enrichment_state.record_assistant_context(
         role="assistant",
         text="Sourced answer that should only be copied for contextual requests.",
-        source="web_qa",
+        source="direct_chat",
         session_id="chat-enrichment",
     )
 

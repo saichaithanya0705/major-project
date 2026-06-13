@@ -13,7 +13,7 @@ import {
   buildLifecycleSnapshot,
   inferLifecycleSnapshot,
   mergeLifecycleTheme,
-} from './status_lifecycle.js';
+} from './modules/status_lifecycle.js';
 
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');

@@ -25,7 +25,6 @@ OrchestratorAgent = Literal[
     "cua_cli",
     "cua_vision",
     "screen_context",
-    "web_qa",
 ]
 
 KNOWN_ORCHESTRATOR_AGENTS: tuple[str, ...] = (
@@ -35,7 +34,6 @@ KNOWN_ORCHESTRATOR_AGENTS: tuple[str, ...] = (
     "cua_cli",
     "cua_vision",
     "screen_context",
-    "web_qa",
 )
 
 
@@ -44,7 +42,6 @@ class ResourceLock(str, Enum):
     BROWSER = "browser"
     DESKTOP = "desktop"
     SCREENSHOT = "screenshot"
-    WEB_QA = "web_qa"
     MODEL_ROUTER = "model_router"
     MODEL_VISION = "model_vision"
 
@@ -88,7 +85,6 @@ def resources_for_agent(agent: str) -> tuple[ResourceLock, ...]:
             ResourceLock.SCREENSHOT,
             ResourceLock.MODEL_VISION,
         ),
-        "web_qa": (ResourceLock.WEB_QA,),
     }
     return mapping[agent]
 

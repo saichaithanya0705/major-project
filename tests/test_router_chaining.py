@@ -161,19 +161,19 @@ def test_router_normalization_promotes_direct_response_text_from_kwargs() -> Non
     }, route
 
 
-def test_router_normalization_accepts_web_qa_route() -> None:
+def test_router_normalization_accepts_browser_route() -> None:
     model = object.__new__(model_module.GeminiModel)
 
     route = model_module.GeminiModel._normalize_router_decision(
         model,
-        {"agent": "web_qa", "task": "What is the latest news about SpaceX?"},
-        "# User's Latest Request:\nWhat is the latest news about SpaceX?",
+        {"agent": "browser", "task": "Open https://example.com"},
+        "# User's Latest Request:\nOpen https://example.com",
         provider_name="unit-test",
     )
 
     assert route == {
-        "agent": "web_qa",
-        "task": "What is the latest news about SpaceX?",
+        "agent": "browser",
+        "task": "Open https://example.com",
     }, route
 
 
@@ -184,7 +184,7 @@ def test_router_normalization_accepts_plan_payload() -> None:
         model,
         {
             "tasks": [
-                {"id": "research", "agent": "web_qa", "task": "Find release notes"},
+                {"id": "research", "agent": "browser", "task": "Find release notes"},
                 {
                     "id": "patch",
                     "agent": "cua_cli",
@@ -202,9 +202,9 @@ def test_router_normalization_accepts_plan_payload() -> None:
         "tasks": [
             {
                 "id": "research",
-                "agent": "web_qa",
+                "agent": "browser",
                 "task": "Find release notes",
-                "resources": ["web_qa"],
+                "resources": ["browser", "model_router"],
             },
             {
                 "id": "patch",
@@ -218,39 +218,34 @@ def test_router_normalization_accepts_plan_payload() -> None:
     }, route
 
 
-async def test_web_qa_route_executes_agent_and_finishes() -> None:
+async def test_source_grounded_question_uses_direct_fast_path() -> None:
     original_model_cls = model_module.GeminiModel
-    original_run_step = request_agent_step_runtime.run_request_agent_step
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
 
-    executed_agents: list[str] = []
+    direct_answers: list[dict[str, str]] = []
     direct_calls: list[dict[str, Any]] = []
 
-    async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
-        agent = routing_result.get("agent", "unknown")
-        executed_agents.append(agent)
-        return {
-            "agent": agent,
-            "task": routing_result.get("task", ""),
-            "success": True,
-            "message": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
-            "source": "web_qa",
-        }
+    class _FakeDirectAnswerModel(_FakeRouterModel):
+        async def answer_direct_request(self, *, user_prompt: str, history_block: str = "") -> str:
+            direct_answers.append(
+                {
+                    "user_prompt": user_prompt,
+                    "history_block": history_block,
+                }
+            )
+            return "Sourced answer\n\nSources:\n- [Example](https://example.com)"
 
     def _fake_direct_response(**kwargs):
         direct_calls.append(dict(kwargs))
 
-    _FakeRouterModel.sequence = [
-        {"agent": "web_qa", "task": "What is the latest news about SpaceX?"},
-    ]
-
     model_module.RAPID_SESSION_STATE.clear_history()
-    model_module.GeminiModel = _FakeRouterModel
-    request_agent_step_runtime.run_request_agent_step = _fake_run_step
+    model_module.GeminiModel = _FakeDirectAnswerModel
     model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
     try:
         await model_module.call_gemini("What is the latest news about SpaceX?", "rapid", "jarvis")
-        assert executed_agents == ["web_qa"], executed_agents
+        assert [entry["user_prompt"] for entry in direct_answers] == [
+            "What is the latest news about SpaceX?"
+        ]
         assert direct_calls == [
             {
                 "text": "Sourced answer\n\nSources:\n- [Example](https://example.com)",
@@ -259,7 +254,6 @@ async def test_web_qa_route_executes_agent_and_finishes() -> None:
         ], direct_calls
     finally:
         model_module.GeminiModel = original_model_cls
-        request_agent_step_runtime.run_request_agent_step = original_run_step
         if original_direct_response is not None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
@@ -328,7 +322,7 @@ async def test_plan_payload_executes_multiple_tasks_then_finishes() -> None:
     _FakeRouterModel.sequence = [
         {
             "tasks": [
-                {"id": "research", "agent": "web_qa", "task": "research release notes"},
+                {"id": "research", "agent": "browser", "task": "research release notes"},
                 {
                     "id": "patch",
                     "agent": "cua_cli",
@@ -347,7 +341,7 @@ async def test_plan_payload_executes_multiple_tasks_then_finishes() -> None:
     model_module.log_assistant_event = _fake_log_assistant_event
     try:
         await model_module.call_gemini("research release notes and update changelog", "rapid", "jarvis")
-        assert executed_routes[0] == {"agent": "web_qa", "task": "research release notes"}
+        assert executed_routes[0] == {"agent": "browser", "task": "research release notes"}
         assert executed_routes[1]["agent"] == "cua_cli"
         assert executed_routes[1]["task"] == "update changelog"
         context = executed_routes[1]["orchestrator_context"]
@@ -1322,19 +1316,14 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
                 return {"agent": "direct", "response_text": "done"}
             return type(self).routes.pop(0)
 
+        async def answer_direct_request(self, *, user_prompt: str, history_block: str = "") -> str:
+            return answer_text
+
     async def _fake_run_step(model, routing_result, jarvis_model, request_id=None, prepare_vision_screenshot=None):
         task = routing_result.get("task", routing_result.get("query", ""))
         captured_tasks.append(task)
         agent = routing_result.get("agent", "unknown")
         captured_agents.append(agent)
-        if agent == "web_qa":
-            return {
-                "agent": "web_qa",
-                "task": task,
-                "success": True,
-                "message": answer_text,
-                "source": "web_qa",
-            }
         if "write" in task.lower():
             return {
                 "agent": "cua_cli",
@@ -1363,9 +1352,7 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
     request_agent_step_runtime.run_request_agent_step = _fake_run_step
     model_module.ROUTER_TOOL_MAP["direct_response"] = lambda **_kwargs: None
     try:
-        _QueueRouterModel.routes = [
-            {"agent": "web_qa", "task": "what is the net worth of bill gates"},
-        ]
+        _QueueRouterModel.routes = []
         await model_module.call_gemini(
             "what is the net worth of bill gates",
             "rapid",
@@ -1399,10 +1386,10 @@ async def test_contextual_file_followups_enrich_cli_tasks() -> None:
         if original_direct_response is not None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
-    assert len(captured_tasks) == 3, captured_tasks
-    assert captured_agents == ["web_qa", "cua_cli", "cua_cli"], captured_agents
-    assert answer_text in captured_tasks[1], captured_tasks[1]
-    assert created_path in captured_tasks[2], captured_tasks[2]
+    assert len(captured_tasks) == 2, captured_tasks
+    assert captured_agents == ["cua_cli", "cua_cli"], captured_agents
+    assert answer_text in captured_tasks[0], captured_tasks[0]
+    assert created_path in captured_tasks[1], captured_tasks[1]
 
 
 async def test_direct_qa_bypasses_router_and_screenshot_capture() -> None:
@@ -1917,8 +1904,8 @@ async def run_checks() -> None:
     await test_chains_multiple_agents_then_finishes()
     await test_direct_response_preserves_full_assistant_message()
     test_router_normalization_preserves_full_direct_response()
-    test_router_normalization_accepts_web_qa_route()
-    await test_web_qa_route_executes_agent_and_finishes()
+    test_router_normalization_accepts_browser_route()
+    await test_source_grounded_question_uses_direct_fast_path()
     await test_repeated_step_loop_recovers_and_finishes()
     await test_single_full_agent_step_finishes_without_followup_router()
     await test_completed_browser_summary_finishes_when_router_rewrites_task()

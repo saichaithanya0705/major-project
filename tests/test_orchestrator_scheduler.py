@@ -115,7 +115,6 @@ def test_resource_mapping_is_conservative_and_serializable() -> None:
         "browser"
     )
     assert resources_for_agent("cua_cli") == (ResourceLock.CLI,)
-    assert resources_for_agent("web_qa") == (ResourceLock.WEB_QA,)
     assert ResourceLock.CLI.value == "cli"
 
     vision_resources = set(resources_for_agent("cua_vision"))
@@ -140,13 +139,13 @@ def test_task_resource_overrides_cannot_drop_required_locks() -> None:
         id="browser-with-extra-lock",
         agent="browser",
         task="browse",
-        resources=(ResourceLock.BROWSER, ResourceLock.MODEL_ROUTER, ResourceLock.WEB_QA),
+        resources=(ResourceLock.BROWSER, ResourceLock.MODEL_ROUTER, ResourceLock.CLI),
     )
 
     assert browser_task.resources == (
         ResourceLock.BROWSER,
         ResourceLock.MODEL_ROUTER,
-        ResourceLock.WEB_QA,
+        ResourceLock.CLI,
     )
 
 
@@ -155,15 +154,15 @@ def test_task_resource_overrides_deduplicate_locks_in_stable_order() -> None:
         id="dedupe-cli",
         agent="cua_cli",
         task="run command",
-        resources=(ResourceLock.CLI, ResourceLock.CLI, ResourceLock.WEB_QA, ResourceLock.CLI),
+        resources=(ResourceLock.CLI, ResourceLock.CLI, ResourceLock.MODEL_ROUTER, ResourceLock.CLI),
     )
 
-    assert task.resources == (ResourceLock.CLI, ResourceLock.WEB_QA)
+    assert task.resources == (ResourceLock.CLI, ResourceLock.MODEL_ROUTER)
 
 
-def test_resource_conflicts_use_intersection_and_allow_cli_webqa_parallelism() -> None:
+def test_resource_conflicts_use_intersection_and_allow_cli_browser_parallelism() -> None:
     cli_task = task("cli", agent="cua_cli", resources=resources_for_agent("cua_cli"))
-    web_task = task("web", agent="web_qa", resources=resources_for_agent("web_qa"))
+    web_task = task("web", agent="browser", resources=resources_for_agent("browser"))
     vision_task = task("vision", agent="cua_vision", resources=resources_for_agent("cua_vision"))
     screen_task = task("screen", agent="screen_context", resources=resources_for_agent("screen_context"))
 
@@ -176,7 +175,7 @@ def test_select_runnable_batch_respects_stable_order_conflicts_and_parallel_limi
         task("vision-a", agent="cua_vision", resources=resources_for_agent("cua_vision")),
         task("vision-b", agent="cua_vision", resources=resources_for_agent("cua_vision")),
         task("cli", agent="cua_cli", resources=resources_for_agent("cua_cli")),
-        task("web", agent="web_qa", resources=resources_for_agent("web_qa")),
+        task("web", agent="browser", resources=resources_for_agent("browser")),
         max_parallel=3,
     )
 
@@ -208,7 +207,7 @@ def test_update_task_status_returns_new_plan_and_merges_metadata() -> None:
 def test_terminal_and_successful_outcome_helpers() -> None:
     outcomes = (
         AgentStepOutcome(task_id="a", agent="direct", success=True, complete=True, message="ok"),
-        AgentStepOutcome(task_id="b", agent="web_qa", success=False, complete=False, message="nope"),
+        AgentStepOutcome(task_id="b", agent="browser", success=False, complete=False, message="nope"),
     )
     plan = plan_with(
         task("done", status=TaskStatus.COMPLETED),
