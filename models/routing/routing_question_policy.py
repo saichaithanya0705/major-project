@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from models.routing_intent_policy import (
     has_context_dependent_reference,
+    is_direct_chat_request as classify_direct_chat_request,
     is_direct_qa_request as classify_direct_qa_request,
     is_source_grounded_qa_request as classify_source_grounded_qa_request,
 )
@@ -100,7 +101,15 @@ def is_direct_qa_request(user_prompt: str) -> bool:
 
 
 def is_direct_chat_request(user_prompt: str) -> bool:
-    return is_direct_qa_request(user_prompt)
+    return classify_direct_chat_request(
+        user_prompt,
+        is_source_grounded_qa_request_predicate=is_source_grounded_qa_request,
+        is_execution_request=is_execution_request,
+        is_visual_explanation_request=is_visual_explanation_request,
+        has_context_dependent_reference_predicate=has_context_dependent_reference,
+        cli_execution_markers=CLI_EXECUTION_MARKERS,
+        browser_surface_markers=BROWSER_SURFACE_MARKERS,
+    )
 
 
 def is_source_grounded_qa_request(user_prompt: str) -> bool:

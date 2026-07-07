@@ -1,5 +1,54 @@
 # AI Slop Audit
 
+## 2026-07-07 Rapid Direct-Answer Intent Audit And Repair
+
+Scope: code changed in this prompt for rapid direct-answer routing, plus directly connected architecture: `models/routing/routing_intent_policy.py`, `models/routing/routing_question_policy.py`, `models/orchestrator/rapid_orchestrator.py`, `agents/direct_chat/agent.py`, and focused routing/chaining tests. This is not a whole-repository re-rating.
+
+Graphify prerequisites completed for this pass:
+- Re-read `graphify-out/GRAPH_REPORT.md` before raw source inspection. The report is dated `2026-05-17` and lists `14807` nodes, `43230` edges, `119` communities, `35%` inferred edges, `760` isolated nodes, and low-cohesion routing/runtime communities including Community 4 and Community 5.
+- Inventoried Graphify files with `rg --files graphify-out`.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Triage output was `62/100` graph-only and `100/100` source-augmented. The source-augmented score is dominated by `.venv-1` and unrelated vendored/browser/agentic hotspots, so final scoring below uses only source-confirmed evidence for this scoped direct-answer slice.
+
+**Verdict**
+
+Score after repair: 5/100, Minimal slop risk for the scoped rapid direct-answer intent seam.
+
+Confidence: High for this slice. Source inspection covered the direct-chat predicate, routing facade, rapid orchestrator fast-path return, direct chat agent search/synthesis split, and focused tests.
+
+**Evidence**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Likely Root Cause | Permanent Fix | Prevention Gate |
+|---|---|---|---|---|---|---|
+| Basic direct prompts could fall through to router/MAS because the direct-chat gate reused a narrow QA classifier. | Community 4 and Community 5 connect routing policy with delegated-agent execution; the scanner flags indirection and verification debt in routing/orchestration areas, making the direct-chat gate a valid inspection target. | `models/orchestrator/rapid_orchestrator.py:102` returns before router planning only when `deps.is_direct_chat_request(...)` is true. Before this repair, `models/routing/routing_question_policy.py` implemented direct chat as a direct QA alias, so prompts such as `weather in Pune`, `meaning of ephemeral`, `thanks`, and `tell me a joke` had no deterministic fast-path coverage. | Confirmed slop signal, fixed. | The routing policy conflated "question answering" with the broader direct-chat surface and lacked regression tests for casual/basic prompts. | Added explicit basic time/weather/casual-chat intent helpers in `models/routing/routing_intent_policy.py:181`, source-grounded time/weather handling at `models/routing/routing_intent_policy.py:360`, and a real `is_direct_chat_request(...)` wrapper at `models/routing/routing_intent_policy.py:295`. | `tests/test_routing_policy.py:104` verifies basic prompts hit direct chat; `tests/test_router_chaining.py:1447` proves they call `answer_direct_request` without router calls or delegated MAS execution. |
+| The initial fix made casual chat part of `is_direct_qa_request`, which made the fast path work while eroding the policy boundary. | Same Community 4 routing-policy cluster; low cohesion makes semantic drift in policy helpers high-risk. | Source review showed casual markers were being accepted by the QA classifier. After repair, `models/routing/routing_question_policy.py:103` calls a dedicated direct-chat classifier, while `tests/test_routing_policy.py:119` asserts `thanks`, `good morning`, and `tell me a joke` are direct chat but not direct QA. | Confirmed slop signal, fixed. | A solution-first patch expanded the nearest predicate instead of restoring the intended classifier boundary. | Split direct chat from direct QA and centralized shared execution/screen-context blocking in `_is_blocked_direct_intent(...)` at `models/routing/routing_intent_policy.py:219`. | The casual-chat regression prevents future broadening of QA semantics; routing module-boundary tests still ensure runtime callers use the extracted question-policy facade. |
+| DirectChatAgent remains the correct runtime owner for source use, not MAS orchestration. | Community 53 contains direct-chat/web-source tests, and Community 82 covers final direct-response transport. | `agents/direct_chat/agent.py:25` uses the source-grounded predicate only to decide Tavily search; `agents/direct_chat/agent.py:334` separates sourced and unsourced synthesis prompts. | Healthy architecture signal. | The existing agent boundary already separated answer synthesis from routing, so the permanent fix belonged in intent policy rather than a later orchestrator workaround. | No change needed beyond routing the correct prompts into this boundary. | Existing and new tests cover sourced direct chat, unsourced chat, final direct response transport, and no-MAS behavior. |
+
+**Aggressive Review Targets**
+
+- The repo-wide Graphify triage remains high because it scans `.venv-1` and unrelated browser/CLI/generated code. Those are out of scope for this stop-hook pass and should be audited separately before drawing whole-repository conclusions.
+- The direct intent marker lists are deterministic and tested, but future additions should go through behavior tests rather than adding broad substring markers.
+
+**Healthy Signals**
+
+- The rapid orchestrator already had an early direct-chat return before router planning, so the fix could stay in the intent-policy boundary.
+- The runtime test fails if either router routing or delegated MAS execution is touched for the covered basic prompts.
+
+**Workflow Gaps**
+
+- The earlier direct-chat fast-path tests covered source-grounded and encyclopedia-style prompts but not casual/basic prompts, leaving a blind spot for "looks obvious" prompts.
+
+**Permanent Fixes Applied**
+
+- Added explicit time/weather/casual direct-chat classification while preserving execution, visual, and local-context blockers.
+- Split direct-chat intent from direct-QA intent so casual chat no longer pollutes QA semantics.
+- Added focused classifier and orchestration-boundary regressions.
+
+**Validation**
+
+- Passed: `python -m pytest tests\test_routing_policy.py tests\test_router_chaining.py tests\test_direct_chat_agent.py tests\test_rapid_direct_chat_flow.py tests\test_direct_answer_runtime.py tests\test_routing_policy_module_boundaries.py tests\test_routing_contracts.py -q` -> 97 passed.
+- Passed: `python -m compileall models\routing\routing_intent_policy.py models\routing\routing_question_policy.py tests\test_routing_policy.py tests\test_router_chaining.py`.
+
 ## 2026-07-05 Electron Main-Process Logging Audit And Repair
 
 Scope: code changed or exercised during this prompt while restarting backend/UI servers and diagnosing the repeated Electron popup. Directly connected architecture inspected: `ui/main.js` Electron lifecycle logging, renderer console forwarding, packaged UI launch behavior, and focused UI regression tests. This is not a whole-repository re-rating.

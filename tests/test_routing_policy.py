@@ -24,6 +24,7 @@ from models.routing_intent_policy import (
     is_direct_qa_request,
     is_source_grounded_qa_request,
 )
+from models.routing_question_policy import is_direct_chat_request
 from models.routing_guardrails import apply_routing_guardrails
 from models.routing_prompt_parser import extract_latest_request_from_router_prompt
 from models.routing_payload_parser import (
@@ -98,6 +99,55 @@ def test_source_grounded_intent_uses_direct_fast_path() -> None:
     assert _is_direct_qa_request(sourced_prompt) is True
     assert _is_source_grounded_qa_request(timeless_prompt) is False
     assert _is_direct_qa_request(timeless_prompt) is True
+
+
+def test_basic_direct_answer_intents_use_direct_chat_fast_path() -> None:
+    direct_prompts = (
+        "what time is it?",
+        "time in Tokyo",
+        "weather in Pune",
+        "meaning of ephemeral",
+        "thanks",
+        "good morning",
+        "tell me a joke",
+    )
+
+    for prompt in direct_prompts:
+        assert is_direct_chat_request(prompt) is True, prompt
+
+
+def test_casual_chat_does_not_pollute_direct_qa_policy() -> None:
+    casual_prompts = (
+        "thanks",
+        "good morning",
+        "tell me a joke",
+    )
+
+    for prompt in casual_prompts:
+        assert is_direct_qa_request(prompt) is False, prompt
+        assert is_direct_chat_request(prompt) is True, prompt
+
+
+def test_basic_dynamic_prompts_are_source_grounded_without_mas() -> None:
+    source_grounded_prompts = (
+        "what time is it?",
+        "time in Tokyo",
+        "weather in Pune",
+        "forecast for Delhi",
+    )
+    timeless_prompts = (
+        "meaning of ephemeral",
+        "thanks",
+        "tell me a joke",
+    )
+
+    for prompt in source_grounded_prompts:
+        assert is_source_grounded_qa_request(prompt) is True, prompt
+        assert is_direct_chat_request(prompt) is True, prompt
+
+    for prompt in timeless_prompts:
+        assert is_source_grounded_qa_request(prompt) is False, prompt
+        assert is_direct_chat_request(prompt) is True, prompt
 
 
 def test_source_grounded_intent_is_not_blocked_by_bare_deictic_subject() -> None:

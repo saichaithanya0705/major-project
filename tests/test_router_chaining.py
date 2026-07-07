@@ -1444,6 +1444,63 @@ async def test_direct_qa_bypasses_router_and_screenshot_capture() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_basic_direct_prompts_bypass_router_and_mas_orchestration() -> None:
+    original_model_cls = model_module.GeminiModel
+    original_run_step = request_agent_step_runtime.run_request_agent_step
+    original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
+
+    prompts = [
+        "what time is it?",
+        "weather in Pune",
+        "meaning of ephemeral",
+        "thanks",
+        "tell me a joke",
+    ]
+    direct_messages: list[str] = []
+
+    class _BasicDirectModel:
+        route_calls = 0
+        direct_prompts: list[str] = []
+
+        def __init__(self, jarvis_model: str, rapid_response_model: str):
+            pass
+
+        async def route_request(self, prompt: str) -> dict[str, Any]:
+            type(self).route_calls += 1
+            raise AssertionError(f"basic prompt reached router: {prompt}")
+
+        async def answer_direct_request(self, *, user_prompt: str, history_block: str = "") -> str:
+            assert user_prompt in prompts
+            assert user_prompt in history_block
+            type(self).direct_prompts.append(user_prompt)
+            return f"direct answer for {user_prompt}"
+
+    async def _fail_run_step(*_args, **_kwargs):
+        raise AssertionError("basic prompt reached delegated MAS execution")
+
+    def _fake_direct_response(**kwargs):
+        direct_messages.append(str(kwargs.get("text", "")))
+
+    model_module.RAPID_SESSION_STATE.clear_history()
+    _BasicDirectModel.route_calls = 0
+    _BasicDirectModel.direct_prompts = []
+    model_module.GeminiModel = _BasicDirectModel
+    request_agent_step_runtime.run_request_agent_step = _fail_run_step
+    model_module.ROUTER_TOOL_MAP["direct_response"] = _fake_direct_response
+    try:
+        for prompt in prompts:
+            await model_module.call_gemini(prompt, "rapid", "jarvis", session_id="basic-direct-test")
+
+        assert _BasicDirectModel.direct_prompts == prompts
+        assert _BasicDirectModel.route_calls == 0
+        assert direct_messages == [f"direct answer for {prompt}" for prompt in prompts]
+    finally:
+        model_module.GeminiModel = original_model_cls
+        request_agent_step_runtime.run_request_agent_step = original_run_step
+        if original_direct_response is not None:
+            model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
+
+
 async def test_direct_qa_preserves_structured_response_formatting() -> None:
     original_model_cls = model_module.GeminiModel
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
@@ -1920,6 +1977,7 @@ async def run_checks() -> None:
     await test_call_gemini_uses_session_scoped_rapid_history()
     await test_contextual_file_followups_enrich_cli_tasks()
     await test_direct_qa_bypasses_router_and_screenshot_capture()
+    await test_basic_direct_prompts_bypass_router_and_mas_orchestration()
     await test_direct_qa_preserves_structured_response_formatting()
 
 
