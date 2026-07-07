@@ -20,7 +20,7 @@ from core.process_lifecycle import (
     ProcessStartError,
     ProcessSupervisor,
 )
-from core.settings import get_screen_size
+from core.settings import get_runtime_state_path, get_screen_size
 
 ActiveBackgroundLogsProvider = Callable[[], Sequence[str]]
 ConfiguredScreenSizeReader = Callable[[str], tuple[int, int]]
@@ -115,6 +115,9 @@ def launch_electron_ui(
         return ElectronLaunchOutcome(message="Electron auto-launch skipped (npm not found on PATH).")
 
     env = os.environ.copy()
+    settings_path = os.path.join(project_root, "settings.json")
+    env["JARVIS_PROJECT_ROOT"] = str(Path(project_root).resolve())
+    env["JARVIS_RUNTIME_STATE_PATH"] = get_runtime_state_path(settings_path)
     electron_binary = os.path.join(
         ui_root,
         "node_modules",

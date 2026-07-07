@@ -5,6 +5,19 @@ const path = require('path');
 
 const DEFAULT_SERVER_CONFIG = Object.freeze({ host: '127.0.0.1', port: 8765 });
 
+function getProjectRoot(env = process.env, cwd = process.cwd()) {
+  const explicit = env?.JARVIS_PROJECT_ROOT;
+  if (typeof explicit === 'string' && explicit.trim()) {
+    return path.resolve(explicit.trim());
+  }
+
+  const normalizedCwd = path.resolve(cwd);
+  if (path.basename(normalizedCwd).toLowerCase() === 'ui') {
+    return path.dirname(normalizedCwd);
+  }
+  return path.resolve(__dirname, '..');
+}
+
 function readJsonObject(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -31,8 +44,8 @@ function getRuntimeStatePath(projectRoot, env = process.env) {
 }
 
 function getServerConfig({
-  projectRoot = path.resolve(__dirname, '..'),
   env = process.env,
+  projectRoot = getProjectRoot(env),
   defaultConfig = DEFAULT_SERVER_CONFIG,
 } = {}) {
   const settingsPath = path.join(projectRoot, 'settings.json');
@@ -57,6 +70,7 @@ function getServerConfig({
 
 module.exports = {
   DEFAULT_SERVER_CONFIG,
+  getProjectRoot,
   getRuntimeStatePath,
   getServerConfig,
   readJsonObject,

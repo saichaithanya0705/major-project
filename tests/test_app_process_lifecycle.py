@@ -93,6 +93,10 @@ def test_maybe_launch_electron_ui_registers_process_with_supervisor(tmp_path, mo
     assert captured[0].label == "electron-ui"
     assert captured[0].command == ["npm.cmd", "run", "dev"]
     assert captured[0].cwd == ui_root
+    assert captured[0].env["JARVIS_PROJECT_ROOT"] == str(tmp_path.resolve())
+    assert captured[0].env["JARVIS_RUNTIME_STATE_PATH"] == app_runtime_lifecycle.get_runtime_state_path(
+        str(tmp_path / "settings.json")
+    )
     assert captured[0].env["JARVIS_ELECTRON_BINARY"] == str(electron_binary)
 
 

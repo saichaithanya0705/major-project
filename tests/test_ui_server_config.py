@@ -115,3 +115,27 @@ def test_runtime_state_path_honors_explicit_env(tmp_path: Path) -> None:
     )
 
     assert resolved_path == explicit_runtime_path
+
+
+def test_project_root_env_controls_default_config_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    runtime_path = project_root / "runtime-state.json"
+    runtime_path.write_text(
+        json.dumps({"host": "127.0.0.1", "port": 9901, "auth_token": "runtime-token"}),
+        encoding="utf-8",
+    )
+
+    result = _run_server_config_eval(
+        project_root,
+        (
+            "const result = serverConfig.getServerConfig();\n"
+            "process.stdout.write(JSON.stringify(result));"
+        ),
+        {
+            "JARVIS_PROJECT_ROOT": str(project_root),
+            "JARVIS_RUNTIME_STATE_PATH": str(runtime_path),
+        },
+    )
+
+    assert result == {"host": "127.0.0.1", "port": 9901, "authToken": "runtime-token"}

@@ -80,6 +80,9 @@ def test_input_window_header_uses_compact_jarvis_actions_contract() -> None:
     assert '<span id="chat-title">JARVIS</span>' in input_html
     assert "JARVIS Assistant" not in input_html
     assert 'id="chat-new"' in input_html
+    assert 'id="chat-history"' in input_html
+    assert 'aria-controls="history-panel"' in input_html
+    assert 'aria-expanded="false"' in input_html
     assert 'id="chat-settings-toggle"' in input_html
     assert 'id="chat-settings-popover"' in input_html
     assert 'id="chat-settings-help"' in input_html
@@ -200,6 +203,16 @@ def test_input_window_shell_keeps_header_status_and_body_as_siblings() -> None:
     assert parents["chat-body"] == "chat-shell"
     assert parents["chat-brand"] == "chat-header"
     assert parents["chat-actions"] == "chat-header"
+    assert parents["chat-history"] == "chat-actions"
     assert parents["chat-settings-menu"] == "chat-actions"
     assert parents["chat-settings-popover"] == "chat-settings-menu"
     assert parents["chat-help-panel"] == "chat-settings-popover"
+
+
+def test_history_header_button_reuses_history_action_boundary() -> None:
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+
+    assert "function openHistoryFromAction()" in input_window_js
+    assert "chatHistoryButton?.setAttribute('aria-expanded', 'true')" in input_window_js
+    assert "chatHistoryButton?.setAttribute('aria-expanded', 'false')" in input_window_js
+    assert input_window_js.count("openHistoryFromAction();") == 2

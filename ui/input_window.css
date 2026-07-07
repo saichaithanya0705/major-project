@@ -106,6 +106,7 @@ input {
 }
 
 #chat-settings-toggle,
+#chat-history,
 #chat-new,
 #history-panel-close,
 .history-delete-all-archived,
@@ -125,6 +126,7 @@ input {
 }
 
 #chat-settings-toggle,
+#chat-history,
 #chat-new {
   width: 40px;
   height: 40px;
@@ -149,6 +151,7 @@ input {
 }
 
 #chat-settings-toggle svg,
+#chat-history svg,
 #chat-new svg,
 .stop-icon {
   width: 18px;
@@ -167,6 +170,7 @@ input {
 }
 
 #chat-new:hover,
+#chat-history:hover,
 #chat-settings-toggle:hover,
 #history-panel-close:hover,
 .history-delete-all-archived:hover,
@@ -184,6 +188,7 @@ input {
 }
 
 #chat-settings-toggle[aria-expanded="true"],
+#chat-history[aria-expanded="true"],
 #terminal-panel-toggle[aria-expanded="false"] {
   background: rgba(127, 157, 138, 0.2);
   border-color: rgba(151, 179, 162, 0.34);
@@ -1621,6 +1626,7 @@ kbd {
 #command-send:disabled,
 #command-input:disabled,
 #chat-new:disabled,
+#chat-history:disabled,
 #chat-settings-toggle:disabled,
 .chat-settings-item:disabled,
 #history-panel-close:disabled,
@@ -1633,6 +1639,7 @@ kbd {
 
 #command-input:focus-visible,
 #chat-settings-toggle:focus-visible,
+#chat-history:focus-visible,
 #chat-new:focus-visible,
 .chat-settings-item:focus-visible,
 #history-panel-close:focus-visible,

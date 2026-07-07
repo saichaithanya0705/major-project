@@ -1,5 +1,54 @@
 # AI Slop Audit
 
+## 2026-07-05 Electron Main-Process Logging Audit And Repair
+
+Scope: code changed or exercised during this prompt while restarting backend/UI servers and diagnosing the repeated Electron popup. Directly connected architecture inspected: `ui/main.js` Electron lifecycle logging, renderer console forwarding, packaged UI launch behavior, and focused UI regression tests. This is not a whole-repository re-rating.
+
+Graphify prerequisites completed for this pass:
+- Re-read `graphify-out/GRAPH_REPORT.md` before source inspection. The report is dated `2026-05-17` and lists `14807` nodes, `43230` edges, `119` communities, `35%` inferred edges, and `760` isolated nodes. Relevant graph targets for this scoped pass were Community 17 (`VisualizationServer` and UI status/trace nodes), Community 52 (input-window and command overlay nodes), and Community 87 (`getRuntimeStatePath`, `getServerConfig`, runtime-state config).
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Triage output was `62/100` graph-only and `100/100` source-augmented. The source-augmented score is dominated by `.venv-1` and unrelated vendored/browser/agentic hotspots; final scoring below is source-confirmed only for this Electron logging slice.
+
+**Verdict**
+
+Score after repair: 6/100, Minimal slop risk for the scoped Electron main-process logging seam.
+
+Confidence: High for this slice. The failure was reproduced from the popup stack (`main.js:470`), source inspection identified the direct console write boundary, and focused tests now pin the non-fatal logging contract.
+
+**Evidence**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Likely Root Cause | Permanent Fix | Prevention Gate |
+|---|---|---|---|---|---|---|
+| Renderer console forwarding could crash the Electron main process when stdout/stderr was closed. | Community 17 and Community 52 tie UI renderer status/input behavior to the main process; the scanner flags broad masking and verification debt around UI/agentic runtime code, making lifecycle logging a valid inspection target. | The popup stack pointed at packaged `main.js:470`, the renderer console forwarder. Source now routes `ui/main.js` main-process diagnostics through `logger.log(...)`/`logger.error(...)` instead of direct `console.*`; `ui/main/safe_logger.js` disables logging after `EPIPE`/broken-pipe errors while rethrowing unrelated errors. | Confirmed slop signal, fixed. | Diagnostic logging was treated as always-safe infrastructure; no failure contract existed for a packaged app launched by wrappers or terminals that can close stdout. | Added `createSafeLogger(...)` as the main-process logging boundary and rewired boot logs, shortcut logs, renderer console forwarding, load failure logs, and stop-all logs through it. | `tests/test_ui_main_safe_logger.py` verifies broken pipes are swallowed once, non-pipe errors still surface, and `ui/main.js` uses the safe logger boundary. |
+| Attempting to repair the packaged archive directly was unsafe because Electron enforced ASAR integrity. | Graphify Community 17 suggested UI runtime inspection, but source evidence showed the packaged artifact is signed/integrity-bound runtime output rather than editable source. | Launching the repacked archive failed with `FATAL:asar_util.cc(144) Integrity check failed for asar archive`; the original `app.asar` was restored, and the permanent fix was made in source for the next package/dev run. | Healthy boundary correction. | Treating a build artifact as editable source would create packaging drift and false confidence. | Restored the packaged archive and kept the fix in source files only. | Validation uses source tests; future packaging should rebuild through Electron Forge/signing flow instead of manual ASAR mutation. |
+
+**Aggressive Review Targets**
+
+- The packaged UI currently runs from an older integrity-bound `app.asar`; the source fix will affect dev/source runs and the next proper package build, not the already restored binary artifact.
+- `ui/main.js` still owns several Electron lifecycle concerns in one file. The safe logger prevents this confirmed failure, but future UI lifecycle work should continue extracting cohesive owners rather than expanding the main file.
+
+**Healthy Signals**
+
+- `ui/main/server_config.js` already owns runtime-state configuration and has focused tests, reducing the risk that this logging fix had to cross server-auth boundaries.
+- `ui/main/chat_sessions.js` and `ui/main/artifact_lifecycle.js` already isolate two formerly main-process concerns; the new `safe_logger.js` follows that same direction.
+
+**Workflow Gaps**
+
+- Manual packaged-archive mutation is not a safe repair path for Electron apps with ASAR integrity checks. Use source changes plus the normal packaging/signing flow.
+- Launching packaged Electron apps through redirected stdout/stderr wrappers can create operational failures; diagnostic capture should be done through a logger boundary or supported process supervisor.
+
+**Permanent Fixes Applied**
+
+- Added `ui/main/safe_logger.js` with `createSafeLogger(...)` and `isBrokenPipeError(...)`.
+- Rewired `ui/main.js` main-process diagnostics and renderer console forwarding to use the safe logger.
+- Added `tests/test_ui_main_safe_logger.py` to prevent direct-console regression and prove the broken-pipe behavior.
+
+**Validation**
+
+- Passed: `python -m pytest tests/test_ui_main_safe_logger.py tests/test_ui_vision_artifact.py tests/test_ui_server_config.py -q` -> 13 passed.
+- Passed: `node -e "const { createSafeLogger } = require('./ui/main/safe_logger.js'); const logger = createSafeLogger(console); if (!logger.log('safe_logger_smoke')) process.exit(1);"` -> printed `safe_logger_smoke`.
+- Passed: `git diff --check` -> no whitespace errors; Git printed only an LF-to-CRLF normalization warning for `ui/main.js`.
+
 ## 2026-05-22 Direct Chat Agent Conversion Audit And Repair
 
 Scope: code changed during the direct normal-chat conversion from a single model call to `DirectChatAgent`, plus directly connected routing contracts, guardrails, Tavily MCP search access, and UI agent labels. This was not a whole-repository re-rating.
@@ -2462,3 +2511,59 @@ Confidence: High for file presence and parseability; Medium for semantic entity 
 - Passed: `python -c "import json,yaml; yaml.safe_load(open('mempalace.yaml', encoding='utf-8')); json.load(open('entities.json', encoding='utf-8')); print('mempalace.yaml and entities.json parse OK')"`
 - Passed with expected result: `python -m mempalace --palace . status` reported no palace store at the repository root.
 - Passed file inventory: `rg --files -uu | rg -i "(^|[\\\\/])(mempalace|entities|palace)([\\\\/.]|$)|mempalace\\.yaml$|entities\\.json$"` found the root `mempalace.yaml` and `entities.json`.
+
+## 2026-07-05 Continuation Pass - Chat History Header Control
+
+Scope: code changed in this prompt plus the directly connected Electron input-window header/history controls: `ui/input.html`, `ui/input_window.css`, `ui/input_window.js`, `tests/test_ui_input_window_controls.py`, and the rebuilt packaged UI artifact.
+
+**Verdict**
+
+Score after this repair: 6/100, Minimal slop risk for the scoped chat-history control slice.
+
+Confidence: High for this slice. Graphify is stale and repo-wide scanner output is noisy because it includes vendored/runtime paths, but the changed UI path was inspected directly, covered by focused tests, rebuilt into `app.asar`, and smoke-verified against the running backend.
+
+**Required Triage**
+
+- Read `graphify-out/GRAPH_REPORT.md` before raw source inspection.
+- Ran `python C:/Users/SAI/.codex/skills/audit-ai-slop/scripts/graphify_slop_scan.py --graphify-out graphify-out --source-root . --format markdown`.
+- Graph-only triage score: 62/100, High.
+- Source-augmented triage score: 100/100, Severe.
+- The severe repo-wide score is dominated by unrelated vendored `.venv-1` files, generated dependencies, broad historical audit notes, and agentic/tooling surfaces. This hook pass used it only as triage and stayed scoped to the newly changed history-control UI boundary.
+
+**Evidence**
+
+| Signal | Graph Evidence | Source Evidence | Classification | Likely Root Cause | Permanent Fix | Prevention Gate |
+|---|---|---|---|---|---|---|
+| Restored history affordance originally added a visible button without a complete accessible state contract. | Graphify triage highlights broad UI/control and verification-debt risk repo-wide, but no scoped graph node directly proves this; source inspection was decisive. | `ui/input.html` initially added `#chat-history`, and `ui/input_window.css` added active styling for `#chat-history[aria-expanded="true"]`, but source inspection found the button had no `aria-controls`/initial `aria-expanded` and no state updates in `openHistoryPanel()`/`closeHistoryPanel()`. | Confirmed slop signal, fixed. | Fast restoration of a missing visible control left semantic state as an implicit visual afterthought. | `ui/input.html` now binds `#chat-history` to `#history-panel` with `aria-controls` and initial `aria-expanded="false"`; `ui/input_window.js` updates the state on open/close. | `tests/test_ui_input_window_controls.py` asserts the header button contract and state update hooks. |
+| History opening was duplicated in two anonymous click handlers. | Repo-wide triage flags indirection/verification debt broadly; direct source inspection found a small duplication in this changed UI slice. | `chat-settings-history` and `chat-history` handlers both performed `closeSettingsPopover(); openHistoryPanel();`. | Confirmed slop signal, fixed. | A second entry point was added without routing through one action boundary. | Added `openHistoryFromAction()` and both entry points now call it. | `tests/test_ui_input_window_controls.py` asserts both entry points reuse the shared action boundary. |
+| Header/history control remains a cohesive extension of the existing input-window architecture. | Graph report shows the overall repo is large and low-cohesion in places, so local UI changes need tight scope. | The change reuses existing `openHistoryPanel()`, `closeHistoryPanel()`, `historyPanel`, and chat-session APIs; no new history state store or duplicate panel was introduced. | Healthy architecture signal. | N/A | Kept the fix inside the existing input-window control boundary. | Focused UI contract tests and packaged-ASAR verification. |
+
+**Aggressive Review Targets**
+
+- None remaining for this scoped change. The broader repo-wide Graphify/source score still needs a separate audit because it is dominated by vendor/runtime paths and historical agentic surfaces outside this prompt.
+
+**Healthy Signals**
+
+- No new dependency, service, state store, or history persistence path was introduced.
+- The visible header button shares the existing history panel behavior with the settings-menu history item.
+- The package was rebuilt and the running UI still has two established WebSocket connections to the backend.
+
+**Workflow Gaps**
+
+- `npm run package:win` emits repeated Electron Forge deprecation warnings from dependencies; not part of this scoped UI slop, but packaging warnings should eventually be cleaned up or tracked.
+- Repo-wide scanner includes virtualenv/vendor paths, which inflates triage risk and should be configured out for future whole-repo audits.
+
+**Permanent Fixes**
+
+- Restored the history button as a first-class header control.
+- Added deterministic accessibility state (`aria-controls`, initial `aria-expanded`, and open/close synchronization).
+- Consolidated history-opening entry points behind `openHistoryFromAction()`.
+- Strengthened UI contract tests to prevent the button from being hidden again or losing its state contract.
+
+**Validation**
+
+- Passed: `python -m pytest tests/test_ui_input_window_controls.py tests/test_ui_server_config.py tests/test_app_process_lifecycle.py tests/test_ui_main_safe_logger.py -q` -> 21 passed.
+- Passed: `npm run package:win` rebuilt the Windows Electron package successfully.
+- Passed: packaged-ASAR inspection found `id="chat-history"`, `aria-controls="history-panel"`, `aria-expanded="false"`, `openHistoryFromAction()`, and the `chatHistoryButton?.setAttribute(...)` state updates.
+- Passed: restarted packaged UI has two established WebSocket connections to `127.0.0.1:8765`.
+- Passed: `git diff --check` completed with only CRLF normalization warnings.

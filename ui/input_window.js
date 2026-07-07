@@ -31,6 +31,7 @@ const chatSettingsHelp = document.getElementById('chat-settings-help');
 const chatSettingsHistory = document.getElementById('chat-settings-history');
 const chatHelpPanel = document.getElementById('chat-help-panel');
 const chatNew = document.getElementById('chat-new');
+const chatHistoryButton = document.getElementById('chat-history');
 const chatBody = document.getElementById('chat-body');
 const chatMain = document.getElementById('chat-main');
 const historyPanel = document.getElementById('history-panel');
@@ -2410,6 +2411,7 @@ async function confirmDeleteSession() {
 function openHistoryPanel() {
   closeSettingsPopover();
   isHistoryOpen = true;
+  chatHistoryButton?.setAttribute('aria-expanded', 'true');
   if (chatBody) {
     chatBody.dataset.view = 'history';
   }
@@ -2427,6 +2429,7 @@ function closeHistoryPanel() {
     cancelDeleteConfirmation({ restoreFocus: false });
   }
   isHistoryOpen = false;
+  chatHistoryButton?.setAttribute('aria-expanded', 'false');
   if (chatBody) {
     chatBody.dataset.view = 'chat';
   }
@@ -2444,6 +2447,11 @@ function toggleHistoryPanel() {
   } else {
     openHistoryPanel();
   }
+}
+
+function openHistoryFromAction() {
+  closeSettingsPopover();
+  openHistoryPanel();
 }
 
 function applySessionState(state, options = {}) {
@@ -3349,8 +3357,10 @@ chatSettingsHelp?.addEventListener('click', (event) => {
   showSettingsHelp();
 });
 chatSettingsHistory?.addEventListener('click', () => {
-  closeSettingsPopover();
-  openHistoryPanel();
+  openHistoryFromAction();
+});
+chatHistoryButton?.addEventListener('click', () => {
+  openHistoryFromAction();
 });
 historyPanelClose?.addEventListener('click', () => closeHistoryPanel());
 historyFilterActive?.addEventListener('click', () => {

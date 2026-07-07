@@ -4,6 +4,7 @@ const path = require('path');
 const { createChatSessionManager } = require('./main/chat_sessions');
 const { getServerConfig: resolveServerConfig } = require('./main/server_config');
 const { cleanupVisionArtifactImages, getVisionArtifactImageDir } = require('./main/artifact_lifecycle');
+const { createSafeLogger } = require('./main/safe_logger');
 
 let overlayWin;
 let inputWin;
@@ -12,8 +13,9 @@ let cursorPoller;
 let inputWindowLastBounds = null;
 const chatSessions = createChatSessionManager({ app });
 const MAX_VISION_ARTIFACT_IMAGE_BYTES = 10 * 1024 * 1024;
+const logger = createSafeLogger(console);
 
-console.log('[main] boot', { cwd: process.cwd(), dir: __dirname });
+logger.log('[main] boot', { cwd: process.cwd(), dir: __dirname });
 
 function decodeVisionArtifactImage(imageDataUrl) {
   const prefix = 'data:image/png;base64,';
@@ -52,13 +54,13 @@ function registerShortcut(accelerator, label, callback) {
   try {
     const registered = globalShortcut.register(accelerator, callback);
     if (registered) {
-      console.log(`[main] shortcut registered: ${label} (${accelerator})`);
+      logger.log(`[main] shortcut registered: ${label} (${accelerator})`);
     } else {
-      console.error(`[main] shortcut registration failed: ${label} (${accelerator})`);
+      logger.error(`[main] shortcut registration failed: ${label} (${accelerator})`);
     }
     return registered;
   } catch (error) {
-    console.error(`[main] shortcut registration error: ${label} (${accelerator})`, error);
+    logger.error(`[main] shortcut registration error: ${label} (${accelerator})`, error);
     return false;
   }
 }
@@ -197,13 +199,13 @@ function createOverlayWindow() {
   const overlayPath = path.join(__dirname, 'overlay.html');
   overlayWin.loadFile(overlayPath);
   overlayWin.webContents.on('console-message', (event, level, message) => {
-    console.log('[overlay-renderer]', message);
+    logger.log('[overlay-renderer]', message);
   });
   overlayWin.webContents.on('did-finish-load', () => {
-    console.log('[main] overlay renderer loaded', overlayPath);
+    logger.log('[main] overlay renderer loaded', overlayPath);
   });
   overlayWin.webContents.on('did-fail-load', (event, code, desc) => {
-    console.error('[main] overlay renderer failed to load', code, desc);
+    logger.error('[main] overlay renderer failed to load', code, desc);
   });
 
   if (process.platform === 'darwin') {
@@ -249,13 +251,13 @@ function createInputWindow() {
   const inputPath = path.join(__dirname, 'input.html');
   inputWin.loadFile(inputPath);
   inputWin.webContents.on('console-message', (event, level, message) => {
-    console.log('[input-renderer]', message);
+    logger.log('[input-renderer]', message);
   });
   inputWin.webContents.on('did-finish-load', () => {
-    console.log('[main] input renderer loaded', inputPath);
+    logger.log('[main] input renderer loaded', inputPath);
   });
   inputWin.webContents.on('did-fail-load', (event, code, desc) => {
-    console.error('[main] input renderer failed to load', code, desc);
+    logger.error('[main] input renderer failed to load', code, desc);
   });
   inputWin.on('move', () => {
     if (!inputWin || inputWin.isDestroyed()) return;
@@ -295,7 +297,7 @@ function hideInputWindow() {
 
 function dispatchStopAll() {
   if (overlayWin && !overlayWin.isDestroyed()) {
-    console.log('[main] stop-all shortcut triggered');
+    logger.log('[main] stop-all shortcut triggered');
     overlayWin.webContents.send('stop-all');
   }
   if (inputWin && !inputWin.isDestroyed()) {
