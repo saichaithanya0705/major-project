@@ -150,6 +150,27 @@ It asks before:
 
 The browser agent's model is chosen from `JARVIS_BROWSER_LLM_ORDER` (default `gemini,openrouter,ollama`), skipping any without a key, so it works with only a local Ollama model (`JARVIS_BROWSER_OLLAMA_MODEL`, default the router model). A 4B local model is noticeably weaker at multi-step browsing than Gemini.
 
+## Memory
+
+Jarvis remembers only what you tell it to, in a local SQLite file (`JARVIS_MEMORY_PATH`, default `~/.jarvis/memory.sqlite3`):
+
+- "remember that my college is JNTU Hyderabad" / "note that I prefer dark mode"
+- "what do you remember?" / "show my memories"
+- "forget my college" / "forget everything you remember"
+
+These commands are answered instantly without a model. For every other request, the few memories that match it are added to the router and answer prompts. Those prompts can reach a cloud model when Jarvis escalates, so don't store anything you would not send there.
+
+## Offline voice
+
+Voice works without any API key:
+
+| | Default without keys | With `ELEVENLABS_API_KEY` | Setting |
+| --- | --- | --- | --- |
+| Speech-to-text | faster-whisper on the CPU (`JARVIS_WHISPER_MODEL=base`, downloads once) | ElevenLabs | `JARVIS_STT_PROVIDER = auto/whisper/elevenlabs` |
+| Text-to-speech | Piper if `JARVIS_PIPER_VOICE` points to a voice `.onnx`, else the Windows/macOS/espeak voice | ElevenLabs | `JARVIS_TTS_PROVIDER = auto/piper/system/elevenlabs/off` |
+
+Whisper stays on the CPU (`JARVIS_WHISPER_DEVICE=cpu`, `int8`) so it does not take VRAM from the Ollama model; use `base.en` or `small` for better accuracy at more CPU time, and `JARVIS_WHISPER_LANGUAGE=en` to skip language detection. Piper voices: download a voice's `.onnx` and `.onnx.json` from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (for example `en/en_US/amy/medium`) and set `JARVIS_PIPER_VOICE` to the `.onnx` path.
+
 ## CLI agent and coding delegation
 
 The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.

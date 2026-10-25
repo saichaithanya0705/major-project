@@ -1,7 +1,9 @@
 """
-Speech-to-Text Integration - ElevenLabs API.
+Speech-to-Text Integration - ElevenLabs API or local faster-whisper.
 
 Provides short-form transcription for voice command capture in the chat UI.
+JARVIS_STT_PROVIDER picks the engine: "auto" (ElevenLabs when
+ELEVENLABS_API_KEY is set, otherwise local Whisper), "elevenlabs", or "whisper".
 """
 import os
 import time
@@ -9,6 +11,8 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+
+from integrations.audio.local_voice import transcribe_locally
 
 load_dotenv()
 
@@ -111,17 +115,28 @@ def _post_stt_request(data: dict[str, str], files: dict[str, tuple[str, bytes, s
     ) from last_error
 
 
+def stt_provider() -> str:
+    configured = str(os.getenv("JARVIS_STT_PROVIDER") or "auto").strip().lower()
+    if configured == "auto":
+        return "elevenlabs" if ELEVENLABS_API_KEY else "whisper"
+    if configured not in {"elevenlabs", "whisper"}:
+        raise ValueError(f"JARVIS_STT_PROVIDER must be auto, elevenlabs, or whisper, got {configured!r}")
+    return configured
+
+
 def transcribe_audio_bytes(
     audio_bytes: bytes,
     *,
     filename: str = "voice-command.webm",
     mime_type: str = "audio/webm",
 ) -> str:
-    """Transcribe a recorded audio clip with ElevenLabs Speech-to-Text."""
-    if not ELEVENLABS_API_KEY:
-        raise ValueError("ELEVENLABS_API_KEY is not configured.")
+    """Transcribe a recorded audio clip with ElevenLabs or local Whisper."""
     if not audio_bytes:
         raise ValueError("Recorded audio was empty.")
+    if stt_provider() == "whisper":
+        return transcribe_locally(audio_bytes, filename=filename)
+    if not ELEVENLABS_API_KEY:
+        raise ValueError("ELEVENLABS_API_KEY is not configured.")
 
     data = {
         "model_id": ELEVENLABS_STT_MODEL_ID,

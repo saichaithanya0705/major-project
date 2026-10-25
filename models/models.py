@@ -15,6 +15,8 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 from core.assistant_logging import log_assistant_event, new_assistant_request_id
+from core.memory import MemoryStore, handle_memory_command, memory_prompt_block
+from ui.visualization_api.chat_response import send_chat_response
 from models.function_calls import ROUTER_TOOL_MAP
 from models.jarvis_response_runtime import generate_jarvis_response
 from models.direct_answer_runtime import (
@@ -94,6 +96,14 @@ _REPEATED_STEP_LIMIT = 3
 # MAIN ENTRY POINT
 # ================================================================================
 
+def _memory_block_for(user_prompt: str) -> str:
+    try:
+        return memory_prompt_block(MemoryStore(), user_prompt)
+    except Exception as exc:  # noqa: BLE001 - a broken memory file must not block requests.
+        print(f"[Memory] Recall failed: {exc}")
+        return ""
+
+
 async def call_gemini(
     user_prompt: str,
     rapid_response_model: str,
@@ -118,6 +128,9 @@ async def call_gemini(
             prepare_vision_screenshot=prepare_vision_screenshot,
             max_router_chain_steps=_MAX_ROUTER_CHAIN_STEPS,
             repeated_step_limit=_REPEATED_STEP_LIMIT,
+            handle_local_command=handle_memory_command,
+            send_local_reply=send_chat_response,
+            build_memory_block=_memory_block_for,
         )
     except Exception as exc:
         log_assistant_event(

@@ -29,6 +29,9 @@ async def run_gemini_request(
     prepare_vision_screenshot: Callable[..., Awaitable[object]],
     max_router_chain_steps: int,
     repeated_step_limit: int,
+    handle_local_command: Callable[[str], str | None] | None = None,
+    send_local_reply: Callable[[str], Awaitable[None]] | None = None,
+    build_memory_block: Callable[[str], str] | None = None,
 ) -> tuple[str, str]:
     request_id = new_request_id()
     rapid_session_id = rapid_session_state.normalize_session_id(session_id)
@@ -43,6 +46,21 @@ async def run_gemini_request(
         },
     )
 
+    local_reply = handle_local_command(user_prompt) if handle_local_command else None
+    if local_reply is not None:
+        # Commands such as "remember that ..." are answered without a model.
+        log_assistant_event(
+            "request_completed",
+            request_id=request_id,
+            task=clean_text(user_prompt, "", max_len=1200),
+            message=clean_text(local_reply, "", max_len=420),
+            agent="local_command",
+            success=True,
+        )
+        if send_local_reply is not None:
+            await send_local_reply(local_reply)
+        return request_id, rapid_session_id
+
     deps = build_rapid_orchestrator_deps(
         rapid_session_id=rapid_session_id,
         model_factory=model_factory,
@@ -52,6 +70,7 @@ async def run_gemini_request(
         log_assistant_event=log_assistant_event,
         max_router_chain_steps=max_router_chain_steps,
         repeated_step_limit=repeated_step_limit,
+        memory_block=build_memory_block(user_prompt) if build_memory_block else "",
     )
     await run_rapid_request(
         user_prompt=user_prompt,
