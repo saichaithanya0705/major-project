@@ -23,3 +23,6 @@ battery-report.html
 
 # Generated Graphify cache
 graphify-out/cache/
+
+# Scorecard run results (local to each machine)
+evals/results/

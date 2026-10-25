@@ -171,6 +171,18 @@ Voice works without any API key:
 
 Whisper stays on the CPU (`JARVIS_WHISPER_DEVICE=cpu`, `int8`) so it does not take VRAM from the Ollama model; use `base.en` or `small` for better accuracy at more CPU time, and `JARVIS_WHISPER_LANGUAGE=en` to skip language detection. Piper voices: download a voice's `.onnx` and `.onnx.json` from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (for example `en/en_US/amy/medium`) and set `JARVIS_PIPER_VOICE` to the `.onnx` path.
 
+## Measuring Jarvis (task scorecard)
+
+`evals/tasks.yaml` lists real tasks with what a good result looks like. Replace the starter tasks with the 5-10 things you actually do each week, then:
+
+```
+python -m evals.scorecard                         # does the local router pick the right agent? (3 trials each, changes nothing)
+python -m evals.scorecard --mode run              # also run each task and check the result
+python -m evals.scorecard --mode run --only pptx-deck,chat-fact --trials 1
+```
+
+`run` mode creates real files and opens a real browser; tasks marked `run: false` only get the routing check. Each run is saved under `evals/results/` and the report shows the change since the previous run, so you can see whether a new model, prompt, or skill actually helped.
+
 ## CLI agent and coding delegation
 
 The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.
