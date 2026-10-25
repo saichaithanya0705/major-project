@@ -137,6 +137,19 @@ python -m agents.skills remove arxiv
 
 Imports go to `JARVIS_SKILLS_DIR/imported` (default `~/.jarvis/skills/imported`). As in OpenJarvis, a skill's scripts are not copied until you review them and re-import with `--with-scripts`, symlinks are rejected, and skills declaring `shell:execute`, `network:listen`, or `filesystem:write` need `--yes-dangerous`. Folders you create directly in `JARVIS_SKILLS_DIR` are treated as your own and can run their scripts; when names collide, your skills win over built-in ones, which win over imported ones.
 
+## Forms and confirmations
+
+The browser agent fills forms on its own but stops to ask before anything you cannot take back. The question appears in the chat; reply **yes** (typed or spoken) to allow it. Any other reply, or no reply within 2 minutes, cancels the action and the agent stops and reports what is left for you.
+
+It asks before:
+- clicking a button that submits, pays, places an order, sends, posts, deletes, books, subscribes, or signs up (or any submit button),
+- typing into a password, card, CVV, OTP, PIN, UPI, Aadhaar/PAN, or bank-account field,
+- uploading a file, running custom JavaScript on a page, or pressing Enter after typing into a form (not a search box).
+
+`JARVIS_CONFIRM_RISKY_ACTIONS=off` turns the questions off.
+
+The browser agent's model is chosen from `JARVIS_BROWSER_LLM_ORDER` (default `gemini,openrouter,ollama`), skipping any without a key, so it works with only a local Ollama model (`JARVIS_BROWSER_OLLAMA_MODEL`, default the router model). A 4B local model is noticeably weaker at multi-step browsing than Gemini.
+
 ## CLI agent and coding delegation
 
 The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.

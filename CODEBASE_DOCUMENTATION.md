@@ -218,7 +218,7 @@ Main file:
 
 Key detail:
 
-The browser agent is first-party wrapper logic around the vendored `browser_use` subsystem.
+The browser agent is first-party wrapper logic around the pinned `browser_use` package. `agents/browser/action_guard.py` wraps browser-use's `Tools.act` so risky actions (submit/pay/delete clicks, password and payment fields, uploads, page JavaScript) wait for the user's approval through `core/confirmations.py`, which shows the question in chat and takes the user's next message as the answer.
 
 #### CLI agent
 

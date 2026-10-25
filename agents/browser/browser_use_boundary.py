@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents.browser.action_guard import guarded_tools_class
+
 
 class BrowserUseBoundaryError(RuntimeError):
     """Base class for browser_use boundary failures."""
@@ -190,6 +192,22 @@ class BrowserUseBoundary:
             raise BrowserUseDependencyError(f"Failed to import browser_use ChatGoogle: {exc}") from exc
         return ChatGoogle
 
+    def import_ollama_llm_class(self):
+        self.ensure_external_package()
+        try:
+            from browser_use.llm.ollama.chat import ChatOllama
+        except ImportError as exc:
+            raise BrowserUseDependencyError(f"Failed to import browser_use ChatOllama: {exc}") from exc
+        return ChatOllama
+
+    def import_action_result_class(self):
+        self.ensure_external_package()
+        try:
+            from browser_use.agent.views import ActionResult
+        except ImportError as exc:
+            raise BrowserUseDependencyError(f"Failed to import browser_use ActionResult: {exc}") from exc
+        return ActionResult
+
     def import_openrouter_llm_class(self):
         self.ensure_external_package()
         try:
@@ -268,10 +286,11 @@ class BrowserUseBoundary:
         register_should_stop_callback: Any,
         injected_agent_state: Any,
         tool_policy: BrowserUseToolPolicy | None = None,
+        action_guard: Any | None = None,
     ) -> Any:
         Agent = self.import_agent_class()
         try:
-            tools = self.create_tools(tool_policy=tool_policy)
+            tools = self.create_tools(tool_policy=tool_policy, action_guard=action_guard)
             return Agent(
                 task=task,
                 llm=llm,
@@ -286,8 +305,10 @@ class BrowserUseBoundary:
         except Exception as exc:
             raise BrowserUseAgentCreationError(f"Failed to create browser_use Agent: {exc}") from exc
 
-    def create_tools(self, *, tool_policy: BrowserUseToolPolicy | None = None) -> Any:
+    def create_tools(self, *, tool_policy: BrowserUseToolPolicy | None = None, action_guard: Any | None = None) -> Any:
         Tools = self.import_tools_class()
+        if action_guard is not None:
+            Tools = guarded_tools_class(Tools, self.import_action_result_class(), action_guard)
         resolved_policy = tool_policy or BrowserUseToolPolicy()
         try:
             return Tools(exclude_actions=list(resolved_policy.excluded_actions))

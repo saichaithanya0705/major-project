@@ -3138,6 +3138,16 @@ async function connectSocket() {
       return;
     }
 
+    if (payload.command === 'confirmation_request') {
+      // Shown mid-task: the running request stays pending until its final reply.
+      appendMessage('assistant', payload.text || '', { pending: false, persist: true });
+      setLifecyclePhase(EXECUTION_PHASES.RUNNING, {
+        text: 'Waiting for your confirmation…',
+        detail: 'Reply yes to allow the action, or anything else to cancel it.',
+      });
+      return;
+    }
+
     if (payload.command === 'chat_response') {
       if (!shouldDisplayReplyInChat(payload)) {
         clearPendingAssistant();

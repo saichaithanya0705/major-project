@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from typing import Any, Optional
 
+from agents.browser.action_guard import ActionGuard
 from agents.browser.controller import PlaywrightBrowserController
 from agents.browser.browser_use_boundary import (
     BrowserUseBoundary,
@@ -56,6 +57,7 @@ from agents.browser.task_policy import (
     steer_task_for_existing_page,
     task_to_search_query,
 )
+from core.confirmations import CONFIRMATIONS
 from models.openrouter_fallback import (
     get_openrouter_api_key,
     get_openrouter_base_url,
@@ -639,7 +641,7 @@ class BrowserAgent:
     async def _execute_with_browser_use(self, task: str, close_when_done: bool) -> dict[str, Any]:
         type(self)._ensure_external_browser_use_resolution()
         boundary = type(self)._browser_use_boundary
-        ChatGoogle = boundary.import_google_llm_class()
+        action_guard = ActionGuard(confirm=CONFIRMATIONS.request)
 
         session = await self._get_or_create_browser_use_session()
         self._session = session
@@ -661,6 +663,7 @@ class BrowserAgent:
                 register_should_stop_callback=type(self)._should_stop_browser_use_agent,
                 injected_agent_state=resume_state,
                 tool_policy=type(self)._browser_use_tool_policy,
+                action_guard=action_guard,
             )
             type(self)._register_active_browser_use_agent(agent)
             try:
@@ -697,40 +700,71 @@ class BrowserAgent:
             return {"success": True, "result": history, "error": None}
 
         try:
-            llm = ChatGoogle(model=self.model_name, api_key=os.getenv("GEMINI_API_KEY"))
-            return await run_with_llm(llm)
-        except asyncio.CancelledError:
-            raise
-        except (BrowserUseDependencyError, BrowserUseLifecycleError):
-            raise
-        except Exception as exc:
-            if not is_gemini_quota_error(exc):
-                return {"success": False, "result": None, "error": str(exc)}
-            fallback_error = str(exc)
-            for model_name in get_openrouter_models("browser"):
+            failures: list[str] = []
+            for label, make_llm in self._browser_llm_candidates(boundary):
                 try:
-                    ChatOpenRouter = boundary.import_openrouter_llm_class()
-
-                    print(f"[Browser Agent] Gemini quota hit; retrying via OpenRouter model {model_name}.")
-                    llm = ChatOpenRouter(
-                        model=model_name,
-                        api_key=get_openrouter_api_key(),
-                        http_referer=get_openrouter_site_url() or None,
-                        base_url=get_openrouter_base_url(),
-                        temperature=0,
-                        default_headers={"X-Title": get_openrouter_site_name()},
-                    )
-                    return await run_with_llm(llm)
+                    return await run_with_llm(make_llm())
                 except asyncio.CancelledError:
                     raise
                 except (BrowserUseDependencyError, BrowserUseLifecycleError):
                     raise
-                except Exception as fallback_exc:
-                    fallback_error = str(fallback_exc)
-                    print(f"[Browser Agent] OpenRouter fallback failed with {model_name}: {fallback_exc}")
-            return {"success": False, "result": None, "error": fallback_error}
+                except Exception as exc:
+                    if label == "gemini" and not is_gemini_quota_error(exc):
+                        return {"success": False, "result": None, "error": str(exc)}
+                    failures.append(f"{label}: {exc}")
+                    print(f"[Browser Agent] {label} failed; trying the next model. ({exc})")
+            if not failures:
+                return {
+                    "success": False,
+                    "result": None,
+                    "error": "No browser model is configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or run Ollama.",
+                }
+            return {"success": False, "result": None, "error": failures[-1].split(": ", 1)[-1]}
         finally:
             self._session = type(self)._shared_browser_use_session
+
+    def _browser_llm_candidates(self, boundary) -> list[tuple[str, Any]]:
+        """
+        (label, factory) for each configured browser model, in JARVIS_BROWSER_LLM_ORDER
+        (default gemini, openrouter, ollama). Unconfigured providers are skipped.
+        """
+        order = [
+            name.strip().lower()
+            for name in (os.getenv("JARVIS_BROWSER_LLM_ORDER") or "gemini,openrouter,ollama").split(",")
+            if name.strip()
+        ]
+        candidates: list[tuple[str, Any]] = []
+        for name in order:
+            if name == "gemini" and (os.getenv("GEMINI_API_KEY") or "").strip():
+                ChatGoogle = boundary.import_google_llm_class()
+                candidates.append(("gemini", lambda: ChatGoogle(model=self.model_name, api_key=os.getenv("GEMINI_API_KEY"))))
+            elif name == "openrouter" and get_openrouter_api_key():
+                for model_name in get_openrouter_models("browser"):
+                    def _openrouter(model_name=model_name):
+                        ChatOpenRouter = boundary.import_openrouter_llm_class()
+                        return ChatOpenRouter(
+                            model=model_name,
+                            api_key=get_openrouter_api_key(),
+                            http_referer=get_openrouter_site_url() or None,
+                            base_url=get_openrouter_base_url(),
+                            temperature=0,
+                            default_headers={"X-Title": get_openrouter_site_name()},
+                        )
+                    candidates.append((f"openrouter {model_name}", _openrouter))
+            elif name == "ollama":
+                model_name = (
+                    os.getenv("JARVIS_BROWSER_OLLAMA_MODEL")
+                    or os.getenv("OLLAMA_ROUTER_MODEL")
+                    or "nemotron-3.5-bolt"
+                ).strip()
+                host = (os.getenv("OLLAMA_BASE_URL") or "http://127.0.0.1:11434").strip()
+
+                def _ollama(model_name=model_name, host=host):
+                    ChatOllama = boundary.import_ollama_llm_class()
+                    return ChatOllama(model=model_name, host=host)
+
+                candidates.append((f"ollama {model_name}", _ollama))
+        return candidates
 
     async def _execute_with_playwright(self, task: str, bootstrap_error: str, close_when_done: bool, pre_extracted_url: str | None = None) -> dict[str, Any]:
         # Use the pre-extracted URL (from original task) if available,

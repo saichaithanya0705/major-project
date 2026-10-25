@@ -115,6 +115,13 @@ class _FakeBrowserUseBoundary:
 
         return _FakeChatGoogle
 
+    def import_ollama_llm_class(self):
+        class _FakeChatOllama:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        return _FakeChatOllama
+
     def create_session(self, **kwargs):
         self.create_session_calls += 1
         self.session_policies.append(kwargs["session_policy"])
