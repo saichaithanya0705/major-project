@@ -10,6 +10,12 @@ import os
 from dataclasses import dataclass
 from typing import Callable
 
+# NVIDIA Nemotron 3.5 Bolt E4B 4GB, served by Ollama. One local model serves as
+# both router and brain because two models do not fit in 4 GB of VRAM.
+DEFAULT_LOCAL_MODEL = "nemotron-3.5-bolt"
+DEFAULT_BRAIN_ESCALATION = ("gemini", "openrouter", "claude", "codex", "copilot")
+KNOWN_BRAIN_PROVIDERS = frozenset({"local", *DEFAULT_BRAIN_ESCALATION})
+
 
 @dataclass(frozen=True)
 class ModelRuntimeConfig:
@@ -37,6 +43,13 @@ class ModelRuntimeConfig:
     openrouter_router_max_tokens: int
     ollama_router_think: bool
     gemini_backup_model: str
+    brain_primary: str
+    brain_escalation: tuple[str, ...]
+    brain_model: str
+    brain_num_ctx: int
+    brain_timeout_seconds: int
+    brain_cli_timeout_seconds: int
+    brain_self_escalate: bool
 
 
 def _bounded_int(env_name: str, fallback: int, lower: int, upper: int) -> int:
@@ -50,6 +63,20 @@ def _bounded_int(env_name: str, fallback: int, lower: int, upper: int) -> int:
 
 def _truthy_env(env_name: str, fallback: str = "false") -> bool:
     return os.getenv(env_name, fallback).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _brain_provider_list(env_name: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return fallback
+    names = tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+    unknown = [name for name in names if name not in KNOWN_BRAIN_PROVIDERS]
+    if unknown:
+        raise ValueError(
+            f"{env_name} names unknown provider(s): {', '.join(unknown)}. "
+            f"Known: {', '.join(sorted(KNOWN_BRAIN_PROVIDERS))}"
+        )
+    return names
 
 
 def _nvidia_model_from_openrouter(model_name: str) -> str:
@@ -128,14 +155,15 @@ def build_model_runtime_config(
         upper=180,
     )
 
+    # Local-first: the router runs on Ollama unless ROUTER_PROVIDER says otherwise.
+    # Configured NVIDIA/OpenRouter keys remain fallbacks when Ollama fails.
     configured_router_provider = (
         os.getenv("ROUTER_PROVIDER")
         or ("openrouter" if rapid_model_requests_openrouter else "")
-        or ("nvidia" if nvidia_api_key else "")
-        or ("openrouter" if openrouter_api_key else "ollama")
+        or "ollama"
     ).strip().lower()
     if configured_router_provider not in {"nvidia", "openrouter", "ollama"}:
-        configured_router_provider = "nvidia" if nvidia_api_key else "openrouter" if openrouter_api_key else "ollama"
+        configured_router_provider = "ollama"
 
     configured_router_model = (
         os.getenv("OLLAMA_ROUTER_MODEL")
@@ -147,7 +175,7 @@ def build_model_runtime_config(
         or "gemini" in configured_router_model.lower()
         or looks_like_openrouter_model_name(configured_router_model)
     ):
-        configured_router_model = "qwen3.5:4b-q4_K_M"
+        configured_router_model = DEFAULT_LOCAL_MODEL
 
     ollama_base_url = (
         os.getenv("OLLAMA_BASE_URL") or "http://127.0.0.1:11434"
@@ -159,11 +187,13 @@ def build_model_runtime_config(
         lower=5,
         upper=180,
     )
+    # The router system prompt alone is ~1.3k tokens; with history and screen
+    # context a 2048 window overflowed and Ollama silently dropped its start.
     ollama_router_num_ctx = _bounded_int(
         "OLLAMA_ROUTER_NUM_CTX",
-        fallback=2048,
-        lower=512,
-        upper=8192,
+        fallback=8192,
+        lower=2048,
+        upper=65536,
     )
     ollama_router_num_predict = _bounded_int(
         "OLLAMA_ROUTER_NUM_PREDICT",
@@ -187,6 +217,26 @@ def build_model_runtime_config(
     gemini_backup_model = (
         os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash"
     ).strip()
+    brain_primary = (os.getenv("JARVIS_BRAIN_PRIMARY") or "local").strip().lower()
+    if brain_primary not in KNOWN_BRAIN_PROVIDERS:
+        raise ValueError(
+            f"JARVIS_BRAIN_PRIMARY must be one of {', '.join(sorted(KNOWN_BRAIN_PROVIDERS))}, got {brain_primary!r}"
+        )
+    brain_escalation = tuple(
+        name
+        for name in _brain_provider_list("JARVIS_BRAIN_ESCALATION", DEFAULT_BRAIN_ESCALATION)
+        if name != brain_primary
+    )
+    brain_model = (os.getenv("JARVIS_BRAIN_MODEL") or configured_router_model).strip()
+    brain_num_ctx = _bounded_int("JARVIS_BRAIN_NUM_CTX", fallback=8192, lower=2048, upper=65536)
+    brain_timeout_seconds = _bounded_int("JARVIS_BRAIN_TIMEOUT_SECONDS", fallback=120, lower=10, upper=600)
+    brain_cli_timeout_seconds = _bounded_int(
+        "JARVIS_BRAIN_CLI_TIMEOUT_SECONDS",
+        fallback=180,
+        lower=20,
+        upper=900,
+    )
+    brain_self_escalate = _truthy_env("JARVIS_BRAIN_SELF_ESCALATE", fallback="true")
     jarvis_thinking_budget = _bounded_int(
         "JARVIS_THINKING_BUDGET",
         fallback=256,
@@ -219,4 +269,11 @@ def build_model_runtime_config(
         openrouter_router_max_tokens=openrouter_router_max_tokens,
         ollama_router_think=ollama_router_think,
         gemini_backup_model=gemini_backup_model,
+        brain_primary=brain_primary,
+        brain_escalation=brain_escalation,
+        brain_model=brain_model,
+        brain_num_ctx=brain_num_ctx,
+        brain_timeout_seconds=brain_timeout_seconds,
+        brain_cli_timeout_seconds=brain_cli_timeout_seconds,
+        brain_self_escalate=brain_self_escalate,
     )

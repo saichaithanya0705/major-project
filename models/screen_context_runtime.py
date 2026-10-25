@@ -8,6 +8,7 @@ from typing import Any
 
 from PIL import Image
 
+from models.gemini_client import gemini_client
 from models.routing_payload_parser import parse_json_object as _parse_json_object_from_text
 from models.routing_payload_parser import ScreenContextPayload
 from models.screen_context_policy import normalize_screen_context_payload as _normalize_screen_context_payload
@@ -49,7 +50,7 @@ async def generate_screen_context(
         contents.append(image)
 
     try:
-        response = await model.client.aio.models.generate_content(
+        response = await gemini_client(model).aio.models.generate_content(
             model=model.screen_judge_model,
             contents=contents,
             config=model.screen_judge_config,
@@ -64,7 +65,7 @@ async def generate_screen_context(
                 f"[ScreenJudge] Primary model unavailable; retrying with backup "
                 f"{model.gemini_backup_model}"
             )
-            response = await model.client.aio.models.generate_content(
+            response = await gemini_client(model).aio.models.generate_content(
                 model=model.gemini_backup_model,
                 contents=contents,
                 config=model.screen_judge_config,

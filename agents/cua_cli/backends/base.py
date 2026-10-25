@@ -60,6 +60,8 @@ class BackendRequest:
     workspace_dirs: tuple[str, ...] = ()
     model: str | None = None
     full_trust: bool = False
+    # Answer-only runs get no shell, file-writing, or MCP tools: the CLI is used as a strong model.
+    answer_only: bool = False
 
 
 @dataclass(frozen=True)

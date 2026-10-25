@@ -50,8 +50,9 @@ cd ../opencode && npm ci
 
 The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.73). Runtime browser tasks should use that local install instead of downloading MCP dynamically with `npx` or `latest`.
 
-3. Create your .env file for your keys
+3. Create your .env file for your keys. Every key is optional: with none set, Jarvis routes and answers chat on the local model, and only screen/vision features need a cloud key.
 ```
+# Optional: screen explanations (JARVIS overlay) and a strong-model escalation target.
 GEMINI_API_KEY = "YOUR_API_KEY"
 
 # CUA vision uses NVIDIA first, then OpenRouter. Gemini is not used for CUA vision.
@@ -60,8 +61,9 @@ NVIDIA_API_KEY = "YOUR_NVIDIA_API_KEY"
 # NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # NVIDIA_VISION_MODEL = "mistralai/mistral-small-4-119b-2603"
 
-# Router prefers OpenRouter when configured, and falls back to Ollama if needed.
-ROUTER_PROVIDER = "openrouter"
+# The router runs on local Ollama by default and falls back to NVIDIA, then
+# OpenRouter, when those keys are set. Set ROUTER_PROVIDER to make a cloud router primary.
+# ROUTER_PROVIDER = "ollama"
 OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
 OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
@@ -71,12 +73,12 @@ OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 # OPENROUTER_SITE_NAME = "JARVIS"
 # OPENROUTER_TIMEOUT_SECONDS = "45"
 
-# Optional local router alternative. Use only by setting ROUTER_PROVIDER = "ollama".
-# OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
+# Local model (router + brain). Defaults shown.
+# OLLAMA_ROUTER_MODEL = "nemotron-3.5-bolt"
 # OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 # OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
 # OLLAMA_KEEP_ALIVE = "10m"
-# OLLAMA_ROUTER_NUM_CTX = "2048"
+# OLLAMA_ROUTER_NUM_CTX = "8192"
 # OLLAMA_ROUTER_NUM_PREDICT = "240"
 # OLLAMA_ROUTER_THINK = "false"
 
@@ -90,6 +92,29 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
 # Optional full URL override (legacy/advanced):
 # ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
 ```
+
+## Local brain and escalation
+
+Chat answers (direct Q&A and web Q&A) come from the local model first: NVIDIA Nemotron 3.5 Bolt E4B 4GB through Ollama, the same model that routes requests. One model plays both roles because two models do not fit in 4 GB of VRAM. Jarvis escalates to a stronger model when:
+
+- the local model errors, times out, or returns nothing,
+- the local model decides it cannot answer reliably and replies `ESCALATE` (direct Q&A only),
+- you ask for it: "think harder", "use the stronger model", "ask codex", "ask claude", "ask ChatGPT".
+
+Escalation targets are tried in order and skipped when not configured: Gemini (`GEMINI_API_KEY`), OpenRouter (`OPENROUTER_API_KEY`), then your signed-in Claude Code, Codex CLI, and Copilot CLI in answer-only mode (no shell, file-writing, or MCP tools). Codex CLI signed in with ChatGPT is how a ChatGPT subscription is used here; Jarvis never reads the CLIs' credentials. The chat shows which model answered.
+
+```
+# .env (all optional)
+# JARVIS_BRAIN_PRIMARY = "local"        # or gemini/openrouter/claude/codex/copilot
+# JARVIS_BRAIN_ESCALATION = "gemini,openrouter,claude,codex,copilot"
+# JARVIS_BRAIN_MODEL = "nemotron-3.5-bolt"   # defaults to the router model
+# JARVIS_BRAIN_NUM_CTX = "8192"
+# JARVIS_BRAIN_TIMEOUT_SECONDS = "120"
+# JARVIS_BRAIN_CLI_TIMEOUT_SECONDS = "180"
+# JARVIS_BRAIN_SELF_ESCALATE = "true"
+```
+
+On a 4 GB GPU the Q4 model (about 6–8 GB on disk) runs partly on the CPU, so first replies can take several seconds. Screen explanations and the vision agent need an image-capable model and still use Gemini or NVIDIA/OpenRouter vision.
 
 ## CLI agent and coding delegation
 
@@ -122,14 +147,11 @@ Google's Antigravity CLI (`agy`) is not wired in: its print mode is reported to 
 
 ## Running Jarvis
 
-1. Ensure your router provider is available
+1. Start the local model
 ```
-# OpenRouter-first setup:
-# add a valid OPENROUTER_API_KEY to .env
-
-# Optional Ollama fallback:
 ollama serve
-ollama run qwen3.5:4b-q4_K_M "ready"
+ollama pull nemotron-3.5-bolt
+ollama run nemotron-3.5-bolt "ready"
 ```
 
 2. Run the frontend visualization
@@ -444,7 +466,7 @@ Events (Electron → Python):
     "screen_height": 1080,
     "viewport_width": 1920,
     "viewport_height": 1080,
-    "rapid_response_model": "qwen3.5:4b-q4_K_M",
+    "rapid_response_model": "nemotron-3.5-bolt",
     "jarvis_model": "gemini-2.5-flash-preview-04-17"
 }
 ```

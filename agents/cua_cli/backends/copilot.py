@@ -59,6 +59,11 @@ class CopilotBackend(CodingBackend):
 
     def build_args(self, request: BackendRequest) -> list[str]:
         args = ["--output-format", "json", "--allow-all-tools", "--disable-client-telemetry"]
+        if request.answer_only:
+            # --available-tools= does not hide Copilot's tools, so deny the side-effecting ones.
+            args.extend(["--deny-tool", "shell", "--deny-tool", "write"])
+            model = request.model or self.default_model()
+            return args + (["--model", model] if model else [])
         for rule in denied_shell_rules(full_trust=request.full_trust):
             args.extend(["--deny-tool", rule])
         for directory in request.workspace_dirs:

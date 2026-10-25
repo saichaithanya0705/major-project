@@ -1,9 +1,10 @@
 """
-JARVIS Model Integration - Local router + Gemini vision agent logic.
+JARVIS Model Integration - Local router/brain + Gemini vision agent logic.
 
 This module handles:
 - Screenshot capture and storage
 - Two-tier model routing (provider-aware router -> specialized agents)
+- Local-first chat answers with escalation (models.brain)
 - Gemini/OpenRouter model configuration for screen tasks
 """
 import asyncio
@@ -146,13 +147,16 @@ class GeminiModel:
     Documentation Reference: https://github.com/googleapis/python-genai
     """
 
-    def __init__(self, jarvis_model='gemini-3-flash-preview', rapid_response_model='qwen3.5:4b-q4_K_M'):
+    def __init__(self, jarvis_model='gemini-3-flash-preview', rapid_response_model='nemotron-3.5-bolt'):
         if genai is None or types is None:
             raise RuntimeError(
                 "Google Gemini dependencies are required to initialize GeminiModel. "
                 "Install `google-genai` and its dependencies."
             )
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # Gemini is optional: without a key, chat answers stay on the local brain and
+        # screen features fall back to OpenRouter vision when it is configured.
+        gemini_api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        self.client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
         self.jarvis_model = jarvis_model
         self.rapid_response_model = rapid_response_model
         initialize_gemini_model_runtime(
@@ -165,6 +169,7 @@ class GeminiModel:
     def _is_gemini_quota_error(exc: Exception) -> bool:
         text = f"{type(exc).__name__}: {exc}".lower()
         markers = (
+            "gemininotconfigurederror",
             "429",
             "resource_exhausted",
             "quota",

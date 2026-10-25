@@ -48,12 +48,14 @@ class CodexBackend(CodingBackend):
     model_env_var = "JARVIS_CODEX_MODEL"
 
     def build_args(self, request: BackendRequest) -> list[str]:
-        args = ["exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write"]
-        if request.full_trust:
+        sandbox = "read-only" if request.answer_only else "workspace-write"
+        args = ["exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox]
+        if request.full_trust and not request.answer_only:
             args.extend(["-c", "sandbox_workspace_write.network_access=true"])
-        for directory in request.workspace_dirs:
-            if directory != request.cwd:
-                args.extend(["--add-dir", directory])
+        if not request.answer_only:
+            for directory in request.workspace_dirs:
+                if directory != request.cwd:
+                    args.extend(["--add-dir", directory])
         model = request.model or self.default_model()
         if model:
             args.extend(["--model", model])

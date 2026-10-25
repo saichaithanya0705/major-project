@@ -64,6 +64,10 @@ class ClaudeCodeBackend(CodingBackend):
     model_env_var = "JARVIS_CLAUDE_MODEL"
 
     def build_args(self, request: BackendRequest) -> list[str]:
+        if request.answer_only:
+            args = ["-p", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config"]
+            model = request.model or self.default_model()
+            return args + (["--model", model] if model else [])
         args = [
             "-p",
             "--output-format",

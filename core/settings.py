@@ -201,14 +201,14 @@ def get_model_configs(settings_path: str = DEFAULT_SETTINGS_PATH) -> tuple[str, 
     """Get both model configurations: (rapid_response_model, jarvis_model)"""
     settings = _read_settings_file(settings_path)
     return (
-        settings.get("rapid_response_model", "qwen3.5:4b-q4_K_M"),
+        settings.get("rapid_response_model", "nemotron-3.5-bolt"),
         settings.get("jarvis_model", "gemini-3-flash-preview")
     )
 
 
 def get_rapid_response_model(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:
     settings = _read_settings_file(settings_path)
-    return settings.get("rapid_response_model", "qwen3.5:4b-q4_K_M")
+    return settings.get("rapid_response_model", "nemotron-3.5-bolt")
 
 
 def get_jarvis_model(settings_path: str = DEFAULT_SETTINGS_PATH) -> str:

@@ -50,6 +50,13 @@ def _runtime_config() -> ModelRuntimeConfig:
         openrouter_router_max_tokens=555,
         ollama_router_think=True,
         gemini_backup_model="gemini-backup",
+        brain_primary="local",
+        brain_escalation=("gemini", "codex"),
+        brain_model="ollama-router",
+        brain_num_ctx=8192,
+        brain_timeout_seconds=120,
+        brain_cli_timeout_seconds=180,
+        brain_self_escalate=True,
     )
 
 
