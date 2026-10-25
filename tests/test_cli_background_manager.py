@@ -60,12 +60,7 @@ async def run_checks() -> None:
         "By using the terminal create a new file in the d drive "
         "with name test.txt and write hello world"
     )
-    cmd = agent._build_command(cli_task)
-    include_dirs = [
-        cmd[idx + 1]
-        for idx, token in enumerate(cmd[:-1])
-        if token == "--include-directories"
-    ]
+    include_dirs = agent._workspace_dirs_for_task(cli_task)
     if os.name == "nt" and Path(r"D:\\").exists():
         normalized_include_dirs = {
             os.path.normcase(os.path.normpath(path))

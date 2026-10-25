@@ -35,7 +35,7 @@ Windows:
 .\.venv\Scripts\python -m playwright install chromium
 cd ui; npm install
 cd ../integrations/playwright_mcp; npm install
-cd ../../agents/cua_cli/gemini-cli; npm install; npm run build
+cd ../opencode; npm ci
 ```
 
 macOS / Linux:
@@ -45,7 +45,7 @@ macOS / Linux:
 .venv/bin/python -m playwright install chromium
 cd ui && npm install
 cd ../integrations/playwright_mcp && npm install
-cd ../../agents/cua_cli/gemini-cli && npm install && npm run build
+cd ../opencode && npm ci
 ```
 
 The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.73). Runtime browser tasks should use that local install instead of downloading MCP dynamically with `npx` or `latest`.
@@ -90,6 +90,35 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
 # Optional full URL override (legacy/advanced):
 # ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
 ```
+
+## CLI agent and coding delegation
+
+The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.
+
+| Backend | Install | Used for |
+| --- | --- | --- |
+| opencode (pinned, installed by setup) | `integrations/opencode` | shell/desktop tasks, last-resort coding |
+| Claude Code | `npm install -g @anthropic-ai/claude-code`, then `claude` to sign in | coding (1st choice) |
+| Codex CLI | `npm install -g @openai/codex`, then `codex login` (ChatGPT sign-in works) | coding (2nd choice) |
+| GitHub Copilot CLI | `npm install -g @github/copilot`, then `copilot` → `/login` | coding (3rd choice) |
+
+Jarvis tries coding backends in order and skips one only if it is not installed or not signed in; once a backend has run a tool it never re-runs the task elsewhere. Prompts are passed on stdin, never as command-line arguments.
+
+Every backend gets the same deny rules: `rm -rf`/`rm -r`, `Remove-Item`, `git push`, `git reset --hard`, `git clean`, `sudo`, `format`, `shutdown` and similar. Codex has no per-command rules, so it runs in its `workspace-write` sandbox with network access off. `JARVIS_CLI_FULL_TRUST=1` keeps only the machine-destroying rules and allows network for Codex.
+
+```
+# .env (all optional)
+JARVIS_OPENCODE_MODEL = "ollama/nemotron-3.5-bolt"   # provider/model for opencode
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+JARVIS_CODING_BACKENDS = "claude,codex,copilot,opencode"
+JARVIS_CODING_DELEGATION = "auto"   # "off" runs coding tasks on opencode too
+JARVIS_CODING_TIMEOUT_SECONDS = "900"
+JARVIS_CLI_TIMEOUT_SECONDS = "300"
+# JARVIS_CLAUDE_MODEL / JARVIS_CODEX_MODEL / JARVIS_COPILOT_MODEL pick models per CLI.
+# JARVIS_<NAME>_BIN points at a specific executable (OPENCODE, CLAUDE, CODEX, COPILOT).
+```
+
+Google's Antigravity CLI (`agy`) is not wired in: its print mode is reported to hang when it is run without a terminal ([antigravity-cli#318](https://github.com/google-antigravity/antigravity-cli/issues/318)), which is how Jarvis runs CLIs.
 
 ## Running Jarvis
 
@@ -203,8 +232,9 @@ JARVIS/
 │   ├── browser/                # Web automation agent (Playwright)
 │   │   └── agent.py            # BrowserAgent class (stub)
 │   │
-│   ├── cua_cli/                # Desktop control via shell commands
-│   │   └── agent.py            # CLIAgent class (stub)
+│   ├── cua_cli/                # Shell control and coding via coding-agent CLIs
+│   │   ├── agent.py            # CLIAgent class
+│   │   └── backends/           # opencode, Claude Code, Codex CLI, Copilot CLI
 │   │
 │   └── cua_vision/             # Desktop control via screen + mouse/keyboard
 │       ├── agent.py            # VisionAgent class
