@@ -101,7 +101,7 @@ def run_checks() -> None:
         assert cfg.ollama_router_num_ctx == 8192
         assert cfg.brain_primary == "local"
         assert cfg.brain_model == "nemotron-3.5-bolt"
-        assert cfg.brain_escalation == ("gemini", "openrouter", "claude", "codex", "copilot")
+        assert cfg.brain_escalation == ("chatgpt", "gemini", "openrouter", "claude", "codex", "copilot")
 
         _clear_env()
         os.environ["ROUTER_PROVIDER"] = "nvidia"

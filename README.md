@@ -101,12 +101,12 @@ Chat answers (direct Q&A and web Q&A) come from the local model first: NVIDIA Ne
 - the local model decides it cannot answer reliably and replies `ESCALATE` (direct Q&A only),
 - you ask for it: "think harder", "use the stronger model", "ask codex", "ask claude", "ask ChatGPT".
 
-Escalation targets are tried in order and skipped when not configured: Gemini (`GEMINI_API_KEY`), OpenRouter (`OPENROUTER_API_KEY`), then your signed-in Claude Code, Codex CLI, and Copilot CLI in answer-only mode (no shell, file-writing, or MCP tools). Codex CLI signed in with ChatGPT is how a ChatGPT subscription is used here; Jarvis never reads the CLIs' credentials. The chat shows which model answered.
+Escalation targets are tried in order and skipped when not configured: your ChatGPT plan (see below), Gemini (`GEMINI_API_KEY`), OpenRouter (`OPENROUTER_API_KEY`), then your signed-in Claude Code, Codex CLI, and Copilot CLI in answer-only mode (no shell, file-writing, or MCP tools). Jarvis never reads the CLIs' credentials. The chat shows which model answered.
 
 ```
 # .env (all optional)
-# JARVIS_BRAIN_PRIMARY = "local"        # or gemini/openrouter/claude/codex/copilot
-# JARVIS_BRAIN_ESCALATION = "gemini,openrouter,claude,codex,copilot"
+# JARVIS_BRAIN_PRIMARY = "local"        # or chatgpt/gemini/openrouter/claude/codex/copilot
+# JARVIS_BRAIN_ESCALATION = "chatgpt,gemini,openrouter,claude,codex,copilot"
 # JARVIS_BRAIN_MODEL = "nemotron-3.5-bolt"   # defaults to the router model
 # JARVIS_BRAIN_NUM_CTX = "8192"
 # JARVIS_BRAIN_TIMEOUT_SECONDS = "120"
@@ -115,6 +115,23 @@ Escalation targets are tried in order and skipped when not configured: Gemini (`
 ```
 
 On a 4 GB GPU the Q4 model (about 6–8 GB on disk) runs partly on the CPU, so first replies can take several seconds. Screen explanations and the vision agent need an image-capable model and still use Gemini or NVIDIA/OpenRouter vision.
+
+### ChatGPT plan (Plus/Pro)
+
+Jarvis can use the models in your ChatGPT subscription through OpenAI's official [Sign in with ChatGPT for open-source apps](https://developers.openai.com/siwc/token-sharing-open-source). Usage counts against your plan, not an API bill.
+
+```
+python -m integrations.chatgpt login     # opens your browser; approve "Jarvis"
+python -m integrations.chatgpt models    # models your plan offers
+python -m integrations.chatgpt status
+python -m integrations.chatgpt logout    # revokes the session and deletes local tokens
+```
+
+- Sign-in uses Jarvis's own OAuth client (PKCE, a callback on `http://127.0.0.1:1455/auth/callback`); Jarvis never copies tokens from Codex CLI or any other app.
+- Tokens are stored in `~/.jarvis/chatgpt/credentials.json`, readable only by you, and renew automatically. Sign in again if Jarvis says the session ended (for example after a long time unused, a password change, or revocation).
+- Pick a model with `JARVIS_CHATGPT_MODEL` (a slug from `models`); otherwise the first model your account lists is used.
+- If you reach your plan's usage limit, Jarvis stops using ChatGPT for 30 minutes (`JARVIS_CHATGPT_LIMIT_PAUSE_SECONDS`) and falls back to the next provider. Check [ChatGPT settings → Usage](https://chatgpt.com/settings/usage). Signing in again lifts the pause.
+- OpenAI marks plan usage for open-source apps as a preview; availability can depend on your plan, workspace, and region. If your account is not eligible, Jarvis says so and does not retry.
 
 ## Skills
 

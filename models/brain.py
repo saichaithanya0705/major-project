@@ -3,7 +3,7 @@ Text "brain" for chat answers: local model first, stronger models on escalation.
 
 The primary provider (``JARVIS_BRAIN_PRIMARY``, default ``local``) is the
 Ollama model also used for routing. Escalation providers
-(``JARVIS_BRAIN_ESCALATION``, default ``gemini,openrouter,claude,codex,copilot``)
+(``JARVIS_BRAIN_ESCALATION``, default ``chatgpt,gemini,openrouter,claude,codex,copilot``)
 are tried in order when:
 
 - the local model fails, times out, or returns nothing,
@@ -11,15 +11,18 @@ are tried in order when:
   reliably (``JARVIS_BRAIN_SELF_ESCALATE``), or
 - the user explicitly asks for a stronger model ("think harder", "ask codex").
 
-``claude``, ``codex`` and ``copilot`` run the user's signed-in CLI in
-answer-only mode (no shell, file-writing, or MCP tools), which is how a ChatGPT
-subscription is used through Codex CLI without handling its credentials.
-Providers that are not configured or installed are skipped.
+``chatgpt`` uses the user's ChatGPT plan through OpenAI's official Sign in with
+ChatGPT (``python -m integrations.chatgpt login``). ``claude``, ``codex`` and
+``copilot`` run the user's signed-in CLI in answer-only mode (no shell,
+file-writing, or MCP tools). Providers that are not configured, signed in, or
+installed are skipped.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import re
 import tempfile
 from dataclasses import dataclass
@@ -29,7 +32,11 @@ import requests
 
 from agents.cua_cli.backends import BACKENDS, BackendRequest
 from agents.cua_cli.backends.runner import run_backend_for_answer
+from integrations.chatgpt import auth as chatgpt_auth
+from integrations.chatgpt import responses as chatgpt_responses
 from models.openrouter_runtime import openrouter_model_enabled
+
+logger = logging.getLogger(__name__)
 
 ESCALATE_MARKER = "ESCALATE"
 SELF_ESCALATION_INSTRUCTION = (
@@ -128,6 +135,22 @@ async def _openrouter_reply(
     )
 
 
+async def _chatgpt_reply(
+    model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+) -> str:
+    del model, temperature, max_tokens  # Plan usage does not accept sampling or length fields.
+    if not chatgpt_auth.is_signed_in():
+        raise BrainProviderUnavailable("not signed in (python -m integrations.chatgpt login)")
+    try:
+        return await asyncio.to_thread(chatgpt_responses.generate, instructions=system, user=user, json_mode=json_mode)
+    except chatgpt_auth.NotSignedInError as exc:
+        raise BrainProviderUnavailable(str(exc)) from exc
+    except chatgpt_responses.ChatGPTPaused as exc:
+        # Log why ChatGPT was skipped (usage limit, eligibility, outage); later providers still answer.
+        logger.warning("ChatGPT plan: %s", exc)
+        raise BrainProviderUnavailable(str(exc)) from exc
+
+
 def _cli_reply(name: str) -> Callable[..., Awaitable[str]]:
     async def _reply(
         model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
@@ -148,6 +171,7 @@ def _cli_reply(name: str) -> Callable[..., Awaitable[str]]:
 
 _PROVIDERS: dict[str, Callable[..., Awaitable[str]]] = {
     "local": _local_reply,
+    "chatgpt": _chatgpt_reply,
     "gemini": _gemini_reply,
     "openrouter": _openrouter_reply,
     "claude": _cli_reply("claude"),
@@ -159,6 +183,9 @@ _PROVIDERS: dict[str, Callable[..., Awaitable[str]]] = {
 def provider_label(model: Any, name: str) -> str:
     if name == "local":
         return f"{model.brain_model} (local)"
+    if name == "chatgpt":
+        configured = os.getenv("JARVIS_CHATGPT_MODEL", "").strip()
+        return f"ChatGPT ({configured})" if configured else "ChatGPT plan"
     if name == "gemini":
         return str(model.jarvis_model)
     if name == "openrouter":
@@ -170,6 +197,8 @@ def provider_configured(model: Any, name: str) -> bool:
     """Cheap check used to decide whether escalation is possible at all."""
     if name == "local":
         return bool(getattr(model, "brain_model", ""))
+    if name == "chatgpt":
+        return chatgpt_auth.is_signed_in()
     if name == "gemini":
         return getattr(model, "client", None) is not None
     if name == "openrouter":

@@ -66,7 +66,7 @@ class _Providers:
 
             return _reply
 
-        return {name: make(name) for name in ("local", "gemini", "openrouter", "claude", "codex", "copilot")}
+        return {name: make(name) for name in ("local", "chatgpt", "gemini", "openrouter", "claude", "codex", "copilot")}
 
 
 @pytest.fixture(autouse=True)

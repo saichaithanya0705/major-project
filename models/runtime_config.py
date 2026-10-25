@@ -13,7 +13,7 @@ from typing import Callable
 # NVIDIA Nemotron 3.5 Bolt E4B 4GB, served by Ollama. One local model serves as
 # both router and brain because two models do not fit in 4 GB of VRAM.
 DEFAULT_LOCAL_MODEL = "nemotron-3.5-bolt"
-DEFAULT_BRAIN_ESCALATION = ("gemini", "openrouter", "claude", "codex", "copilot")
+DEFAULT_BRAIN_ESCALATION = ("chatgpt", "gemini", "openrouter", "claude", "codex", "copilot")
 KNOWN_BRAIN_PROVIDERS = frozenset({"local", *DEFAULT_BRAIN_ESCALATION})
 
 
