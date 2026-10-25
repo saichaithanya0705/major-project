@@ -87,7 +87,7 @@ echo "[setup] Installing Playwright MCP dependencies..."
 run_in_dir "$ROOT_DIR/integrations/playwright_mcp" npm install
 
 echo "[setup] Installing Gemini CLI dependencies and building..."
-run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm install
+run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm ci
 run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm run build
 
 echo "[setup] Done."

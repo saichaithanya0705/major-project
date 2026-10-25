@@ -98,6 +98,14 @@ def test_current_manifest_matches_vendored_gemini_cli() -> None:
     assert result.entrypoint_path == vendor_root / "bundle" / "gemini.js"
 
 
+def test_vendor_validation_reports_unbuilt_entrypoint(tmp_path: Path) -> None:
+    vendor_root = _write_vendor_tree(tmp_path)
+    (vendor_root / "bundle" / "gemini.js").unlink()
+
+    with pytest.raises(GeminiCliVendorError, match="npm run build"):
+        validate_gemini_cli_vendor(vendor_root)
+
+
 def test_vendor_validation_rejects_package_lock_hash_drift(tmp_path: Path) -> None:
     vendor_root = _write_vendor_tree(tmp_path)
     package_lock_path = vendor_root / "package-lock.json"

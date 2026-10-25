@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { wasmLoader } from 'esbuild-plugin-wasm';
 
 let esbuild;
@@ -68,8 +69,18 @@ function createWasmPlugins() {
             : path.join(resolveDir, specifier);
         }
 
-        return { path: resolvedPath, namespace: 'wasm-embedded' };
+        // Keep build-machine paths out of the bundle so its hash is reproducible
+        // from any checkout location.
+        const relativePath = path
+          .relative(__dirname, resolvedPath)
+          .split(path.sep)
+          .join('/');
+        return { path: relativePath, namespace: 'wasm-embedded' };
       });
+      build.onLoad({ filter: /.*/, namespace: 'wasm-embedded' }, async (args) => ({
+        contents: await readFile(path.resolve(__dirname, args.path)),
+        loader: 'binary',
+      }));
     },
   };
 

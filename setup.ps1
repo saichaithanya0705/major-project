@@ -116,7 +116,7 @@ finally {
 Push-Location (Join-Path $root "agents\cua_cli\gemini-cli")
 try {
     Invoke-Step "Installing Gemini CLI dependencies..." {
-        npm install
+        npm ci
     }
     Invoke-Step "Building Gemini CLI..." {
         npm run build

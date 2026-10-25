@@ -98,6 +98,11 @@ def validate_gemini_cli_vendor(
     cli_entrypoint_sha = (
         _hash_file(vendor_root / cli_entrypoint, errors) if cli_entrypoint is not None else None
     )
+    if cli_entrypoint is not None and cli_entrypoint_sha is None:
+        errors.append(
+            f"Gemini CLI entrypoint is missing: {vendor_root / cli_entrypoint}. "
+            f"Build it with `npm install && npm run build` in {vendor_root}"
+        )
 
     if manifest is not None:
         _validate_hash_pin(
