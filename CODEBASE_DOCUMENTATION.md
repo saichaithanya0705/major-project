@@ -46,8 +46,8 @@ These directories define the product itself:
 
 These are embedded subsystems that the first-party code wraps:
 
-- `agents/browser/browser_use/`
-  - bundled browser automation runtime
+- `browser_use` (pip dependency pinned in `requirements.txt`)
+  - browser automation runtime; `agents/browser/browser_use_boundary.py` refuses any in-repo copy
 - `agents/cua_cli/gemini-cli/`
   - bundled Gemini CLI source/build tree used by the CLI agent
 - `ui/node_modules/`
@@ -635,7 +635,7 @@ When making changes, this is the fastest mental map:
 
 - change browser automation:
   - `agents/browser/agent.py`
-  - only descend into `agents/browser/browser_use/` if the wrapper cannot solve the issue
+  - `agents/browser/browser_use_boundary.py` for the boundary to the pinned `browser_use` package
 
 - change CLI automation:
   - `agents/cua_cli/agent.py`
