@@ -69,6 +69,9 @@ from agents.cua_cli.stream_event_policy import (
     safe_preview,
     status_from_stream_event,
 )
+from agents.skills.brain_bridge import generate_spec_with_brain
+from agents.skills.registry import SkillRegistry
+from agents.skills.structured import SpecGenerator, run_structured_skill
 from agents.cua_cli.workspace_policy import (
     compute_workspace_dirs,
     dedupe_workspace_dirs,
@@ -124,9 +127,10 @@ class CLIAgent:
     _managed_background_processes: Dict[str, Dict[str, Any]] = {}
     _active_foreground_processes: Dict[str, Dict[str, Any]] = {}
 
-    def __init__(self) -> None:
+    def __init__(self, spec_generator: Optional[SpecGenerator] = None) -> None:
         self._full_trust = _truthy_env("JARVIS_CLI_FULL_TRUST")
         self._base_workspace_dirs = self._compute_workspace_dirs()
+        self._spec_generator = spec_generator or generate_spec_with_brain
         self._ensure_cleanup_hook_registered()
 
     def _build_cli_env(self) -> Dict[str, str]:
@@ -262,6 +266,7 @@ class CLIAgent:
                 "When the user specifies a drive, directory, or absolute path, operate there exactly and do not silently redirect to a different folder."
             )
 
+        skills_section = self._skills_section(task)
         instruction = (
             "You are running inside JARVIS with tool access enabled. "
             "Execute the request directly using tools/shell commands instead of giving manual instructions. "
@@ -273,7 +278,28 @@ class CLIAgent:
         )
         if extra_guidance:
             instruction = f"{instruction} {' '.join(extra_guidance)}"
+        if skills_section:
+            instruction = f"{instruction}\n\n{skills_section}"
         return f"{instruction}\n\nTask:\n{task}"
+
+    @staticmethod
+    def _skills_section(task: str) -> str:
+        """Skill instructions for the CLI: the full text of a named skill, else a short catalog."""
+        registry = SkillRegistry.discover()
+        named = registry.explicit_skill(task)
+        if named is not None and not named.manifest.is_structured:
+            return (
+                f"The user asked you to use the '{named.name}' skill. Follow its instructions. "
+                f"Its files are in {named.manifest.directory}.\n\n{named.manifest.body}"
+            )
+        relevant = registry.relevant_skills(task)
+        if not relevant:
+            return ""
+        lines = [f"- {entry.name}: {entry.manifest.description} (read {entry.manifest.path})" for entry in relevant]
+        return (
+            "Installed skills that may help. Read a skill's SKILL.md before using it, "
+            "and skip any that do not fit the task:\n" + "\n".join(lines)
+        )
 
     @staticmethod
     def _prepare_retry_task(task: str) -> str:
@@ -524,6 +550,11 @@ class CLIAgent:
             management_response = await self._maybe_handle_background_management_task(task)
             if management_response is not None:
                 return management_response
+
+            structured_skill = SkillRegistry.discover().structured_skill_for(task)
+            if structured_skill is not None:
+                await self._emit_status(status_callback, f"Using the {structured_skill.name} skill...")
+                return await run_structured_skill(structured_skill, task, generate=self._spec_generator)
 
             explicit_command = self._extract_explicit_shell_command(task)
             if explicit_command and self._is_background_intent_task(task, explicit_command):

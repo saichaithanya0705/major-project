@@ -65,7 +65,9 @@ def _is_escalation_marker(text: str) -> bool:
     return text.strip().strip(".`*\"' ").upper() == ESCALATE_MARKER
 
 
-async def _local_reply(model: Any, system: str, user: str, temperature: float, max_tokens: int) -> str:
+async def _local_reply(
+    model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+) -> str:
     payload: dict[str, Any] = {
         "model": model.brain_model,
         "stream": False,
@@ -75,6 +77,9 @@ async def _local_reply(model: Any, system: str, user: str, temperature: float, m
     }
     if getattr(model, "ollama_keep_alive", ""):
         payload["keep_alive"] = model.ollama_keep_alive
+    if json_mode:
+        # Grammar-constrained output: the model can only emit valid JSON.
+        payload["format"] = "json"
 
     def _post() -> str:
         try:
@@ -93,8 +98,10 @@ async def _local_reply(model: Any, system: str, user: str, temperature: float, m
     return await asyncio.to_thread(_post)
 
 
-async def _gemini_reply(model: Any, system: str, user: str, temperature: float, max_tokens: int) -> str:
-    del temperature, max_tokens  # direct_answer_config carries Gemini sampling settings.
+async def _gemini_reply(
+    model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+) -> str:
+    del temperature, max_tokens, json_mode  # direct_answer_config carries Gemini sampling settings.
     if getattr(model, "client", None) is None:
         raise BrainProviderUnavailable("GEMINI_API_KEY is not set")
     response = await model.client.aio.models.generate_content(
@@ -105,7 +112,10 @@ async def _gemini_reply(model: Any, system: str, user: str, temperature: float, 
     return str(getattr(response, "text", "") or "")
 
 
-async def _openrouter_reply(model: Any, system: str, user: str, temperature: float, max_tokens: int) -> str:
+async def _openrouter_reply(
+    model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+) -> str:
+    del json_mode
     if not openrouter_model_enabled(model, model.openrouter_model):
         raise BrainProviderUnavailable("OPENROUTER_API_KEY is not set")
     return await asyncio.to_thread(
@@ -119,8 +129,10 @@ async def _openrouter_reply(model: Any, system: str, user: str, temperature: flo
 
 
 def _cli_reply(name: str) -> Callable[..., Awaitable[str]]:
-    async def _reply(model: Any, system: str, user: str, temperature: float, max_tokens: int) -> str:
-        del temperature, max_tokens
+    async def _reply(
+        model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+    ) -> str:
+        del temperature, max_tokens, json_mode
         backend = BACKENDS[name]()
         if not backend.is_available():
             raise BrainProviderUnavailable(f"{backend.display_name} is not installed")
@@ -174,6 +186,7 @@ async def generate_brain_reply(
     max_tokens: int = 1800,
     force_escalation: bool = False,
     allow_self_escalation: bool = True,
+    json_mode: bool = False,
     providers: dict[str, Callable[..., Awaitable[str]]] | None = None,
 ) -> BrainReply:
     providers = providers or _PROVIDERS
@@ -184,7 +197,9 @@ async def generate_brain_reply(
 
     async def _attempt(name: str, system_prompt: str) -> str | None:
         try:
-            text = (await providers[name](model, system_prompt, user, temperature, max_tokens)).strip()
+            text = (
+                await providers[name](model, system_prompt, user, temperature, max_tokens, json_mode=json_mode)
+            ).strip()
         except BrainProviderUnavailable as exc:
             failures.append(f"{name}: {exc}")
             return None

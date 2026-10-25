@@ -17,3 +17,11 @@ psutil==7.2.2
 
 # TTS Integration (ElevenLabs)
 requests==2.32.5
+
+# Skills (SKILL.md parsing, spec validation) and bundled document skills
+PyYAML==6.0.3
+jsonschema==4.26.0
+python-pptx==1.0.2
+python-docx==1.2.0
+reportlab==4.4.9
+openpyxl==3.1.5

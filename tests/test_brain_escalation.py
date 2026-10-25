@@ -56,8 +56,8 @@ class _Providers:
 
     def table(self):
         def make(name):
-            async def _reply(model, system, user, temperature, max_tokens):
-                del model, user, temperature, max_tokens
+            async def _reply(model, system, user, temperature, max_tokens, *, json_mode=False):
+                del model, user, temperature, max_tokens, json_mode
                 self.calls.append((name, system))
                 reply = self.replies[name]
                 if isinstance(reply, Exception):
@@ -173,7 +173,7 @@ async def test_local_reply_calls_ollama_chat_with_brain_settings() -> None:
     thread.start()
     try:
         model = _model(ollama_base_url=f"http://127.0.0.1:{server.server_address[1]}", ollama_keep_alive="10m")
-        text = await brain._local_reply(model, "SYS", "hi", 0.3, 256)
+        text = await brain._local_reply(model, "SYS", "hi", 0.3, 256, json_mode=True)
     finally:
         server.shutdown()
 
@@ -183,6 +183,7 @@ async def test_local_reply_calls_ollama_chat_with_brain_settings() -> None:
     assert body["model"] == "nemotron-3.5-bolt"
     assert body["options"] == {"temperature": 0.3, "num_predict": 256, "num_ctx": 8192}
     assert body["keep_alive"] == "10m"
+    assert body["format"] == "json"
     assert body["messages"][0] == {"role": "system", "content": "SYS"}
 
 

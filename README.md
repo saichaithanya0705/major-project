@@ -116,6 +116,27 @@ Escalation targets are tried in order and skipped when not configured: Gemini (`
 
 On a 4 GB GPU the Q4 model (about 6–8 GB on disk) runs partly on the CPU, so first replies can take several seconds. Screen explanations and the vision agent need an image-capable model and still use Gemini or NVIDIA/OpenRouter vision.
 
+## Skills
+
+Skills use the open [agentskills.io](https://agentskills.io) `SKILL.md` format, the same one used by OpenJarvis, Hermes Agent, OpenClaw, Claude Code, and opencode, so skills from those ecosystems work here.
+
+**Built-in document skills** (`skills/`): `pptx`, `docx`, `pdf`, `xlsx`. Ask for a file ("make a 6 slide presentation on solar energy", "create an excel budget for October and save it on my desktop") and the CLI agent runs the matching skill: the local model writes only a JSON outline that the skill's schema checks, and a tested Python script builds the file. Invalid JSON is retried once with the errors, then handed to a stronger model. Files go to the folder you name, your Desktop/Downloads/Documents if mentioned, or `JARVIS_OUTPUT_DIR` (default `~/Documents/Jarvis`).
+
+**Other skills** give instructions instead of code. When a request matches one, the CLI agent's coding CLI is pointed at its `SKILL.md`; say "use the <name> skill" to force one.
+
+```
+python -m agents.skills list
+python -m agents.skills import openjarvis                 # skills from your OpenJarvis install
+python -m agents.skills import hermes:arxiv               # NousResearch/hermes-agent
+python -m agents.skills import openclaw:<owner>/<name>    # openclaw/skills
+python -m agents.skills import github:owner/repo/path --name some-skill
+python -m agents.skills import C:\path\to\skill-folder
+python -m agents.skills show arxiv
+python -m agents.skills remove arxiv
+```
+
+Imports go to `JARVIS_SKILLS_DIR/imported` (default `~/.jarvis/skills/imported`). As in OpenJarvis, a skill's scripts are not copied until you review them and re-import with `--with-scripts`, symlinks are rejected, and skills declaring `shell:execute`, `network:listen`, or `filesystem:write` need `--yes-dangerous`. Folders you create directly in `JARVIS_SKILLS_DIR` are treated as your own and can run their scripts; when names collide, your skills win over built-in ones, which win over imported ones.
+
 ## CLI agent and coding delegation
 
 The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.

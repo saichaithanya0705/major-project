@@ -36,6 +36,8 @@ These directories define the product itself:
 - `agents/cua_vision/`
 - `agents/browser/agent.py`
 - `agents/cua_cli/agent.py`
+- `agents/skills/`
+- `skills/`
 - `integrations/`
 - `ui/`
 - `tests/`
@@ -237,6 +239,22 @@ Main files:
 Key detail:
 
 Each backend builds a subprocess invocation (prompt on stdin, shared deny rules) and normalizes its CLI's JSONL events into one event schema, so status bubbles, terminal transcripts, and background-server promotion work the same for every backend. `backend_chain_for_task` picks the chain; a backend is skipped only when it is missing or unauthenticated before running any tool.
+
+
+#### Skills
+
+Directories: `agents/skills/` (runtime) and `skills/` (bundled skills)
+
+Purpose:
+
+- load `SKILL.md` skills (agentskills.io format) from the repo and `JARVIS_SKILLS_DIR`
+- run structured skills: the brain writes a JSON spec validated against the skill's schema, the skill's script builds the file (`pptx`, `docx`, `pdf`, `xlsx`)
+- offer instruction-only skills to the coding CLI through the CLI agent prompt
+- import skills from folders, GitHub, Hermes, OpenClaw, and OpenJarvis (`python -m agents.skills`)
+
+Key detail:
+
+The CLI agent checks `SkillRegistry.structured_skill_for(task)` before running a backend. Imported skills carry a `.jarvis-source.json` provenance file, and their scripts only run if they were imported with `--with-scripts`.
 
 
 ## UI Architecture
