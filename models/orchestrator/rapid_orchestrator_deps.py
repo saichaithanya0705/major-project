@@ -54,6 +54,7 @@ def build_rapid_orchestrator_deps(
     rapid_session_state: RapidSessionState = RAPID_SESSION_STATE,
     max_router_chain_steps: int = 6,
     repeated_step_limit: int = 3,
+    memory_block: str = "",
 ) -> RapidOrchestratorDeps:
     def append_session_history(role: str, text: str, source: str) -> None:
         rapid_session_state.append_history(
@@ -65,7 +66,7 @@ def build_rapid_orchestrator_deps(
         )
 
     def format_session_history_for_prompt() -> str:
-        return rapid_session_state.format_history_for_prompt(session_id=rapid_session_id)
+        return rapid_session_state.format_history_for_prompt(session_id=rapid_session_id) + memory_block
 
     def enrich_session_routing_result(
         routing_result: RapidRouteResult,

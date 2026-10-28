@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from agents.direct_chat.mcp_client import TavilyMcpClient, TavilyMcpConfigurationError
+from models.brain import generate_brain_reply, wants_strong_model
 from models.model_status import set_model_label
 from models.routing_question_policy import (
     is_source_grounded_qa_request as _should_use_web_search,
@@ -197,57 +197,6 @@ def _source_lines(sources: SourceList) -> list[str]:
     return source_lines
 
 
-async def _generate_text(
-    model: Any,
-    *,
-    model_name: str,
-    prompt: str,
-    timeout_seconds: float,
-) -> str:
-    response = await asyncio.wait_for(
-        model.client.aio.models.generate_content(
-            model=model_name,
-            contents=[prompt],
-            config=model.direct_answer_config,
-        ),
-        timeout=timeout_seconds,
-    )
-    text = _format_direct_response_text(getattr(response, "text", ""), "", max_len=None)
-    if not text:
-        raise RuntimeError("Direct chat agent model returned empty text.")
-    return text
-
-
-async def _try_backup_text(
-    model: Any,
-    *,
-    label: str,
-    prompt: str,
-    primary_model: str,
-    timeout_seconds: float,
-) -> str | None:
-    if not (
-        model.gemini_backup_model
-        and model.gemini_backup_model != primary_model
-    ):
-        return None
-
-    try:
-        print(
-            f"[{label}] Primary model unavailable; retrying with backup "
-            f"{model.gemini_backup_model}"
-        )
-        return await _generate_text(
-            model,
-            model_name=model.gemini_backup_model,
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
-        )
-    except Exception as backup_exc:
-        print(f"[{label}] Gemini backup failed: {backup_exc}")
-        return None
-
-
 class DirectChatAgent:
     def __init__(
         self,
@@ -294,42 +243,17 @@ class DirectChatAgent:
 
         prompt = self._build_model_prompt(user_prompt=user_prompt, sources=sources)
         context = "direct_chat:web_search" if sources else "direct_chat"
-        label = "DirectChatWeb" if sources else "DirectChat"
-
-        try:
-            await set_model_label(
-                f"{self.model.jarvis_model} (Direct Agent)",
-                context=context,
-            )
-            return await _generate_text(
-                self.model,
-                model_name=self.model.jarvis_model,
-                prompt=prompt,
-                timeout_seconds=45,
-            )
-        except Exception as exc:
-            if self.model._is_gemini_temporary_error(exc):
-                backup_text = await _try_backup_text(
-                    self.model,
-                    label=label,
-                    prompt=prompt,
-                    primary_model=self.model.jarvis_model,
-                    timeout_seconds=45,
-                )
-                if backup_text:
-                    return backup_text
-
-            fallback_text = await self.model._try_openrouter_text_fallback(
-                label=label,
-                system_prompt=self._openrouter_system_prompt(sources=sources),
-                user_prompt=prompt if sources else user_prompt,
-                temperature=0.2 if sources else 0.4,
-                max_tokens=1400,
-                purpose="text",
-            )
-            if fallback_text:
-                return _format_direct_response_text(fallback_text, "", max_len=None)
-            raise
+        reply = await generate_brain_reply(
+            self.model,
+            system=self._answer_system_prompt(sources=sources),
+            user=prompt,
+            temperature=0.2 if sources else 0.4,
+            max_tokens=1400 if sources else 1800,
+            force_escalation=wants_strong_model(user_prompt),
+            allow_self_escalation=not bool(sources),
+        )
+        await set_model_label(f"{reply.label} (Direct Agent)", context=context)
+        return _format_direct_response_text(reply.text, "", max_len=None)
 
     def _build_model_prompt(self, *, user_prompt: str, sources: SourceList) -> str:
         if sources:
@@ -355,7 +279,7 @@ class DirectChatAgent:
         )
 
     @staticmethod
-    def _openrouter_system_prompt(*, sources: SourceList) -> str:
+    def _answer_system_prompt(*, sources: SourceList) -> str:
         if sources:
             return (
                 "You are JARVIS in direct chat agent mode. Answer using only the "

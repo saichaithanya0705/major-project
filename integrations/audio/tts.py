@@ -1,7 +1,10 @@
 """
-Text-to-Speech Integration - ElevenLabs API.
+Text-to-Speech Integration - ElevenLabs API, a local Piper voice, or the OS voice.
 
 Provides text-to-speech capabilities for verbal feedback to users.
+JARVIS_TTS_PROVIDER picks the engine: "auto" (ElevenLabs when
+ELEVENLABS_API_KEY is set, else Piper when JARVIS_PIPER_VOICE is set, else the
+OS voice), "elevenlabs", "piper", "system", or "off".
 """
 import os
 import requests
@@ -17,6 +20,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from core.settings import get_tts_active_bool
+from integrations.audio.local_voice import piper_voice_path, synthesize_with_piper, system_speech_command
 
 logging.basicConfig(level=logging.ERROR)
 
@@ -178,6 +182,65 @@ def _preprocess_text(text: str) -> str:
     return text
 
 
+def tts_provider() -> str:
+    configured = str(os.getenv("JARVIS_TTS_PROVIDER") or "auto").strip().lower()
+    if configured == "auto":
+        if ELEVENLABS_API_KEY:
+            return "elevenlabs"
+        return "piper" if piper_voice_path() is not None else "system"
+    if configured not in {"elevenlabs", "piper", "system", "off"}:
+        print(f"[TTS] Unknown JARVIS_TTS_PROVIDER {configured!r}; using the system voice")
+        return "system"
+    return configured
+
+
+def _speak_with_piper(text: str) -> None:
+    try:
+        audio_path = synthesize_with_piper(text, _resolve_audio_output_path().with_suffix(".wav"))
+    except Exception as exc:  # noqa: BLE001 - fall back to the OS voice rather than stay silent.
+        print(f"[TTS] Piper failed ({exc}); using the system voice")
+        _speak_with_system_voice(text)
+        return
+    if _play_audio(audio_path):
+        try:
+            audio_path.unlink()
+        except OSError:
+            pass
+
+
+def _speak_with_system_voice(text: str) -> None:
+    global _audio_process
+    command = system_speech_command()
+    if command is None:
+        print("[TTS] No system speech engine found (install espeak-ng on Linux)")
+        return
+    argv, text_channel = command
+    env = os.environ.copy()
+    if text_channel == "env":
+        env["JARVIS_TTS_TEXT"] = text
+    popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "env": env}
+    if text_channel == "stdin":
+        popen_kwargs["stdin"] = subprocess.PIPE
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        process = subprocess.Popen(argv, **popen_kwargs)
+    except OSError as exc:
+        print(f"[TTS] System voice failed: {exc}")
+        return
+    with _audio_process_lock:
+        _audio_process = process
+    try:
+        if text_channel == "stdin":
+            process.communicate(input=text.encode("utf-8"))
+        else:
+            process.wait()
+    finally:
+        with _audio_process_lock:
+            if _audio_process is process:
+                _audio_process = None
+
+
 def tts_speak(text: str):
     """Verbally speak to the user using text-to-speech.
 
@@ -190,7 +253,15 @@ def tts_speak(text: str):
     text = _preprocess_text(text)
     print(f'[TTS] Speaking: {text}')
 
-    # If ElevenLabs is not configured, just print
+    provider = tts_provider()
+    if provider == "off":
+        return
+    if provider == "piper":
+        _speak_with_piper(text)
+        return
+    if provider == "system":
+        _speak_with_system_voice(text)
+        return
     if not ELEVENLABS_API_KEY:
         print("[TTS] ElevenLabs not configured - skipping audio")
         return

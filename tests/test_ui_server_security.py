@@ -197,7 +197,8 @@ async def test_capture_screenshot_does_not_block_following_overlay_input() -> No
 
     try:
         await asyncio.wait_for(server._handle_client(websocket), timeout=0.25)
-        assert capture_started.wait(timeout=0.25)
+        # Wait off the event loop so the background capture task can be scheduled.
+        assert await asyncio.to_thread(capture_started.wait, 0.25)
         assert observed == [("Tell me everything about elon musk.", "chat-1")], observed
     finally:
         release_capture.set()

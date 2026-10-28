@@ -1,0 +1,83 @@
+# Jarvis task scorecard. Replace these with the 5-10 tasks you really do each week.
+#
+# Fields:
+#   id        short unique name
+#   prompt    exactly what you would type or say to Jarvis
+#   agent     agent(s) the router should pick: direct, web_qa, browser, cua_cli, cua_vision, jarvis, screen_context
+#   run       false = only check routing (the task would touch real accounts or your screen)
+#   expect    checks for `--mode run`:
+#     success          true/false
+#     output_extension the task must create a file with this extension (.pptx, .docx, .pdf, .xlsx, ...)
+#     reply_contains   every listed string must appear in the reply (case-insensitive)
+#     max_seconds      fail if slower than this
+
+tasks:
+  - id: chat-fact
+    prompt: What is the boiling point of water at sea level in Celsius?
+    agent: direct
+    expect: {reply_contains: ["100"], max_seconds: 60}
+
+  - id: chat-explain
+    prompt: Explain recursion to a first-year student in three sentences.
+    agent: direct
+    expect: {reply_contains: ["recurs"], max_seconds: 90}
+
+  - id: web-current
+    prompt: What is the latest stable Python version? Give me sources.
+    agent: web_qa
+    run: false
+
+  - id: pptx-deck
+    prompt: Make a 6 slide presentation on renewable energy for a college seminar.
+    agent: cua_cli
+    expect: {success: true, output_extension: .pptx, max_seconds: 240}
+
+  - id: docx-report
+    prompt: Create a Word document with a one page project report on a smart attendance system using face recognition.
+    agent: cua_cli
+    expect: {success: true, output_extension: .docx, max_seconds: 240}
+
+  - id: pdf-notes
+    prompt: Prepare a PDF of short revision notes on the OSI model layers.
+    agent: cua_cli
+    expect: {success: true, output_extension: .pdf, max_seconds: 240}
+
+  - id: xlsx-budget
+    prompt: Make an excel budget for a 3 day college trip with categories travel, food, stay and a total.
+    agent: cua_cli
+    expect: {success: true, output_extension: .xlsx, max_seconds: 240}
+
+  - id: shell-folder
+    prompt: Create a folder named jarvis-scorecard-test in my Documents folder.
+    agent: cua_cli
+    expect: {success: true, max_seconds: 120}
+
+  - id: code-fix
+    prompt: In my project folder, fix the failing unit test in tests/test_utils.py.
+    agent: cua_cli
+    run: false
+
+  - id: browser-read
+    prompt: Open the Wikipedia page for Ada Lovelace and tell me the year she was born.
+    agent: browser
+    expect: {success: true, reply_contains: ["1815"], max_seconds: 300}
+
+  - id: browser-form
+    prompt: Go to the college admissions website and fill the enquiry form with my name and email.
+    agent: browser
+    run: false
+
+  - id: desktop-click
+    prompt: Click the blue Save button in the app that is open.
+    agent: cua_vision
+    run: false
+
+  - id: screen-explain
+    prompt: What do you see on my screen right now?
+    agent: jarvis
+    run: false
+
+  - id: memory-remember
+    prompt: remember that my favourite editor is VS Code
+    agent: memory
+    expect: {reply_contains: ["VS Code"]}

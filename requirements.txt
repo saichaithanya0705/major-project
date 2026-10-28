@@ -17,3 +17,19 @@ psutil==7.2.2
 
 # TTS Integration (ElevenLabs)
 requests==2.32.5
+
+# Skills (SKILL.md parsing, spec validation) and bundled document skills
+PyYAML==6.0.3
+jsonschema==4.26.0
+python-pptx==1.0.2
+python-docx==1.2.0
+reportlab==4.4.9
+openpyxl==3.1.5
+
+# Offline voice: local speech-to-text (Whisper) and Piper text-to-speech
+faster-whisper==1.2.1
+piper-tts==1.8.0
+# huggingface-hub>=1.0 requires click>=8.4.2, which conflicts with browser-use's click==8.3.1 pin.
+huggingface-hub==0.36.0
+# Sign in with ChatGPT: ID token signature validation
+PyJWT[crypto]==2.15.1

@@ -36,6 +36,8 @@ These directories define the product itself:
 - `agents/cua_vision/`
 - `agents/browser/agent.py`
 - `agents/cua_cli/agent.py`
+- `agents/skills/`
+- `skills/`
 - `integrations/`
 - `ui/`
 - `tests/`
@@ -46,10 +48,10 @@ These directories define the product itself:
 
 These are embedded subsystems that the first-party code wraps:
 
-- `agents/browser/browser_use/`
-  - bundled browser automation runtime
-- `agents/cua_cli/gemini-cli/`
-  - bundled Gemini CLI source/build tree used by the CLI agent
+- `browser_use` (pip dependency pinned in `requirements.txt`)
+  - browser automation runtime; `agents/browser/browser_use_boundary.py` refuses any in-repo copy
+- `integrations/opencode/`
+  - pinned `opencode-ai` npm install used as the local CLI agent backend
 - `ui/node_modules/`
   - normal frontend dependency tree
 
@@ -68,9 +70,8 @@ project/
 |  |- jarvis/
 |  |- cua_vision/
 |  |- browser/
-|  |  `- browser_use/           # vendored
 |  `- cua_cli/
-|     `- gemini-cli/            # vendored
+|     `- backends/              # opencode, Claude Code, Codex CLI, Copilot CLI
 |- integrations/
 |- ui/
 |- tests/
@@ -217,7 +218,7 @@ Main file:
 
 Key detail:
 
-The browser agent is first-party wrapper logic around the vendored `browser_use` subsystem.
+The browser agent is first-party wrapper logic around the pinned `browser_use` package. `agents/browser/action_guard.py` wraps browser-use's `Tools.act` so risky actions (submit/pay/delete clicks, password and payment fields, uploads, page JavaScript) wait for the user's approval through `core/confirmations.py`, which shows the question in chat and takes the user's next message as the answer.
 
 #### CLI agent
 
@@ -226,16 +227,34 @@ Directory: `agents/cua_cli/`
 Purpose:
 
 - perform shell-based desktop and code tasks
-- run commands through the bundled Gemini CLI
+- run shell tasks on opencode with a local model
+- delegate coding tasks to Claude Code, Codex CLI, or GitHub Copilot CLI
 - manage long-running/background process promotion
 
-Main file:
+Main files:
 
 - `agents/cua_cli/agent.py`
+- `agents/cua_cli/backends/`
 
 Key detail:
 
-The first-party wrapper adds environment setup, trusted-folder config, workspace inclusion, subprocess handling, and background lifecycle management around the vendored CLI.
+Each backend builds a subprocess invocation (prompt on stdin, shared deny rules) and normalizes its CLI's JSONL events into one event schema, so status bubbles, terminal transcripts, and background-server promotion work the same for every backend. `backend_chain_for_task` picks the chain; a backend is skipped only when it is missing or unauthenticated before running any tool.
+
+
+#### Skills
+
+Directories: `agents/skills/` (runtime) and `skills/` (bundled skills)
+
+Purpose:
+
+- load `SKILL.md` skills (agentskills.io format) from the repo and `JARVIS_SKILLS_DIR`
+- run structured skills: the brain writes a JSON spec validated against the skill's schema, the skill's script builds the file (`pptx`, `docx`, `pdf`, `xlsx`)
+- offer instruction-only skills to the coding CLI through the CLI agent prompt
+- import skills from folders, GitHub, Hermes, OpenClaw, and OpenJarvis (`python -m agents.skills`)
+
+Key detail:
+
+The CLI agent checks `SkillRegistry.structured_skill_for(task)` before running a backend. Imported skills carry a `.jarvis-source.json` provenance file, and their scripts only run if they were imported with `--with-scripts`.
 
 
 ## UI Architecture
@@ -453,11 +472,11 @@ Best place to work when changing:
 
 Best place to work when changing:
 
-- CLI environment setup
-- approval and sandbox policy wiring
+- backend selection and delegation policy
+- per-backend permission and sandbox flags
 - subprocess lifecycle
 - background server handling
-- Gemini CLI integration
+- event normalization for each coding CLI
 
 ### `ui/`
 
@@ -521,7 +540,7 @@ The main moving pieces are:
 2. install Python dependencies from `requirements.txt`
 3. install Playwright Chromium
 4. install `ui/` npm dependencies
-5. install and build `agents/cua_cli/gemini-cli`
+5. install the pinned opencode CLI in `integrations/opencode`
 6. provide required API keys
 7. run the Electron UI
 8. run `app.py`
@@ -635,11 +654,11 @@ When making changes, this is the fastest mental map:
 
 - change browser automation:
   - `agents/browser/agent.py`
-  - only descend into `agents/browser/browser_use/` if the wrapper cannot solve the issue
+  - `agents/browser/browser_use_boundary.py` for the boundary to the pinned `browser_use` package
 
 - change CLI automation:
   - `agents/cua_cli/agent.py`
-  - only descend into `agents/cua_cli/gemini-cli/` if the wrapper cannot solve the issue
+  - `agents/cua_cli/backends/` for a specific coding CLI
 
 - change desktop shell/input/chat behavior:
   - `ui/main.js`

@@ -43,6 +43,9 @@ _ENV_KEYS = [
     "OPENROUTER_ROUTER_MAX_TOKENS",
     "OLLAMA_ROUTER_THINK",
     "GEMINI_BACKUP_MODEL",
+    "JARVIS_BRAIN_PRIMARY",
+    "JARVIS_BRAIN_ESCALATION",
+    "JARVIS_BRAIN_MODEL",
 ]
 
 
@@ -91,9 +94,22 @@ def run_checks() -> None:
         _clear_env()
         os.environ["NVIDIA_API_KEY"] = "nvidia-key"
         os.environ["OPENROUTER_API_KEY"] = "openrouter-key"
-        cfg = _build("qwen3.5:4b-q4_K_M")
-        assert cfg.router_provider == "nvidia"
+        cfg = _build("nemotron-3.5-bolt")
+        # Local-first: cloud keys are fallbacks, not the default router.
+        assert cfg.router_provider == "ollama"
         assert cfg.nvidia_router_model == "nvidia-router-default"
+        assert cfg.ollama_router_num_ctx == 8192
+        assert cfg.brain_primary == "local"
+        assert cfg.brain_model == "nemotron-3.5-bolt"
+        assert cfg.brain_escalation == ("chatgpt", "gemini", "openrouter", "claude", "codex", "copilot")
+
+        _clear_env()
+        os.environ["ROUTER_PROVIDER"] = "nvidia"
+        os.environ["JARVIS_BRAIN_PRIMARY"] = "gemini"
+        os.environ["JARVIS_BRAIN_ESCALATION"] = "codex, gemini, local"
+        cfg = _build("nemotron-3.5-bolt")
+        assert cfg.router_provider == "nvidia"
+        assert cfg.brain_escalation == ("codex", "local")
 
         _clear_env()
         os.environ["ROUTER_PROVIDER"] = "invalid-provider"
@@ -104,19 +120,23 @@ def run_checks() -> None:
         os.environ["ROUTER_PROVIDER"] = "invalid-provider"
         os.environ["OPENROUTER_API_KEY"] = "test-key"
         cfg = _build("qwen3.5:4b-q4_K_M")
-        assert cfg.router_provider == "openrouter"
+        assert cfg.router_provider == "ollama"
 
         _clear_env()
         os.environ["ROUTER_PROVIDER"] = "invalid-provider"
         os.environ["NVIDIA_API_KEY"] = "test-key"
         os.environ["OPENROUTER_API_KEY"] = "test-key"
         cfg = _build("qwen3.5:4b-q4_K_M")
-        assert cfg.router_provider == "nvidia"
+        assert cfg.router_provider == "ollama"
 
         _clear_env()
         os.environ["OLLAMA_ROUTER_MODEL"] = "gemini-3-flash-preview"
         cfg = _build("qwen3.5:4b-q4_K_M")
-        assert cfg.ollama_router_model == "qwen3.5:4b-q4_K_M"
+        assert cfg.ollama_router_model == "nemotron-3.5-bolt"
+
+        _clear_env()
+        cfg = _build("gemini-3-flash-preview")
+        assert cfg.ollama_router_model == "nemotron-3.5-bolt"
 
         _clear_env()
         os.environ["OLLAMA_ROUTER_THINK"] = "yes"

@@ -113,17 +113,20 @@ finally {
     Pop-Location
 }
 
-Push-Location (Join-Path $root "agents\cua_cli\gemini-cli")
+Push-Location (Join-Path $root "integrations\opencode")
 try {
-    Invoke-Step "Installing Gemini CLI dependencies..." {
-        npm install
-    }
-    Invoke-Step "Building Gemini CLI..." {
-        npm run build
+    Invoke-Step "Installing pinned opencode CLI (local CLI agent)..." {
+        npm ci
     }
 }
 finally {
     Pop-Location
+}
+
+foreach ($cli in @("claude", "codex", "copilot")) {
+    if (Get-Command $cli -ErrorAction SilentlyContinue) {
+        Write-Host "[setup] Found $cli on PATH; coding tasks can be delegated to it."
+    }
 }
 
 Write-Host "[setup] Done."

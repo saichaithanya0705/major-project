@@ -15,3 +15,17 @@ demo/
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# Local machine artifacts (never commit)
+battery-report.html
+*.sqlite3
+.blob_seq_ids_migrated
+
+# Generated Graphify cache
+graphify-out/cache/
+
+# Scorecard run results (local to each machine)
+evals/results/
+
+# Retired vendored CLI: preserve local sessions and installed dependencies.
+agents/cua_cli/gemini-cli/

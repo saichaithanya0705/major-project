@@ -86,9 +86,14 @@ run_in_dir "$ROOT_DIR/ui" npm install
 echo "[setup] Installing Playwright MCP dependencies..."
 run_in_dir "$ROOT_DIR/integrations/playwright_mcp" npm install
 
-echo "[setup] Installing Gemini CLI dependencies and building..."
-run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm install
-run_in_dir "$ROOT_DIR/agents/cua_cli/gemini-cli" npm run build
+echo "[setup] Installing pinned opencode CLI (local CLI agent)..."
+run_in_dir "$ROOT_DIR/integrations/opencode" npm ci
+
+for cli in claude codex copilot; do
+  if command -v "$cli" >/dev/null 2>&1; then
+    echo "[setup] Found $cli on PATH; coding tasks can be delegated to it."
+  fi
+done
 
 echo "[setup] Done."
 echo "[setup] Activate with: source .venv/bin/activate"

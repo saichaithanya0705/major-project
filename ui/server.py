@@ -506,6 +506,17 @@ class VisualizationServer:
                         continue
                     payload["source"] = payload.get("source") or "rapid_response"
                     await self._broadcast(payload)
+                elif command == "confirmation_request":
+                    try:
+                        payload["text"] = self._safe_text(
+                            payload.get("text", ""),
+                            max_chars=self.MAX_DRAW_TEXT_CHARS,
+                            field_name="confirmation_request text",
+                        )
+                    except ValueError as exc:
+                        await self._send_error(websocket, event="overlay_error", error=str(exc))
+                        continue
+                    await self._broadcast(payload)
                 elif command == "remove_box":
                     self.boxes.pop(payload.get("id"), None)
                     await self._broadcast(payload)

@@ -35,7 +35,7 @@ Windows:
 .\.venv\Scripts\python -m playwright install chromium
 cd ui; npm install
 cd ../integrations/playwright_mcp; npm install
-cd ../../agents/cua_cli/gemini-cli; npm install; npm run build
+cd ../opencode; npm ci
 ```
 
 macOS / Linux:
@@ -45,13 +45,14 @@ macOS / Linux:
 .venv/bin/python -m playwright install chromium
 cd ui && npm install
 cd ../integrations/playwright_mcp && npm install
-cd ../../agents/cua_cli/gemini-cli && npm install && npm run build
+cd ../opencode && npm ci
 ```
 
 The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.73). Runtime browser tasks should use that local install instead of downloading MCP dynamically with `npx` or `latest`.
 
-3. Create your .env file for your keys
+3. Create your .env file for your keys. Every key is optional: with none set, Jarvis routes and answers chat on the local model, and only screen/vision features need a cloud key.
 ```
+# Optional: screen explanations (JARVIS overlay) and a strong-model escalation target.
 GEMINI_API_KEY = "YOUR_API_KEY"
 
 # CUA vision uses NVIDIA first, then OpenRouter. Gemini is not used for CUA vision.
@@ -60,8 +61,9 @@ NVIDIA_API_KEY = "YOUR_NVIDIA_API_KEY"
 # NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # NVIDIA_VISION_MODEL = "mistralai/mistral-small-4-119b-2603"
 
-# Router prefers OpenRouter when configured, and falls back to Ollama if needed.
-ROUTER_PROVIDER = "openrouter"
+# The router runs on local Ollama by default and falls back to NVIDIA, then
+# OpenRouter, when those keys are set. Set ROUTER_PROVIDER to make a cloud router primary.
+# ROUTER_PROVIDER = "ollama"
 OPENROUTER_API_KEY = "YOUR_OPENROUTER_API_KEY"
 OPENROUTER_ROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
@@ -71,12 +73,12 @@ OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 # OPENROUTER_SITE_NAME = "JARVIS"
 # OPENROUTER_TIMEOUT_SECONDS = "45"
 
-# Optional local router alternative. Use only by setting ROUTER_PROVIDER = "ollama".
-# OLLAMA_ROUTER_MODEL = "qwen3.5:4b-q4_K_M"
+# Local model (router + brain). Defaults shown.
+# OLLAMA_ROUTER_MODEL = "nemotron-3.5-bolt"
 # OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 # OLLAMA_ROUTER_TIMEOUT_SECONDS = "90"
 # OLLAMA_KEEP_ALIVE = "10m"
-# OLLAMA_ROUTER_NUM_CTX = "2048"
+# OLLAMA_ROUTER_NUM_CTX = "8192"
 # OLLAMA_ROUTER_NUM_PREDICT = "240"
 # OLLAMA_ROUTER_THINK = "false"
 
@@ -91,16 +93,149 @@ ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"     # Optional
 # ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>"
 ```
 
+## Local brain and escalation
+
+Chat answers (direct Q&A and web Q&A) come from the local model first: NVIDIA Nemotron 3.5 Bolt E4B 4GB through Ollama, the same model that routes requests. One model plays both roles because two models do not fit in 4 GB of VRAM. Jarvis escalates to a stronger model when:
+
+- the local model errors, times out, or returns nothing,
+- the local model decides it cannot answer reliably and replies `ESCALATE` (direct Q&A only),
+- you ask for it: "think harder", "use the stronger model", "ask codex", "ask claude", "ask ChatGPT".
+
+Escalation targets are tried in order and skipped when not configured: your ChatGPT plan (see below), Gemini (`GEMINI_API_KEY`), OpenRouter (`OPENROUTER_API_KEY`), then your signed-in Claude Code, Codex CLI, and Copilot CLI in answer-only mode (no shell, file-writing, or MCP tools). Jarvis never reads the CLIs' credentials. The chat shows which model answered.
+
+```
+# .env (all optional)
+# JARVIS_BRAIN_PRIMARY = "local"        # or chatgpt/gemini/openrouter/claude/codex/copilot
+# JARVIS_BRAIN_ESCALATION = "chatgpt,gemini,openrouter,claude,codex,copilot"
+# JARVIS_BRAIN_MODEL = "nemotron-3.5-bolt"   # defaults to the router model
+# JARVIS_BRAIN_NUM_CTX = "8192"
+# JARVIS_BRAIN_TIMEOUT_SECONDS = "120"
+# JARVIS_BRAIN_CLI_TIMEOUT_SECONDS = "180"
+# JARVIS_BRAIN_SELF_ESCALATE = "true"
+```
+
+On a 4 GB GPU the Q4 model (about 6–8 GB on disk) runs partly on the CPU, so first replies can take several seconds. Screen explanations and the vision agent need an image-capable model and still use Gemini or NVIDIA/OpenRouter vision.
+
+### ChatGPT plan (Plus/Pro)
+
+Jarvis can use the models in your ChatGPT subscription through OpenAI's official [Sign in with ChatGPT for open-source apps](https://developers.openai.com/siwc/token-sharing-open-source). Usage counts against your plan, not an API bill.
+
+```
+python -m integrations.chatgpt login     # opens your browser; approve "Jarvis"
+python -m integrations.chatgpt models    # models your plan offers
+python -m integrations.chatgpt status
+python -m integrations.chatgpt logout    # revokes the session and deletes local tokens
+```
+
+- Sign-in uses Jarvis's own OAuth client (PKCE, a callback on `http://127.0.0.1:1455/auth/callback`); Jarvis never copies tokens from Codex CLI or any other app.
+- Tokens are stored in `~/.jarvis/chatgpt/credentials.json`, readable only by you, and renew automatically. Sign in again if Jarvis says the session ended (for example after a long time unused, a password change, or revocation).
+- Pick a model with `JARVIS_CHATGPT_MODEL` (a slug from `models`); otherwise the first model your account lists is used.
+- If you reach your plan's usage limit, Jarvis stops using ChatGPT for 30 minutes (`JARVIS_CHATGPT_LIMIT_PAUSE_SECONDS`) and falls back to the next provider. Check [ChatGPT settings → Usage](https://chatgpt.com/settings/usage). Signing in again lifts the pause.
+- OpenAI marks plan usage for open-source apps as a preview; availability can depend on your plan, workspace, and region. If your account is not eligible, Jarvis says so and does not retry.
+
+## Skills
+
+Skills use the open [agentskills.io](https://agentskills.io) `SKILL.md` format, the same one used by OpenJarvis, Hermes Agent, OpenClaw, Claude Code, and opencode, so skills from those ecosystems work here.
+
+**Built-in document skills** (`skills/`): `pptx`, `docx`, `pdf`, `xlsx`. Ask for a file ("make a 6 slide presentation on solar energy", "create an excel budget for October and save it on my desktop") and the CLI agent runs the matching skill: the local model writes only a JSON outline that the skill's schema checks, and a tested Python script builds the file. Invalid JSON is retried once with the errors, then handed to a stronger model. Files go to the folder you name, your Desktop/Downloads/Documents if mentioned, or `JARVIS_OUTPUT_DIR` (default `~/Documents/Jarvis`).
+
+**Other skills** give instructions instead of code. When a request matches one, the CLI agent's coding CLI is pointed at its `SKILL.md`; say "use the <name> skill" to force one.
+
+```
+python -m agents.skills list
+python -m agents.skills import openjarvis                 # skills from your OpenJarvis install
+python -m agents.skills import hermes:arxiv               # NousResearch/hermes-agent
+python -m agents.skills import openclaw:<owner>/<name>    # openclaw/skills
+python -m agents.skills import github:owner/repo/path --name some-skill
+python -m agents.skills import C:\path\to\skill-folder
+python -m agents.skills show arxiv
+python -m agents.skills remove arxiv
+```
+
+Imports go to `JARVIS_SKILLS_DIR/imported` (default `~/.jarvis/skills/imported`). As in OpenJarvis, a skill's scripts are not copied until you review them and re-import with `--with-scripts`, symlinks are rejected, and skills declaring `shell:execute`, `network:listen`, or `filesystem:write` need `--yes-dangerous`. Folders you create directly in `JARVIS_SKILLS_DIR` are treated as your own and can run their scripts; when names collide, your skills win over built-in ones, which win over imported ones.
+
+## Forms and confirmations
+
+The browser agent fills forms on its own but stops to ask before anything you cannot take back. The question appears in the chat; reply **yes** (typed or spoken) to allow it. Any other reply, or no reply within 2 minutes, cancels the action and the agent stops and reports what is left for you.
+
+It asks before:
+- clicking a button that submits, pays, places an order, sends, posts, deletes, books, subscribes, or signs up (or any submit button),
+- typing into a password, card, CVV, OTP, PIN, UPI, Aadhaar/PAN, or bank-account field,
+- uploading a file, running custom JavaScript on a page, or pressing Enter after typing into a form (not a search box).
+
+`JARVIS_CONFIRM_RISKY_ACTIONS=off` turns the questions off.
+
+The browser agent's model is chosen from `JARVIS_BROWSER_LLM_ORDER` (default `gemini,openrouter,ollama`), skipping any without a key, so it works with only a local Ollama model (`JARVIS_BROWSER_OLLAMA_MODEL`, default the router model). A 4B local model is noticeably weaker at multi-step browsing than Gemini.
+
+## Memory
+
+Jarvis remembers only what you tell it to, in a local SQLite file (`JARVIS_MEMORY_PATH`, default `~/.jarvis/memory.sqlite3`):
+
+- "remember that my college is JNTU Hyderabad" / "note that I prefer dark mode"
+- "what do you remember?" / "show my memories"
+- "forget my college" / "forget everything you remember"
+
+These commands are answered instantly without a model. For every other request, the few memories that match it are added to the router and answer prompts. Those prompts can reach a cloud model when Jarvis escalates, so don't store anything you would not send there.
+
+## Offline voice
+
+Voice works without any API key:
+
+| | Default without keys | With `ELEVENLABS_API_KEY` | Setting |
+| --- | --- | --- | --- |
+| Speech-to-text | faster-whisper on the CPU (`JARVIS_WHISPER_MODEL=base`, downloads once) | ElevenLabs | `JARVIS_STT_PROVIDER = auto/whisper/elevenlabs` |
+| Text-to-speech | Piper if `JARVIS_PIPER_VOICE` points to a voice `.onnx`, else the Windows/macOS/espeak voice | ElevenLabs | `JARVIS_TTS_PROVIDER = auto/piper/system/elevenlabs/off` |
+
+Whisper stays on the CPU (`JARVIS_WHISPER_DEVICE=cpu`, `int8`) so it does not take VRAM from the Ollama model; use `base.en` or `small` for better accuracy at more CPU time, and `JARVIS_WHISPER_LANGUAGE=en` to skip language detection. Piper voices: download a voice's `.onnx` and `.onnx.json` from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) (for example `en/en_US/amy/medium`) and set `JARVIS_PIPER_VOICE` to the `.onnx` path.
+
+## Measuring Jarvis (task scorecard)
+
+`evals/tasks.yaml` lists real tasks with what a good result looks like. Replace the starter tasks with the 5-10 things you actually do each week, then:
+
+```
+python -m evals.scorecard                         # does the local router pick the right agent? (3 trials each, changes nothing)
+python -m evals.scorecard --mode run              # also run each task and check the result
+python -m evals.scorecard --mode run --only pptx-deck,chat-fact --trials 1
+```
+
+`run` mode creates real files and opens a real browser; tasks marked `run: false` only get the routing check. Each run is saved under `evals/results/` and the report shows the change since the previous run, so you can see whether a new model, prompt, or skill actually helped.
+
+## CLI agent and coding delegation
+
+The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.
+
+| Backend | Install | Used for |
+| --- | --- | --- |
+| opencode (pinned, installed by setup) | `integrations/opencode` | shell/desktop tasks, last-resort coding |
+| Claude Code | `npm install -g @anthropic-ai/claude-code`, then `claude` to sign in | coding (1st choice) |
+| Codex CLI | `npm install -g @openai/codex`, then `codex login` (ChatGPT sign-in works) | coding (2nd choice) |
+| GitHub Copilot CLI | `npm install -g @github/copilot`, then `copilot` → `/login` | coding (3rd choice) |
+
+Jarvis tries coding backends in order and skips one only if it is not installed or not signed in; once a backend has run a tool it never re-runs the task elsewhere. Prompts are passed on stdin, never as command-line arguments.
+
+Every backend gets the same deny rules: `rm -rf`/`rm -r`, `Remove-Item`, `git push`, `git reset --hard`, `git clean`, `sudo`, `format`, `shutdown` and similar. Codex has no per-command rules, so it runs in its `workspace-write` sandbox with network access off. `JARVIS_CLI_FULL_TRUST=1` keeps only the machine-destroying rules and allows network for Codex.
+
+```
+# .env (all optional)
+JARVIS_OPENCODE_MODEL = "ollama/nemotron-3.5-bolt"   # provider/model for opencode
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+JARVIS_CODING_BACKENDS = "claude,codex,copilot,opencode"
+JARVIS_CODING_DELEGATION = "auto"   # "off" runs coding tasks on opencode too
+JARVIS_CODING_TIMEOUT_SECONDS = "900"
+JARVIS_CLI_TIMEOUT_SECONDS = "300"
+# JARVIS_CLAUDE_MODEL / JARVIS_CODEX_MODEL / JARVIS_COPILOT_MODEL pick models per CLI.
+# JARVIS_<NAME>_BIN points at a specific executable (OPENCODE, CLAUDE, CODEX, COPILOT).
+```
+
+Google's Antigravity CLI (`agy`) is not wired in: its print mode is reported to hang when it is run without a terminal ([antigravity-cli#318](https://github.com/google-antigravity/antigravity-cli/issues/318)), which is how Jarvis runs CLIs.
+
 ## Running Jarvis
 
-1. Ensure your router provider is available
+1. Start the local model
 ```
-# OpenRouter-first setup:
-# add a valid OPENROUTER_API_KEY to .env
-
-# Optional Ollama fallback:
 ollama serve
-ollama run qwen3.5:4b-q4_K_M "ready"
+ollama pull nemotron-3.5-bolt
+ollama run nemotron-3.5-bolt "ready"
 ```
 
 2. Start the backend and UI together from the project root
@@ -216,8 +351,9 @@ JARVIS/
 │   ├── browser/                # Web automation agent (Playwright)
 │   │   └── agent.py            # BrowserAgent class (stub)
 │   │
-│   ├── cua_cli/                # Desktop control via shell commands
-│   │   └── agent.py            # CLIAgent class (stub)
+│   ├── cua_cli/                # Shell control and coding via coding-agent CLIs
+│   │   ├── agent.py            # CLIAgent class
+│   │   └── backends/           # opencode, Claude Code, Codex CLI, Copilot CLI
 │   │
 │   └── cua_vision/             # Desktop control via screen + mouse/keyboard
 │       ├── agent.py            # VisionAgent class
@@ -427,7 +563,7 @@ Events (Electron → Python):
     "screen_height": 1080,
     "viewport_width": 1920,
     "viewport_height": 1080,
-    "rapid_response_model": "qwen3.5:4b-q4_K_M",
+    "rapid_response_model": "nemotron-3.5-bolt",
     "jarvis_model": "gemini-2.5-flash-preview-04-17"
 }
 ```

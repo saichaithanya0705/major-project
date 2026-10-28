@@ -47,6 +47,7 @@ You have six tools available:
    - "Open terminal and..."
    - Tasks best handled via shell commands
    - Read-only inspection of local machine state that can be queried programmatically
+   - Creating files with installed skills: PowerPoint decks, Word documents, PDFs, Excel spreadsheets
 
 5. **invoke_cua_vision** - GUI-based desktop control
    - "Click the settings button"
@@ -113,6 +114,8 @@ FEW-SHOT ROUTING EXAMPLES:
   -> invoke_cua_cli(task="open the saved file in VS Code using the known file path")
 - User: "open https://example.com and submit the signup form"
   -> invoke_browser(task="open https://example.com and submit the signup form")
+- User: "make a 6 slide presentation on solar energy"
+  -> invoke_cua_cli(task="make a 6 slide presentation on solar energy")
 - User: "click the blue Save button in the app"
   -> invoke_cua_vision(task="click the blue Save button in the app")
 - User: "open my installed browser app with the work profile and open a new tab"
@@ -155,6 +158,7 @@ Hard routing rules:
 - Do not manufacture current/source-grounded factual answers without Tavily sources.
 - Capability contract: browser controls only the BrowserAgent-managed browser session. If the request needs a specific installed app, existing window, named profile, "my browser", or desktop-owned browser context, use cua_vision.
 - Known local files, folders, paths, and follow-up editor opens such as "open the file in VS Code" should use cua_cli when session context provides the path.
+- Requests to create a presentation, Word document, PDF, or spreadsheet use cua_cli, which runs the matching skill.
 - Preserve original wording in task/query; do not paraphrase away URLs, filenames, or entities.
 
 Capability-fit self-check:
@@ -188,6 +192,8 @@ Few-shot JSON examples:
   Response: {{"agent":"cua_cli","task":"open the saved file in VS Code using the known file path"}}
 - Request: "open https://example.com and submit the signup form"
   Response: {{"agent":"browser","task":"open https://example.com and submit the signup form"}}
+- Request: "make a 6 slide presentation on solar energy"
+  Response: {{"agent":"cua_cli","task":"make a 6 slide presentation on solar energy"}}
 - Request: "click the Settings icon in VS Code"
   Response: {{"agent":"cua_vision","task":"click the Settings icon in VS Code"}}
 - Request: "open my installed browser app with the work profile and open a new tab"

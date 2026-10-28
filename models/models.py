@@ -1,9 +1,10 @@
 """
-JARVIS Model Integration - Local router + Gemini vision agent logic.
+JARVIS Model Integration - Local router/brain + Gemini vision agent logic.
 
 This module handles:
 - Screenshot capture and storage
 - Two-tier model routing (provider-aware router -> specialized agents)
+- Local-first chat answers with escalation (models.brain)
 - Gemini/OpenRouter model configuration for screen tasks
 """
 import asyncio
@@ -14,6 +15,8 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 from core.assistant_logging import log_assistant_event, new_assistant_request_id
+from core.memory import MemoryStore, handle_memory_command, memory_prompt_block
+from ui.visualization_api.chat_response import send_chat_response
 from models.routing.function_calls import ROUTER_TOOL_MAP
 from models.runtime.jarvis_response_runtime import generate_jarvis_response
 from models.runtime.direct_answer_runtime import (
@@ -92,6 +95,14 @@ _REPEATED_STEP_LIMIT = 3
 # MAIN ENTRY POINT
 # ================================================================================
 
+def _memory_block_for(user_prompt: str) -> str:
+    try:
+        return memory_prompt_block(MemoryStore(), user_prompt)
+    except Exception as exc:  # noqa: BLE001 - a broken memory file must not block requests.
+        print(f"[Memory] Recall failed: {exc}")
+        return ""
+
+
 async def call_gemini(
     user_prompt: str,
     rapid_response_model: str,
@@ -116,6 +127,9 @@ async def call_gemini(
             prepare_vision_screenshot=prepare_vision_screenshot,
             max_router_chain_steps=_MAX_ROUTER_CHAIN_STEPS,
             repeated_step_limit=_REPEATED_STEP_LIMIT,
+            handle_local_command=handle_memory_command,
+            send_local_reply=send_chat_response,
+            build_memory_block=_memory_block_for,
         )
     except Exception as exc:
         log_assistant_event(
@@ -145,13 +159,16 @@ class GeminiModel:
     Documentation Reference: https://github.com/googleapis/python-genai
     """
 
-    def __init__(self, jarvis_model='gemini-3-flash-preview', rapid_response_model='qwen3.5:4b-q4_K_M'):
+    def __init__(self, jarvis_model='gemini-3-flash-preview', rapid_response_model='nemotron-3.5-bolt'):
         if genai is None or types is None:
             raise RuntimeError(
                 "Google Gemini dependencies are required to initialize GeminiModel. "
                 "Install `google-genai` and its dependencies."
             )
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # Gemini is optional: without a key, chat answers stay on the local brain and
+        # screen features fall back to OpenRouter vision when it is configured.
+        gemini_api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        self.client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
         self.jarvis_model = jarvis_model
         self.rapid_response_model = rapid_response_model
         initialize_gemini_model_runtime(
@@ -164,6 +181,7 @@ class GeminiModel:
     def _is_gemini_quota_error(exc: Exception) -> bool:
         text = f"{type(exc).__name__}: {exc}".lower()
         markers = (
+            "gemininotconfigurederror",
             "429",
             "resource_exhausted",
             "quota",

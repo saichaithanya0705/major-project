@@ -10,6 +10,7 @@ from PIL import Image
 from agents.jarvis.policy import validate_jarvis_function_calls
 from agents.jarvis.tool_declarations import JARVIS_FUNCTION_DECLARATIONS
 from agents.jarvis.tools import JARVIS_TOOL_MAP
+from models.gemini_client import gemini_client
 from models.model_status import set_model_label
 from models.routing_prompt_parser import (
     extract_latest_request_from_router_prompt as _extract_latest_request,
@@ -34,7 +35,7 @@ async def generate_jarvis_response(
         contents.append(image)
 
     try:
-        response = await model.client.aio.models.generate_content(
+        response = await gemini_client(model).aio.models.generate_content(
             model=model.jarvis_model,
             contents=contents,
             config=model.jarvis_config,
@@ -49,7 +50,7 @@ async def generate_jarvis_response(
                 f"[JARVIS] Primary model unavailable; retrying with backup "
                 f"{model.gemini_backup_model}"
             )
-            response = await model.client.aio.models.generate_content(
+            response = await gemini_client(model).aio.models.generate_content(
                 model=model.gemini_backup_model,
                 contents=contents,
                 config=model.jarvis_config,

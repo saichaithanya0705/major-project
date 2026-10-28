@@ -14,9 +14,10 @@ from PIL import Image, ImageDraw, ImageGrab
 
 try:
     import pygetwindow as gw
-except ImportError:
+except (ImportError, NotImplementedError):
+    # pygetwindow raises NotImplementedError on platforms it does not support (e.g. Linux).
     gw = None
-    print("pygetwindow dependency is not installed; active-window capture will fallback to full-screen mode.")
+    print("pygetwindow is unavailable; active-window capture will fallback to full-screen mode.")
 
 try:
     import pyautogui

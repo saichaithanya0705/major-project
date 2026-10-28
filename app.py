@@ -3,6 +3,7 @@ import asyncio
 import time
 from pathlib import Path
 from core import app_runtime_lifecycle
+from core.confirmations import CONFIRMATIONS
 from core.process_lifecycle import (
     ManagedProcessHandle,
     ProcessSupervisor,
@@ -127,6 +128,10 @@ async def main():
         nonlocal current_task, last_overlay_text, last_overlay_session_id, last_overlay_ts
         text = text.strip()
         if not text:
+            return
+        # A reply to a pending "Confirm: ..." question answers it instead of starting a task.
+        if CONFIRMATIONS.answer(text):
+            print(f"Confirmation answered: {text}")
             return
         normalized_session_id = str(session_id or "").strip()
         now = time.monotonic()

@@ -52,6 +52,9 @@ def parse_stream_json_response(
         if event_type == "message" and event.get("role") == "assistant":
             content = event.get("content", "")
             if content:
+                if event.get("delta") is False and output_parts:
+                    # Whole messages (not streamed deltas) are separate paragraphs.
+                    output_parts.append("\n\n")
                 output_parts.append(content)
 
         elif event_type == "tool_use":
