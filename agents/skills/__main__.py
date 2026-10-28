@@ -74,10 +74,25 @@ def _remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _trust_browser(args: argparse.Namespace) -> int:
+    from pathlib import Path
+    from agents.skills.browser_skills import BrowserSkills
+    try:
+        digest = BrowserSkills(Path(__file__).resolve().parents[2]).trust(Path(args.path))
+    except (OSError, ValueError) as exc:
+        print(f"Could not enable browser skill: {exc}", file=sys.stderr)
+        return 1
+    print(f"Browser skill enabled for content {digest[:12]}. Scripts remain disabled.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agents.skills", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List installed skills").set_defaults(run=_list)
+    trust = commands.add_parser("trust-browser", help="Explicitly enable an instruction skill for browser tasks")
+    trust.add_argument("path", help="Skill folder or SKILL.md to review and enable")
+    trust.set_defaults(run=_trust_browser)
     show = commands.add_parser("show", help="Print a skill's instructions")
     show.add_argument("name")
     show.set_defaults(run=_show)
