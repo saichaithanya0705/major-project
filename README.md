@@ -105,7 +105,7 @@ Escalation targets are tried in order and skipped when not configured: your Chat
 
 ```
 # .env (all optional)
-# JARVIS_BRAIN_PRIMARY = "local"        # or chatgpt/gemini/openrouter/claude/codex/copilot
+# JARVIS_BRAIN_PRIMARY = "local"        # or nvidia/chatgpt/gemini/openrouter/claude/codex/copilot
 # JARVIS_BRAIN_ESCALATION = "chatgpt,gemini,openrouter,claude,codex,copilot"
 # JARVIS_BRAIN_MODEL = "nemotron-3.5-bolt"   # defaults to the router model
 # JARVIS_BRAIN_NUM_CTX = "8192"
@@ -113,6 +113,13 @@ Escalation targets are tried in order and skipped when not configured: your Chat
 # JARVIS_BRAIN_CLI_TIMEOUT_SECONDS = "180"
 # JARVIS_BRAIN_SELF_ESCALATE = "true"
 ```
+
+NVIDIA can also answer chat directly. To select it, set `JARVIS_BRAIN_PRIMARY=nvidia`
+and `NVIDIA_BRAIN_MODEL` to a model your account can run; it otherwise uses
+`NVIDIA_ROUTER_MODEL`. The NVIDIA provider supports both text and validated JSON
+replies, with reasoning disabled for responsive short requests. See the
+[live readiness report](docs/LIVE_READINESS_REPORT.md) for tested model IDs,
+device and app checks, and remaining presentation limits.
 
 On a 4 GB GPU the Q4 model (about 6–8 GB on disk) runs partly on the CPU, so first replies can take several seconds. Screen explanations and the vision agent need an image-capable model and still use Gemini or NVIDIA/OpenRouter vision.
 

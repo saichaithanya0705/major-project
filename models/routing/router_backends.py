@@ -114,6 +114,7 @@ def call_openrouter_text_sync(
     clean_text: CleanText,
     response_format: Optional[dict[str, Any]] = None,
     image_data_url: Optional[str] = None,
+    enable_thinking: bool | None = None,
 ) -> str:
     headers = {
         "Authorization": f"Bearer {openrouter_api_key}",
@@ -144,6 +145,8 @@ def call_openrouter_text_sync(
     }
     if response_format:
         payload["response_format"] = response_format
+    if enable_thinking is not None:
+        payload["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
 
     try:
         response = requests.post(
@@ -356,6 +359,7 @@ def call_nvidia_router_sync(
         max_tokens=nvidia_router_max_tokens,
         clean_text=clean_text,
         response_format={"type": "json_object"},
+        enable_thinking=False,
     )
     parsed = parse_router_response(text, parse_json_object_from_text)
     if parsed is None:

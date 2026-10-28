@@ -800,7 +800,7 @@ async function connectSocket() {
   const wsUrl = `ws://${target.host}:${target.port}${authQuery}`;
   socket = new WebSocket(wsUrl);
   socket.addEventListener('open', () => {
-    logSocketEvent(`[renderer] websocket open (${wsUrl})`);
+    logSocketEvent(`[renderer] websocket open (ws://${target.host}:${target.port})`);
     reconnectDelay = 500;
     sendMessage({
       event: 'viewport',
@@ -809,10 +809,10 @@ async function connectSocket() {
     });
   });
   socket.addEventListener('error', () => {
-    logSocketEvent(`[renderer] websocket error (${wsUrl})`);
+    logSocketEvent(`[renderer] websocket error (ws://${target.host}:${target.port})`);
   });
   socket.addEventListener('close', () => {
-    logSocketEvent(`[renderer] websocket closed (${wsUrl})`);
+    logSocketEvent(`[renderer] websocket closed (ws://${target.host}:${target.port})`);
     scheduleReconnect();
   });
 

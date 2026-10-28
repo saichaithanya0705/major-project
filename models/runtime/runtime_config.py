@@ -14,7 +14,7 @@ from typing import Callable
 # both router and brain because two models do not fit in 4 GB of VRAM.
 DEFAULT_LOCAL_MODEL = "nemotron-3.5-bolt"
 DEFAULT_BRAIN_ESCALATION = ("chatgpt", "gemini", "openrouter", "claude", "codex", "copilot")
-KNOWN_BRAIN_PROVIDERS = frozenset({"local", *DEFAULT_BRAIN_ESCALATION})
+KNOWN_BRAIN_PROVIDERS = frozenset({"local", "nvidia", *DEFAULT_BRAIN_ESCALATION})
 
 
 @dataclass(frozen=True)
@@ -215,7 +215,7 @@ def build_model_runtime_config(
     )
     ollama_router_think = _truthy_env("OLLAMA_ROUTER_THINK", fallback="false")
     gemini_backup_model = (
-        os.getenv("GEMINI_BACKUP_MODEL") or "gemini-2.0-flash"
+        os.getenv("GEMINI_BACKUP_MODEL") or "gemini-3.1-flash-lite"
     ).strip()
     brain_primary = (os.getenv("JARVIS_BRAIN_PRIMARY") or "local").strip().lower()
     if brain_primary not in KNOWN_BRAIN_PROVIDERS:

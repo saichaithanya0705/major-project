@@ -163,6 +163,11 @@ _BROWSER_AUTOMATION_MARKERS = (
     "sign in",
     "type",
 )
+_SOFTWARE_TOPIC_MARKERS = frozenset({"python", "node", "git", "npm", "pnpm", "yarn", "pip"})
+_SOFTWARE_OPERATION_RE = re.compile(
+    r"(?:^|\b(?:and|then)\s+)(?:(?:please|can you|could you|would you)\s+)*"
+    r"(?:run|execute|install|uninstall|upgrade|clone|edit|fix|build|deploy|start|stop|delete|create|debug)\b"
+)
 
 
 def contains_phrase_or_word(text: str, marker: str) -> bool:
@@ -267,6 +272,11 @@ def is_direct_qa_request(
     visual_predicate = is_visual_explanation_request or (lambda _text: False)
     context_predicate = has_context_dependent_reference_predicate or has_context_dependent_reference
 
+    # Source classification already excludes local state and real automation;
+    # domain names and software subjects must not block factual web Q&A.
+    if web_search_predicate(lowered):
+        return True
+
     if _is_blocked_direct_intent(
         lowered,
         execution_predicate=execution_predicate,
@@ -277,8 +287,6 @@ def is_direct_qa_request(
     ):
         return False
 
-    if web_search_predicate(lowered):
-        return True
     if any(lowered.startswith(marker) for marker in _DIRECT_QA_START_MARKERS):
         return True
     if lowered in {"hi", "hello", "hey", "yo"}:
@@ -353,7 +361,11 @@ def is_source_grounded_qa_request(
     if context_predicate(lowered):
         return False
     if matches_any_marker(lowered, cli_execution_markers):
-        return False
+        local_state_markers = tuple(marker for marker in cli_execution_markers if marker not in _SOFTWARE_TOPIC_MARKERS)
+        if (matches_any_marker(lowered, local_state_markers)
+                or _SOFTWARE_OPERATION_RE.search(lowered)
+                or not matches_any_marker(lowered, _SOURCE_GROUNDED_MARKERS)):
+            return False
 
     if matches_any_marker(lowered, _SOURCE_GROUNDED_MARKERS):
         if not matches_any_marker(lowered, browser_execution_markers):

@@ -228,11 +228,11 @@ def _ensure_queue_processor():
 async def _run_queue_async():
     """Process queued actions with their time delays."""
     global _LAST_DIRECT_RESPONSE, _WAITED_AFTER_DIRECT_RESPONSE
-    last_time = 0.0
+    last_time = None
 
     while True:
         if not ACTION_QUEUE:
-            last_time = 0.0
+            last_time = None
             await asyncio.sleep(0.05)
             continue
 
@@ -247,15 +247,16 @@ async def _run_queue_async():
             await _hide_command_overlay()
             _WAITED_AFTER_DIRECT_RESPONSE = True
 
-        if last_time == 0.0 and action_time_s > _MAX_INITIAL_ACTION_DELAY_SECONDS:
+        is_cleanup = _is_annotation_cleanup_action(func)
+        if last_time is None and not is_cleanup and action_time_s > _MAX_INITIAL_ACTION_DELAY_SECONDS:
             print(
                 f"[JARVIS][queue] clamping initial action time from "
                 f"{action_time_s:.2f}s to {_MAX_INITIAL_ACTION_DELAY_SECONDS:.2f}s"
             )
             action_time_s = _MAX_INITIAL_ACTION_DELAY_SECONDS
 
-        delay = max(0.0, action_time_s - last_time)
-        if delay > _MAX_INTER_ACTION_DELAY_SECONDS:
+        delay = max(0.0, action_time_s - (last_time or 0.0))
+        if delay > _MAX_INTER_ACTION_DELAY_SECONDS and not is_cleanup:
             print(
                 f"[JARVIS][queue] clamping inter-action delay from "
                 f"{delay:.2f}s to {_MAX_INTER_ACTION_DELAY_SECONDS:.2f}s"

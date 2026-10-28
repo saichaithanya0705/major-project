@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - keeps lightweight test environments us
     def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
         return False
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DOTENV_PATH = _PROJECT_ROOT / ".env"
 
 

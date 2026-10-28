@@ -58,7 +58,10 @@ class CopilotBackend(CodingBackend):
     model_env_var = "JARVIS_COPILOT_MODEL"
 
     def build_args(self, request: BackendRequest) -> list[str]:
-        args = ["--output-format", "json", "--allow-all-tools", "--disable-client-telemetry"]
+        # Copilot otherwise starts its interactive UI even with piped stdin.
+        # Keep the user's request on stdin; only this fixed instruction is in argv.
+        args = ["--prompt", "Follow the user request provided on standard input.",
+                "--output-format", "json", "--allow-all-tools"]
         if request.answer_only:
             # --available-tools= does not hide Copilot's tools, so deny the side-effecting ones.
             args.extend(["--deny-tool", "shell", "--deny-tool", "write"])

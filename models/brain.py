@@ -16,11 +16,15 @@ ChatGPT (``python -m integrations.chatgpt login``). ``claude``, ``codex`` and
 ``copilot`` run the user's signed-in CLI in answer-only mode (no shell,
 file-writing, or MCP tools). Providers that are not configured, signed in, or
 installed are skipped.
+
+``nvidia`` is also selectable as a primary or escalation provider, using
+``NVIDIA_BRAIN_MODEL`` (or the configured NVIDIA router model).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -35,6 +39,8 @@ from agents.cua_cli.backends.runner import run_backend_for_answer
 from integrations.chatgpt import auth as chatgpt_auth
 from integrations.chatgpt import responses as chatgpt_responses
 from models.openrouter_runtime import openrouter_model_enabled
+from models.routing.router_backends import call_openrouter_text_sync
+from models.shared.text_normalization import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +125,29 @@ async def _gemini_reply(
     return str(getattr(response, "text", "") or "")
 
 
+async def _nvidia_reply(
+    model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
+) -> str:
+    if not provider_configured(model, "nvidia"):
+        raise BrainProviderUnavailable("NVIDIA_API_KEY or NVIDIA model endpoint is not configured")
+    return await asyncio.to_thread(
+        call_openrouter_text_sync,
+        openrouter_api_key=model.nvidia_api_key,
+        openrouter_url=model.nvidia_url,
+        openrouter_site_url="",
+        openrouter_site_name="",
+        openrouter_timeout_seconds=model.nvidia_timeout_seconds,
+        model_name=os.getenv("NVIDIA_BRAIN_MODEL", "").strip() or model.nvidia_router_model,
+        system_prompt=system,
+        user_prompt=user,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        clean_text=lambda value, fallback, max_len: clean_text(value, fallback, max_len=max_len),
+        response_format={"type": "json_object"} if json_mode else None,
+        enable_thinking=False,
+    )
+
+
 async def _openrouter_reply(
     model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
 ) -> str:
@@ -171,6 +200,7 @@ def _cli_reply(name: str) -> Callable[..., Awaitable[str]]:
 
 _PROVIDERS: dict[str, Callable[..., Awaitable[str]]] = {
     "local": _local_reply,
+    "nvidia": _nvidia_reply,
     "chatgpt": _chatgpt_reply,
     "gemini": _gemini_reply,
     "openrouter": _openrouter_reply,
@@ -186,6 +216,8 @@ def provider_label(model: Any, name: str) -> str:
     if name == "chatgpt":
         configured = os.getenv("JARVIS_CHATGPT_MODEL", "").strip()
         return f"ChatGPT ({configured})" if configured else "ChatGPT plan"
+    if name == "nvidia":
+        return f"{os.getenv('NVIDIA_BRAIN_MODEL', '').strip() or model.nvidia_router_model} (NVIDIA)"
     if name == "gemini":
         return str(model.jarvis_model)
     if name == "openrouter":
@@ -199,6 +231,9 @@ def provider_configured(model: Any, name: str) -> bool:
         return bool(getattr(model, "brain_model", ""))
     if name == "chatgpt":
         return chatgpt_auth.is_signed_in()
+    if name == "nvidia":
+        return bool(getattr(model, "nvidia_api_key", "") and getattr(model, "nvidia_url", "")
+                    and (os.getenv("NVIDIA_BRAIN_MODEL", "").strip() or getattr(model, "nvidia_router_model", "")))
     if name == "gemini":
         return getattr(model, "client", None) is not None
     if name == "openrouter":
@@ -238,6 +273,15 @@ async def generate_brain_reply(
         if not text:
             failures.append(f"{name}: empty reply")
             return None
+        if json_mode:
+            try:
+                payload = json.loads(text)
+            except (TypeError, ValueError):
+                failures.append(f"{name}: invalid JSON reply")
+                return None
+            if not isinstance(payload, dict):
+                failures.append(f"{name}: JSON reply is not an object")
+                return None
         return text
 
     if not (force_escalation and can_escalate):
