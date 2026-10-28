@@ -858,10 +858,22 @@ input {
 
 #chat-session-marker {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 0 8px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+#chat-session-marker[hidden],
+#chat-guidance-details[hidden] {
+  display: none;
+}
+
+#chat-session-detail {
   color: var(--text-subtle);
 }
 
@@ -1444,6 +1456,74 @@ kbd {
   font: 11px/1.2 Consolas, "SFMono-Regular", Menlo, Monaco, monospace;
 }
 
+#chat-guidance {
+  flex: 0 0 auto;
+  padding: 0 14px 6px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+#chat-guidance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+}
+
+#chat-guidance-toggle {
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#chat-guidance-toggle::after {
+  content: ' +';
+}
+
+#chat-guidance-toggle[aria-expanded="true"]::after {
+  content: ' −';
+}
+
+#chat-guidance-recall {
+  color: var(--text-subtle);
+  font-size: 10.5px;
+  text-align: right;
+}
+
+#chat-guidance-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+#chat-guidance-details .chat-help-panel-item {
+  gap: 6px;
+}
+
+#chat-guidance-details .chat-shortcut-note {
+  flex-basis: 100%;
+}
+
+#chat-guidance-details kbd {
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.chat-shortcut-note {
+  margin: 4px 0;
+  color: var(--text-subtle);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 #input-row {
   display: flex;
   align-items: flex-end;
@@ -1638,6 +1718,7 @@ kbd {
 }
 
 #command-input:focus-visible,
+#chat-guidance-toggle:focus-visible,
 #chat-settings-toggle:focus-visible,
 #chat-history:focus-visible,
 #chat-new:focus-visible,
@@ -1688,5 +1769,27 @@ kbd {
 
   #chat-settings-popover {
     width: min(232px, calc(100vw - 32px));
+  }
+}
+
+@media (max-height: 560px) {
+  #chat-header {
+    padding: 8px 12px;
+  }
+
+  #chat-status {
+    padding: 6px 12px;
+  }
+
+  #chat-status[data-phase="idle"] #chat-status-detail {
+    display: none;
+  }
+
+  #chat-session-marker {
+    padding: 6px 12px;
+  }
+
+  #input-row {
+    padding: 8px 12px;
   }
 }

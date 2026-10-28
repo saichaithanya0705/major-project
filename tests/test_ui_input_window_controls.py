@@ -91,8 +91,9 @@ def test_input_window_header_uses_compact_jarvis_actions_contract() -> None:
     assert 'id="chat-history-toggle"' not in input_html
     assert 'id="chat-stop"' not in input_html
     assert 'id="chat-hide"' not in input_html
-    assert "Hide window" not in input_html
-    assert "chat-guidance-hide-shortcut" not in input_html
+    assert "Hide window" in input_html
+    assert 'data-shortcut="hide"' in input_html
+    assert 'id="chat-guidance-toggle"' in input_html
 
 
 def test_composer_action_swaps_between_send_and_stop_contract() -> None:
@@ -207,6 +208,9 @@ def test_input_window_shell_keeps_header_status_and_body_as_siblings() -> None:
     assert parents["chat-settings-menu"] == "chat-actions"
     assert parents["chat-settings-popover"] == "chat-settings-menu"
     assert parents["chat-help-panel"] == "chat-settings-popover"
+    assert parents["chat-session-marker"] == "chat-main"
+    assert parents["chat-messages"] == "chat-main"
+    assert parents["chat-guidance"] == "chat-main"
 
 
 def test_history_header_button_reuses_history_action_boundary() -> None:

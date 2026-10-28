@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <title>JARVIS Chat</title>
   <link rel="stylesheet" href="input_window.css">
 </head>
@@ -66,7 +67,12 @@
                   <span class="chat-help-panel-label">Stop running actions</span>
                   <kbd id="chat-guidance-stop-shortcut">Ctrl + Shift + C</kbd>
                 </div>
+                <div class="chat-help-panel-item">
+                  <span class="chat-help-panel-label">Hide window</span>
+                  <kbd data-shortcut="hide">Esc</kbd>
+                </div>
               </div>
+              <p class="chat-shortcut-note">Hide leaves actions running. Stop interrupts them. Esc closes an open menu or History first.</p>
             </div>
           </div>
         </div>
@@ -94,8 +100,11 @@
         <div id="history-list" role="list"></div>
       </section>
         <div id="chat-main">
+          <div id="chat-session-marker" role="status" hidden>
+            <span id="chat-session-summary"></span>
+            <span id="chat-session-detail"></span>
+          </div>
           <div id="chat-messages" aria-live="polite">
-            <div id="chat-session-marker" hidden></div>
           <div id="chat-empty-state" hidden>
               <div id="chat-empty-title">Ready for command</div>
               <div id="chat-empty-body">Type the next task below or reopen a prior session from History.</div>
@@ -129,7 +138,7 @@
               <textarea
                 id="command-input"
                 rows="1"
-                placeholder="Describe the next task for JARVIS…"
+                placeholder="Describe the next task…"
                 autocomplete="off"
                 spellcheck="false"
                 aria-describedby="chat-composer-hint chat-status-detail"
@@ -156,6 +165,18 @@
               </button>
             </div>
         </div>
+        <section id="chat-guidance" aria-label="Keyboard shortcuts">
+          <div id="chat-guidance-header">
+            <button id="chat-guidance-toggle" type="button" aria-expanded="true" aria-controls="chat-guidance-details">Shortcuts</button>
+            <span id="chat-guidance-recall">Enter send · Shift + Enter newline</span>
+          </div>
+          <div id="chat-guidance-details">
+            <div class="chat-help-panel-item"><span class="chat-help-panel-label">Open</span><kbd data-shortcut="open">Ctrl + Shift + Space</kbd></div>
+            <div class="chat-help-panel-item"><span class="chat-help-panel-label">Stop</span><kbd data-shortcut="stop">Ctrl + Shift + C</kbd></div>
+            <div class="chat-help-panel-item"><span class="chat-help-panel-label">Hide</span><kbd data-shortcut="hide">Esc</kbd></div>
+            <p class="chat-shortcut-note">Hide leaves actions running. Stop interrupts them.</p>
+          </div>
+        </section>
       </div>
     </div>
   </div>

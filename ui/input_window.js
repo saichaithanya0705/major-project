@@ -44,6 +44,11 @@ const historyFilterActive = document.getElementById('history-filter-active');
 const historyFilterArchived = document.getElementById('history-filter-archived');
 const chatComposerHint = document.getElementById('chat-composer-hint');
 const chatSessionMarker = document.getElementById('chat-session-marker');
+const chatSessionSummary = document.getElementById('chat-session-summary');
+const chatSessionDetail = document.getElementById('chat-session-detail');
+const chatGuidanceToggle = document.getElementById('chat-guidance-toggle');
+const chatGuidanceDetails = document.getElementById('chat-guidance-details');
+const SHORTCUT_GUIDANCE_KEY = 'jarvis.shortcut-guidance.collapsed.v1';
 const chatEmptyState = document.getElementById('chat-empty-state');
 const chatEmptyTitle = document.getElementById('chat-empty-title');
 const chatEmptyBody = document.getElementById('chat-empty-body');
@@ -69,7 +74,7 @@ const ASSISTANT_THINKING_TEXT = 'Waiting for model response…';
 const MAX_TERMINAL_TRANSCRIPT_CHARS = 16000;
 const MAX_TERMINAL_SUMMARY_SOURCE_CHARS = 2200;
 const MAX_TERMINAL_SUMMARY_CHARS = 360;
-const DEFAULT_INPUT_PLACEHOLDER = 'Describe the next task for JARVIS…';
+const DEFAULT_INPUT_PLACEHOLDER = 'Describe the next task…';
 const ARCHIVED_INPUT_PLACEHOLDER = 'Archived chats are read-only. Start a new chat to continue.';
 const VOICE_MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
 const RESTORE_CHAT_SYMBOL = '↩';
@@ -104,7 +109,7 @@ let currentSession = null;
 let activeSessions = [];
 let archivedSessions = [];
 let currentLifecycle = buildLifecycleSnapshot(EXECUTION_PHASES.IDLE);
-let sessionResumeMarkerVisible = false;
+let restoredSessionSnapshot = null;
 let lastStopAnnouncementAt = 0;
 let lastStopAnnouncementText = '';
 let voiceRecorder = null;
@@ -523,6 +528,9 @@ function updateShortcutUi() {
   if (chatGuidanceStopShortcut) {
     chatGuidanceStopShortcut.textContent = shortcuts.stop;
   }
+  document.querySelectorAll('[data-shortcut]').forEach((element) => {
+    element.textContent = shortcuts[element.dataset.shortcut];
+  });
 
   if (chatSettingsToggle) {
     chatSettingsToggle.title = 'Open settings menu';
@@ -537,6 +545,30 @@ function updateShortcutUi() {
   if (terminalPanelStop) {
     terminalPanelStop.title = `Stop terminal session (${shortcuts.stop})`;
   }
+}
+
+function setShortcutGuidanceExpanded(expanded, { persist = false } = {}) {
+  if (!chatGuidanceToggle || !chatGuidanceDetails) return;
+  chatGuidanceDetails.hidden = !expanded;
+  chatGuidanceToggle.setAttribute('aria-expanded', String(expanded));
+  chatGuidanceToggle.title = expanded ? 'Minimize shortcut guidance' : 'Show shortcut guidance';
+  if (persist) {
+    try {
+      window.localStorage.setItem(SHORTCUT_GUIDANCE_KEY, expanded ? 'false' : 'true');
+    } catch {
+      // Guidance remains usable when local preference storage is unavailable.
+    }
+  }
+}
+
+function initializeShortcutGuidance() {
+  let collapsed = false;
+  try {
+    collapsed = window.localStorage.getItem(SHORTCUT_GUIDANCE_KEY) === 'true';
+  } catch {
+    // Default to discoverable guidance if preference storage is unavailable.
+  }
+  setShortcutGuidanceExpanded(!collapsed);
 }
 
 function updateComposerActionState() {
@@ -1560,12 +1592,23 @@ function renderConversationDecorators() {
   }
 
   if (chatSessionMarker) {
-    const showMarker = sessionResumeMarkerVisible && chatHistory.length > 0;
+    const showMarker = Boolean(restoredSessionSnapshot);
     chatSessionMarker.hidden = !showMarker;
     if (showMarker) {
-      chatSessionMarker.textContent = `Resumed session · Updated ${formatSessionDate(currentSession?.updatedAt)}`;
+      const { messageCount, updatedAt, archived } = restoredSessionSnapshot;
+      const label = archived ? 'Archived session' : 'Resumed session';
+      const summary = `${label} · ${messageCount} saved ${messageCount === 1 ? 'message' : 'messages'}`;
+      const detail = archived
+        ? 'Read-only history; no actions restarted.'
+        : 'History restored; no actions restarted.';
+      // Avoid repeating the live-region announcement as new messages arrive.
+      if (chatSessionSummary.textContent !== summary) chatSessionSummary.textContent = summary;
+      if (chatSessionDetail.textContent !== detail) chatSessionDetail.textContent = detail;
+      chatSessionMarker.title = `Saved ${formatSessionDate(updatedAt)}`;
     } else {
-      chatSessionMarker.textContent = '';
+      chatSessionSummary.textContent = '';
+      chatSessionDetail.textContent = '';
+      chatSessionMarker.removeAttribute('title');
     }
   }
 }
@@ -2471,9 +2514,14 @@ function applySessionState(state, options = {}) {
   if (!currentSession) {
     clearRenderedMessages();
     chatHistory.length = 0;
-    sessionResumeMarkerVisible = false;
+    restoredSessionSnapshot = null;
   } else {
-    sessionResumeMarkerVisible = currentSession.messages.length > 0;
+    // Capture restoration metadata once; later messages must not relabel saved history.
+    restoredSessionSnapshot = currentSession.messages.length > 0 ? {
+      messageCount: currentSession.messages.length,
+      updatedAt: currentSession.updatedAt,
+      archived: Boolean(currentSession.archivedAt),
+    } : null;
     restoreMessages(currentSession.messages);
     upsertSessionSummary(buildSessionSummary(currentSession));
   }
@@ -2548,7 +2596,7 @@ async function createNewChat() {
   try {
     const state = await window.api.createChatSession();
     applySessionState(state, { keepHistoryOpen: false, focusInput: true });
-    sessionResumeMarkerVisible = false;
+    restoredSessionSnapshot = null;
     renderConversationDecorators();
     setReadyLifecycle();
   } catch {
@@ -3348,6 +3396,9 @@ function handleComposerActionClick() {
 }
 
 commandSend?.addEventListener('click', () => handleComposerActionClick());
+chatGuidanceToggle?.addEventListener('click', () => {
+  setShortcutGuidanceExpanded(chatGuidanceDetails.hidden, { persist: true });
+});
 chatSettingsToggle?.addEventListener('click', (event) => {
   event.stopPropagation();
   toggleSettingsPopover();
@@ -3454,6 +3505,7 @@ window.addEventListener('beforeunload', () => {
 
 async function initializeInputWindow() {
   updateShortcutUi();
+  initializeShortcutGuidance();
   updateTerminalPanelControls();
   resizeInput();
   updateHistoryRetentionCopy();
