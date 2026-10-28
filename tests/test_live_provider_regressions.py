@@ -85,6 +85,19 @@ def test_provider_helpers_load_the_project_dotenv_after_module_move():
     assert openrouter_fallback._DOTENV_PATH == Path(__file__).resolve().parents[1] / ".env"
 
 
+async def test_per_request_nvidia_model_overrides_chat_default(monkeypatch):
+    monkeypatch.setenv("NVIDIA_BRAIN_MODEL", "chat-default")
+    observed = []
+    def reply(**kwargs):
+        observed.append(kwargs["model_name"])
+        return "42"
+    monkeypatch.setattr(brain, "call_openrouter_text_sync", reply)
+    model = SimpleNamespace(nvidia_api_key="test-key", nvidia_url="https://nvidia.invalid",
+        nvidia_router_model="router", nvidia_timeout_seconds=15, nvidia_brain_model="browser-model")
+    assert await brain._nvidia_reply(model, "SYS", "Question", 0, 200) == "42"
+    assert observed == ["browser-model"] and "browser-model" in brain.provider_label(model, "nvidia")
+
+
 @pytest.mark.parametrize("prompt", [
     "Find the current Python release on python.org and cite your source.",
     "What is the latest Node.js release with sources?",

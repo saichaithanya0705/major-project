@@ -29,6 +29,7 @@ from agents.browser.browser_use_boundary import (
     BrowserUseToolPolicy,
 )
 from agents.browser.mcp_client import PlaywrightMcpClient
+from agents.browser.connected_control import control_command, extension_mode
 from agents.browser.page_context import format_page_context_response
 from agents.browser.playwright_boundary import (
     PlaywrightBoundary,
@@ -103,6 +104,76 @@ class BrowserAgent:
     _interrupted_browser_use_state: Any = None
     _interrupted_browser_use_task: str = ""
     _interrupted_browser_use_summary: str = ""
+    _connected_runner: Any = None
+
+    @classmethod
+    def _get_connected_runner(cls):
+        if cls._connected_runner is None:
+            from agents.browser.connected_runner import ConnectedBrowserRunner
+            async def status(text):
+                try:
+                    from ui.visualization_api.status_bubble import update_status_bubble
+                    await update_status_bubble(text, source="browser_use")
+                except Exception:
+                    pass  # An unavailable status display must not execute or repeat an action.
+            client = PlaywrightMcpClient(extension=True,
+                timeout=120,
+                browser=os.getenv("JARVIS_BROWSER_CHANNEL", "chrome").strip(),
+                executable_path=os.getenv("JARVIS_BROWSER_EXECUTABLE", "").strip() or None)
+            cls._connected_runner = ConnectedBrowserRunner(client, status=status)
+        return cls._connected_runner
+
+    @classmethod
+    async def close_connected(cls):
+        runner, cls._connected_runner = cls._connected_runner, None
+        if runner is not None:
+            await runner.disconnect()
+
+    @classmethod
+    async def handle_control_command(cls, task: str) -> dict | None:
+        command = control_command(task)
+        if command is None:
+            return None
+        action, index = command
+        try:
+            if action == "disconnect":
+                await cls.close_connected()
+                message = "Disconnected JARVIS from the browser; your tabs remain open."
+            elif action == "stop":
+                cls.request_stop_all()
+                message = "Stopped browser work; your tabs remain open."
+            elif action == "status":
+                runner = cls._connected_runner
+                if runner is None:
+                    message = "Browser is disconnected. Say 'connect browser' to select a session."
+                else:
+                    from agents.browser.connected_gateway import public_url
+                    gateway = runner.gateway
+                    message = f"Browser: {runner.state}."
+                    if gateway:
+                        message += f" Selected tab: {gateway.title} — {public_url(gateway.url)}"
+                        if runner.state in {"ready","awaiting_tab_selection"}:
+                            message += "\n" + await gateway.list_tabs()
+            else:
+                os.environ["JARVIS_BROWSER_MODE"] = "extension"
+                runner = cls._get_connected_runner()
+                if runner.state in {"running", "awaiting_approval", "connecting"}:
+                    return {"success": False, "complete": False, "error": "Stop the active browser task before changing the connection or tab."}
+                if action == "select":
+                    await runner.select_tab(index)
+                else:
+                    connection = await runner.connect()
+                    if runner.state == "awaiting_tab_selection":
+                        return {"success":True,"complete":True,"error":None,
+                            "result":{"summary":connection,"mode":"playwright_extension","complete":True}}
+                from agents.browser.connected_gateway import public_url
+                gateway = runner.gateway
+                message = f"Connected to {gateway.title} — {public_url(gateway.url)}."
+            return {"success": True, "complete": True, "error": None,
+                    "result": {"summary": message, "mode": "playwright_extension", "complete": True}}
+        except Exception as exc:
+            return {"success": False, "complete": False,
+                    "error": f"Browser connection failed ({type(exc).__name__}). Check the official Playwright extension installation and select a tab in its connection prompt."}
 
     def __init__(self, model_name: str):
         self.model_name = model_name
@@ -232,11 +303,12 @@ class BrowserAgent:
 
     @classmethod
     def request_stop_all(cls) -> int:
+        connected_stopped = bool(cls._connected_runner and cls._connected_runner.request_stop())
         result = cls._browser_use_lifecycle.request_stop_all()
         cls._last_browser_use_stop_failures = result.failures
         cls._active_browser_use_agents = cls._browser_use_lifecycle.active_agents
         cls._browser_use_stop_requested = cls._browser_use_lifecycle.stop_requested
-        return result.stopped
+        return result.stopped + int(connected_stopped)
 
     @classmethod
     async def _should_stop_browser_use_agent(cls) -> bool:
@@ -254,10 +326,17 @@ class BrowserAgent:
 
     @classmethod
     def has_interrupted_work(cls) -> bool:
-        return cls._browser_use_lifecycle.has_interrupted_work()
+        return bool(cls._connected_runner and cls._connected_runner.last_objective) or cls._browser_use_lifecycle.has_interrupted_work()
 
     @classmethod
     def resolve_resume_task(cls, user_prompt: str) -> str | None:
+        runner = cls._connected_runner
+        if extension_mode() and runner and runner.last_objective:
+            if user_prompt.startswith(runner.last_objective + "\nPreviously verified progress:\n"):
+                return user_prompt
+            if cls._is_resume_request(user_prompt) or runner.awaiting_input:
+                progress = "\n".join(runner.last_progress[-12:])
+                return f"{runner.last_objective}\nPreviously verified progress:\n{progress}\nInspect the current page before acting.\nUser follow-up: {user_prompt}"
         return cls._browser_use_lifecycle.resolve_resume_task(user_prompt)
 
     @classmethod
@@ -293,6 +372,7 @@ class BrowserAgent:
 
     @classmethod
     async def _close_shared_resources(cls) -> None:
+        await cls.close_connected()
         playwright_failures: list[PlaywrightLifecycleFailure] = []
         browser_use_cleanup_error: BrowserUseCleanupError | None = None
 
@@ -453,6 +533,18 @@ class BrowserAgent:
         return page, used_headless
 
     async def execute(self, task: str) -> dict[str, Any]:
+        command_result = await type(self).handle_control_command(task)
+        if command_result is not None:
+            return command_result
+        mode = os.getenv("JARVIS_BROWSER_MODE", "managed").strip().lower()
+        if mode not in {"managed", "extension"}:
+            return {"success": False, "complete": False, "error": "JARVIS_BROWSER_MODE must be managed or extension."}
+        if extension_mode():
+            try:
+                runner = type(self)._get_connected_runner()
+                return await runner.execute(type(self).resolve_resume_task(task) or task)
+            except Exception as exc:
+                return {"success": False, "complete": False, "error": f"Connected browser could not start ({type(exc).__name__}); check extension setup. No managed-browser fallback was used."}
         # Extract the direct URL from the ORIGINAL task before steering is applied,
         # so the steering preamble text doesn't produce false URL matches.
         original_direct_url = self._extract_direct_url(task)

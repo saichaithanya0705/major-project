@@ -32,7 +32,8 @@ class Browser:
             return {"type": "object", "properties": props, "required": list(required), "additionalProperties": False}
         string = {"type": "string"}
         return {
-            "browser_snapshot": schema({}),
+            "browser_snapshot": schema({"target": string, "depth": {"type":"number"}, "filename": string}),
+            "browser_tabs": schema({"action":{"type":"string","enum":["list","new","select","close"]},"index":{"type":"integer"}}, ["action"]),
             "browser_evaluate": schema({"function": string, "target": string}, ["function"]),
             "browser_click": schema({"target": string}, ["target"]),
             "browser_type": schema({"target": string, "text": string, "submit": {"type": "boolean"}}, ["target", "text"]),
@@ -43,6 +44,8 @@ class Browser:
 
     async def call_result(self, name, arguments=None):
         args = arguments or {}
+        if name == "browser_tabs" and args.get("action") == "list":
+            return McpToolResult("### Open tabs\n- 0: (current) [Application](https://forms.example/application)")
         if name == "browser_snapshot":
             return McpToolResult("### Snapshot\n" + self.snapshot)
         if name == "browser_evaluate":
@@ -213,3 +216,35 @@ async def test_readback_mismatch_is_incomplete():
     with pytest.raises(RuntimeError, match="read-back"):
         await gateway.act("browser_type", {"target": "e1", "text": "Demo"})
     assert not gateway.verified_steps
+
+
+async def test_snapshot_catalog_exposes_only_a_whole_page_read():
+    gateway, _, _ = await ready()
+    assert gateway.tool_catalog()["browser_snapshot"]["properties"] == {}
+
+
+async def test_batch_noneditable_target_is_rejected_before_any_write():
+    gateway, browser, _ = await ready()
+    with pytest.raises(RuntimeError):
+        await gateway.act("browser_fill_form", {"fields":[
+            {"target":"e1","name":"Name","type":"textbox","value":"Demo"},
+            {"target":"e2","name":"Not a field","type":"textbox","value":"Wrong"}]})
+    assert not browser.effects
+
+
+@pytest.mark.parametrize("reference", ["ref=e1", "[ref=e1]"])
+async def test_displayed_reference_notation_is_canonicalized_safely(reference):
+    gateway, browser, _ = await ready()
+    await gateway.act("browser_type", {"target":reference,"text":"Demo"})
+    assert browser.effects[-1][1]["target"] == "e1"
+
+
+async def test_tab_listing_is_retained_as_observed_evidence():
+    gateway, _, _ = await ready()
+    await gateway.act("browser_tabs", {"action":"list"})
+    assert "0: Application" in "\n".join(gateway.verified_steps)
+
+
+def test_public_urls_do_not_disclose_embedded_credentials():
+    from agents.browser.connected_gateway import public_url
+    assert public_url("https://username:private@example.org/path?secret=value#part") == "https://example.org/path"

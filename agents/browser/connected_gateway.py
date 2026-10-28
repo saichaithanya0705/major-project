@@ -6,6 +6,7 @@ implementation details, and never interpolate model, skill, or page source.
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import re
 import time
@@ -37,6 +38,7 @@ ELEMENT_STATE = r"""(element) => { /* JARVIS_ELEMENT_STATE */
  return {tag:e.tagName.toLowerCase(), type:e.type || '', role:e.getAttribute('role') || '',
    label:label(e), value:sensitive(e) ? (e.value ? '[present]' : '') : String(e.value ?? '').slice(0,4096),
    sensitive:sensitive(e), checked:!!e.checked, disabled:!!e.disabled,
+   readOnly:!!e.readOnly, editable:!!e.isContentEditable,
    selected:e.selectedOptions ? Array.from(e.selectedOptions).map(o=>({value:o.value,text:o.text})) : [],
    valid:e.validity ? e.validity.valid : true,
    form:scope ? {id:scope.id || scope.getAttribute('aria-label') || 'form',
@@ -61,7 +63,9 @@ class StalePageError(McpToolError):
 
 def public_url(url: str) -> str:
     parsed = urlsplit(url)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    # Strip userinfo as well as query/fragment without changing IPv6 or ports.
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parsed.scheme, authority, parsed.path, "", ""))
 
 
 def _json_result(result: McpToolResult) -> dict:
@@ -94,6 +98,7 @@ class ConnectedGateway:
         self._refs: set[str] = set()
         self._draft_refs: set[str] = set()
         self._secrets: set[str] = set()
+        self._tab_entries: dict[int, tuple[str, str]] = {}
 
     def _check_stop(self):
         if self.stopped():
@@ -146,10 +151,34 @@ class ConnectedGateway:
         for name in sorted(TOOLS & self._schemas.keys()):
             schema = json.loads(json.dumps(self._schemas[name]))
             schema.get("properties", {}).pop("filename", None)
+            if name == "browser_snapshot":
+                schema = {"type":"object", "properties":{}, "additionalProperties":False}
             if name == "browser_tabs":
                 schema["properties"]["action"]["enum"] = ["list", "new"]
             catalog[name] = schema
         return catalog
+
+    def validate_action(self, name: str, arguments: dict) -> None:
+        """Pure preflight: callers may correct this rejection without replaying effects."""
+        self._validate(name, self._canonical(arguments))
+
+    @staticmethod
+    def _canonical(arguments: dict) -> dict:
+        if not isinstance(arguments, dict):
+            return arguments
+        result = copy.deepcopy(arguments)
+        fields = result.get("fields", [])
+        if not isinstance(fields, list):
+            return result
+        for item in [result, *fields]:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("target")
+            if isinstance(value, str):
+                match = re.fullmatch(r"(?:ref=|\[ref=)((?:f\d+)?e\d+)\]?", value.strip())
+                if match:
+                    item["target"] = match.group(1)
+        return result
 
     async def _fresh(self):
         page = await self._page()
@@ -187,6 +216,21 @@ class ConnectedGateway:
             raise McpToolError("Use inspected typing tools instead of browser-wide keyboard shortcuts.")
         if name == "browser_wait_for" and not 0 <= args.get("time", 0) <= 5:
             raise McpToolError("Waits must be between zero and five seconds.")
+
+    @staticmethod
+    def _editable(node: dict, kind="textbox"):
+        tag, field_type = node.get("tag"), node.get("type", "text")
+        valid = False
+        if kind == "textbox":
+            valid = tag == "textarea" or bool(node.get("editable")) or (tag == "input" and field_type not in {"checkbox","radio","submit","button","reset","hidden","file","range"})
+        elif kind in {"checkbox", "radio"}:
+            valid = tag == "input" and field_type == kind
+        elif kind == "combobox":
+            valid = tag == "select"
+        elif kind == "slider":
+            valid = tag == "input" and field_type == "range"
+        if not valid or node.get("disabled") or node.get("readOnly"):
+            raise McpToolError("The target is not an editable field of the requested type; no batch was sent.")
 
     @staticmethod
     def _submission(node: dict, *, enter=False) -> bool:
@@ -231,22 +275,44 @@ class ConnectedGateway:
         if await self._approval_state(after) != before:
             raise StalePageError("The form changed during approval; submission was not sent.")
 
+    async def list_tabs(self) -> str:
+        result = await self._call("browser_tabs", {"action":"list"})
+        entries = {}
+        for match in re.finditer(r"(?m)^-\s*(\d+):\s*(?:\(current\)\s*)?\[(.*?)\]\(([^\n]+)\)", result.text):
+            entries[int(match.group(1))] = (match.group(2), match.group(3))
+        self._tab_entries = entries
+        return "\n".join(f"{index}: {title} — {public_url(url)}" for index,(title,url) in entries.items())[:6000]
+
     async def select_tab(self, index: int) -> str:
         if isinstance(index, bool) or not isinstance(index, int) or index < 0:
             raise McpToolError("Choose a nonnegative tab index from browser status.")
         # Called only for an explicit user chat command, never from model actions.
-        await self._call("browser_tabs", {"action": "list"})
+        expected = self._tab_entries.get(index)
+        await self.list_tabs()
+        entry = self._tab_entries.get(index)
+        if entry is None or (expected is not None and entry != expected):
+            raise StalePageError("The tab list changed; check browser status and choose the tab again.")
+        if urlsplit(entry[1]).scheme not in {"http","https"}:
+            raise McpToolError("Choose a normal HTTP(S) test tab; browser-internal pages cannot be controlled.")
         await self._call("browser_tabs", {"action": "select", "index": index})
+        page = await self._page()
+        if page.get("url") != entry[1]:
+            raise StalePageError("The selected tab changed before inspection; choose it again.")
         self._draft_refs.clear()
         return await self.observe()
 
     async def act(self, name: str, arguments: dict) -> str:
         self._check_stop()
+        arguments = self._canonical(arguments)
         self._validate(name, arguments)
         await self._fresh()
         args = dict(arguments)
         if name == "browser_snapshot":
             return await self.observe()
+        if name == "browser_tabs" and args.get("action") == "list":
+            message = "Observed browser tabs:\n" + await self.list_tabs()
+            self.verified_steps.append(message)
+            return message
         target = args.get("target")
         node = await self._inspect(target) if target else None
         if name == "browser_press_key" and args["key"] in {"Enter", "Return", "Space", " "}:
@@ -262,7 +328,11 @@ class ConnectedGateway:
         fields = args.get("fields", [])
         # Validate and inspect the entire batch before sending its first write.
         for field in fields:
-            await self._inspect(field["target"])
+            self._editable(await self._inspect(field["target"]), field["type"])
+        if name == "browser_type":
+            self._editable(node)
+        if name == "browser_select_option":
+            self._editable(node, "combobox")
         for field in [args, *fields]:
             text = field.get("text") or field.get("value")
             if isinstance(text, str) and text:

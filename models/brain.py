@@ -125,6 +125,11 @@ async def _gemini_reply(
     return str(getattr(response, "text", "") or "")
 
 
+def _nvidia_model(model: Any) -> str:
+    return (getattr(model, "nvidia_brain_model", "") or os.getenv("NVIDIA_BRAIN_MODEL", "").strip()
+            or getattr(model, "nvidia_router_model", ""))
+
+
 async def _nvidia_reply(
     model: Any, system: str, user: str, temperature: float, max_tokens: int, *, json_mode: bool = False
 ) -> str:
@@ -137,7 +142,7 @@ async def _nvidia_reply(
         openrouter_site_url="",
         openrouter_site_name="",
         openrouter_timeout_seconds=model.nvidia_timeout_seconds,
-        model_name=os.getenv("NVIDIA_BRAIN_MODEL", "").strip() or model.nvidia_router_model,
+        model_name=_nvidia_model(model),
         system_prompt=system,
         user_prompt=user,
         temperature=temperature,
@@ -217,7 +222,7 @@ def provider_label(model: Any, name: str) -> str:
         configured = os.getenv("JARVIS_CHATGPT_MODEL", "").strip()
         return f"ChatGPT ({configured})" if configured else "ChatGPT plan"
     if name == "nvidia":
-        return f"{os.getenv('NVIDIA_BRAIN_MODEL', '').strip() or model.nvidia_router_model} (NVIDIA)"
+        return f"{_nvidia_model(model)} (NVIDIA)"
     if name == "gemini":
         return str(model.jarvis_model)
     if name == "openrouter":
@@ -233,7 +238,7 @@ def provider_configured(model: Any, name: str) -> bool:
         return chatgpt_auth.is_signed_in()
     if name == "nvidia":
         return bool(getattr(model, "nvidia_api_key", "") and getattr(model, "nvidia_url", "")
-                    and (os.getenv("NVIDIA_BRAIN_MODEL", "").strip() or getattr(model, "nvidia_router_model", "")))
+                    and _nvidia_model(model))
     if name == "gemini":
         return getattr(model, "client", None) is not None
     if name == "openrouter":

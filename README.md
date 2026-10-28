@@ -48,7 +48,7 @@ cd ../integrations/playwright_mcp && npm install
 cd ../opencode && npm ci
 ```
 
-The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.73). Runtime browser tasks should use that local install instead of downloading MCP dynamically with `npx` or `latest`.
+The setup scripts install a pinned local Playwright MCP package under `integrations/playwright_mcp` (`@playwright/mcp` 0.0.83). Runtime browser tasks use that local install rather than downloading MCP dynamically.
 
 3. Create your .env file for your keys. Every key is optional: with none set, Jarvis routes and answers chat on the local model, and only screen/vision features need a cloud key.
 ```
@@ -162,6 +162,14 @@ python -m agents.skills remove arxiv
 Imports go to `JARVIS_SKILLS_DIR/imported` (default `~/.jarvis/skills/imported`). As in OpenJarvis, a skill's scripts are not copied until you review them and re-import with `--with-scripts`, symlinks are rejected, and skills declaring `shell:execute`, `network:listen`, or `filesystem:write` need `--yes-dangerous`. Folders you create directly in `JARVIS_SKILLS_DIR` are treated as your own and can run their scripts; when names collide, your skills win over built-in ones, which win over imported ones.
 
 ## Forms and confirmations
+
+The new extension operator controls a selected tab in your existing Chrome session,
+using standard `SKILL.md` workflows and a general task loop. See
+[browser setup and skills](docs/BROWSER_EXTENSION.md) and
+[qualification results](docs/BROWSER_IMPLEMENTATION_REPORT.md).
+In extension mode, routine actions and field entry proceed automatically, while
+form submission requires chat confirmation even if legacy confirmations are off.
+The following settings describe the existing managed-browser mode.
 
 The browser agent fills forms on its own but stops to ask before anything you cannot take back. The question appears in the chat; reply **yes** (typed or spoken) to allow it. Any other reply, or no reply within 2 minutes, cancels the action and the agent stops and reports what is left for you.
 

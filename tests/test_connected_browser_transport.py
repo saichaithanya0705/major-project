@@ -80,3 +80,40 @@ def test_text_error_without_flag_is_not_success():
     result = mcp_client.McpToolResult("### Error\nTarget is closed", False, None)
     with pytest.raises(mcp_client.McpToolError):
         result.require_success()
+
+
+def test_extension_install_error_is_actionable_without_private_paths():
+    result = mcp_client.McpToolResult('### Error\nPlaywright Extension not found in "C:/private-profile"', True)
+    with pytest.raises(mcp_client.McpToolError, match="Install.*Playwright") as error:
+        result.require_success()
+    assert "private-profile" not in str(error.value)
+
+
+async def test_owned_output_files_are_ephemeral(tmp_path, monkeypatch):
+    from contextlib import asynccontextmanager
+    captured = []
+    @asynccontextmanager
+    async def stdio(params):
+        captured.append(params)
+        yield None, None
+    class Context(Session):
+        def __init__(self, *_, **_kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): pass
+        async def initialize(self): pass
+    monkeypatch.setattr(mcp_client, "stdio_client", stdio)
+    monkeypatch.setattr(mcp_client, "ClientSession", Context)
+    client = mcp_client.PlaywrightMcpClient(tmp_path)
+    command = client.resolve_command()
+    command.parent.mkdir(parents=True)
+    command.touch()
+    try:
+        await client.tool_schemas()
+        args = captured[0].args
+        assert "--output-dir" in args
+        directory = Path(args[args.index("--output-dir") + 1])
+        assert directory.is_dir()
+        (directory / "private-snapshot.txt").write_text("private fixture")
+    finally:
+        await client.close()
+    assert not directory.exists()

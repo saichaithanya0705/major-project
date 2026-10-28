@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.types import Implementation
 
 
 class McpToolError(RuntimeError):
@@ -25,6 +27,10 @@ class McpToolResult:
     def require_success(self) -> "McpToolResult":
         if self.is_error or self.text.lstrip().startswith("### Error"):
             # Raw server errors may contain page contents or query strings.
+            if "playwright extension not found" in self.text.lower():
+                raise McpToolError("Install the official Playwright Extension in the Chrome profile you want to share, then connect again.")
+            if "extension not connected" in self.text.lower():
+                raise McpToolError("Open Chrome and complete the Playwright Extension connection prompt, then connect again.")
             raise McpToolError("Browser tool failed; inspect the selected tab and reconnect if needed.")
         return self
 
@@ -114,7 +120,7 @@ class PlaywrightMcpClient:
         if self.executable_path:
             args.extend(["--executable-path", self.executable_path])
         if self.headless and not self.extension:
-            args.append("--headless")
+            args.extend(["--headless", "--isolated"])
         cli = self.integration_dir / "node_modules" / "@playwright" / "mcp" / "cli.js"
         executable = str(command)
         if os.name == "nt" and cli.is_file():
@@ -131,11 +137,13 @@ class PlaywrightMcpClient:
         exit_stack = AsyncExitStack()
         try:
             server = self.server_parameters(command)
+            output = exit_stack.enter_context(tempfile.TemporaryDirectory(prefix="jarvis-browser-output-"))
+            server.args.extend(["--output-dir", output])
             read_stream, write_stream = await exit_stack.enter_async_context(
                 stdio_client(server)
             )
             session = await exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
+                ClientSession(read_stream, write_stream, client_info=Implementation(name="JARVIS", version="1.0"))
             )
             await session.initialize()
         except BaseException:

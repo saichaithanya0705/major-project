@@ -13,6 +13,7 @@ from models.routing_payload_parser import (
 )
 
 GuardrailRewriteReason = Literal[
+    "connected_browser_session",
     "browser_resume",
     "screen_context_to_actionable_agent",
     "execution_request_needs_actionable_agent",
@@ -118,6 +119,13 @@ def apply_routing_guardrails(
         routing_task_text = routing_task_text or default_routing_task_text
 
     original_route = _route_payload_copy(routing_result)
+    from agents.browser.connected_control import connected_session_request, extension_mode, native_browser_request
+    if connected_session_request(user_prompt):
+        return _rewritten({"agent": "browser", "task": user_prompt},
+                          rewritten_from=original_route, reason="connected_browser_session")
+    if extension_mode() and native_browser_request(user_prompt) and str(routing_result.get("agent")) == "browser":
+        return _rewritten({"agent": "cua_vision", "task": user_prompt},
+                          rewritten_from=original_route, reason="browser_needs_desktop_control_surface")
     agent = str(routing_result.get("agent") or "").strip().lower()
     execution_request = is_execution_request(user_prompt)
 
@@ -172,7 +180,7 @@ def apply_routing_guardrails(
 
     if execution_request and agent == "browser":
         task_text = routing_task_text(routing_result) or clean_text(user_prompt, "", max_len=420)
-        if requires_desktop_control_surface(task_text):
+        if requires_desktop_control_surface(task_text) and not connected_session_request(task_text):
             print(
                 "[Router][CapabilityGate] Browser route needs desktop/profile/window control -> "
                 "cua_vision"

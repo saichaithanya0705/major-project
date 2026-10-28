@@ -94,6 +94,7 @@ async def main():
     async def stop_all():
         nonlocal current_task
         print("Stop requested: cancelling active tasks.")
+        CONFIRMATIONS.cancel()
         request_cua_vision_stop()
         BrowserAgent.request_stop_all()
         async with task_lock:
@@ -128,6 +129,17 @@ async def main():
         nonlocal current_task, last_overlay_text, last_overlay_session_id, last_overlay_ts
         text = text.strip()
         if not text:
+            return
+        from agents.browser.connected_control import control_command
+        from ui.visualization_api.chat_response import send_chat_response
+        if text.lower().strip().rstrip(".!?") in {"stop", "cancel", "stop browser", "stop browser task"}:
+            await stop_all()
+            await send_chat_response("Stopped active work. Your browser tabs remain open.", source="browser_use")
+            return
+        if control_command(text):
+            result = await BrowserAgent.handle_control_command(text)
+            payload = result.get("result") or {}
+            await send_chat_response(payload.get("summary") or result.get("error") or "Browser command failed.", source="browser_use")
             return
         # A reply to a pending "Confirm: ..." question answers it instead of starting a task.
         if CONFIRMATIONS.answer(text):
@@ -183,6 +195,7 @@ async def main():
 
         await server.wait_forever()
     finally:
+        await BrowserAgent.close_connected()
         for message in summarize_stop_results(process_supervisor.stop_all()):
             print(f"[ProcessCleanup] {message}")
 

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>JARVIS Browser Fixture</title>
+<style>body{max-width:850px;margin:40px auto;font:18px system-ui;line-height:1.6}nav a{margin-right:24px}label{display:block;margin:12px 0}input,select,button{font:inherit;padding:7px}table{border-collapse:collapse}td,th{padding:12px;border:1px solid #888}[hidden]{display:none!important}</style>
+<nav><a href="/">Home</a><a href="/research">Research</a><a href="/form">Application</a><a href="/app">Project board</a></nav>
+<main>
+<section data-page="/"><h1>Browser operator test workspace</h1><p>Local synthetic data for a presentation rehearsal.</p></section>
+<section data-page="/research"><h1>Device comparison</h1><p>Inspect each report for its battery measurement.</p><table><tr><th>Device</th><th>Monthly price</th><th>Memory</th><th>Report</th></tr><tr><td>Quartz</td><td>15 credits</td><td>8 GB</td><td><a href="/quartz">Quartz report</a></td></tr><tr><td>Lumen</td><td>22 credits</td><td>16 GB</td><td><a href="/lumen">Lumen report</a></td></tr></table></section>
+<section data-page="/quartz"><h1>Quartz report</h1><p>Measured battery life: 9 hours.</p><a href="/research">Back to comparison</a></section>
+<section data-page="/lumen"><h1>Lumen report</h1><p>Measured battery life: 14 hours.</p><a href="/research">Back to comparison</a></section>
+<section data-page="/form"><h1>Demo application</h1><form method="post" action="/submit" aria-label="Demo application">
+<label>Full name <input name="full_name" required></label>
+<label>Email <input name="email" type="email" required></label>
+<label>Track <select name="track"><option>Research</option><option>Engineering</option></select></label>
+<label><input type="checkbox" name="updates">Receive project updates</label>
+<label><input type="radio" name="attendance" value="online">Online attendance</label>
+<label><input type="radio" name="attendance" value="in-person">In-person attendance</label>
+<button type="submit">Send application</button></form></section>
+<section data-page="/app"><h1>Project board</h1><button type="button" id="details">Show details</button><p id="milestone" hidden>Milestone Polaris is due on Friday.</p>
+<label>Draft title <input name="draft_title" id="draft-title"></label><button type="button" id="spa-submit">Submit draft</button><p id="spa-result" aria-live="polite"></p></section>
+</main><script>
+for(const section of document.querySelectorAll('[data-page]'))section.hidden=section.dataset.page!==location.pathname;
+document.querySelector('#details').onclick=()=>document.querySelector('#milestone').hidden=false;
+document.querySelector('#spa-submit').onclick=async()=>{const response=await fetch('/submit-draft',{method:'POST',body:document.querySelector('#draft-title').value});document.querySelector('#spa-result').textContent=response.ok?'Draft received successfully':'Draft was not received';};
+</script></html>

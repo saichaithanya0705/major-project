@@ -38,8 +38,8 @@ You have six tools available:
    - "Book a flight to NYC"
    - "Fill out this form"
    - "Go to website X"
-   - Any task that can run inside the agent's managed browser session
-   - Cannot open or control a specific installed browser app, user profile, existing window, or desktop browser account
+   - General web tasks in the configured browser session; extension mode uses the user's selected existing browser tab
+   - Cannot perform native window management or switch to an arbitrary browser/profile; those require desktop control
 
 4. **invoke_cua_cli** - Shell-based desktop control
    - "Run this command"
@@ -72,7 +72,7 @@ ROUTING RULES:
 - Use `invoke_cua_cli` for shell/file/codebase/localhost/server tasks and local machine state that tools can query directly.
 - Prefer `invoke_cua_cli` for known local paths, saved files, folders, and follow-up requests like "open the file in VS Code" when session context already provides the file path.
 - Use `invoke_cua_vision` for UI clicking/typing/navigation tasks on desktop apps.
-- Capability contract: `invoke_browser` controls only the BrowserAgent's own managed browser session. If the user asks to open/use a specific installed app, an existing window, a named profile, "my browser", or another desktop-owned browser context, use `invoke_cua_vision`.
+- Capability contract: in managed mode `invoke_browser` controls its own session; in extension mode it controls the user's explicitly selected existing browser tab, including "my browser" web tasks. Native window management, launching a different browser, and arbitrary profile switching still require `invoke_cua_vision`.
 - For pure screen-understanding questions ("what do you see", "what's on my screen", "explain this UI"), call `invoke_jarvis` directly and skip `request_screen_context`.
 - Use `direct_response` for factual/chat Q&A that does not need current web evidence, sources, the screen, browser automation, local files, or desktop control, OR when a multi-step execution is fully complete.
 - For ordinary multi-step requests, choose one actionable tool call per turn and continue step-by-step until done.
@@ -104,7 +104,7 @@ TIE-BREAK RULES:
 - If the same local state can be inspected through shell instead of a GUI, prefer invoke_cua_cli.
 - If request involves public website automation without local tooling, prefer invoke_browser.
 - If request needs pointer/mouse/visual app manipulation, prefer invoke_cua_vision.
-- If request requires a specific installed browser/app/profile/window before web automation, prefer invoke_cua_vision because BrowserAgent cannot satisfy that starting context.
+- Use invoke_cua_vision for native browser/app/window management or selecting an arbitrary profile; use invoke_browser for web work in an already selected extension session.
 - If uncertain between actionable agents, prefer invoke_cua_cli.
 
 FEW-SHOT ROUTING EXAMPLES:
@@ -156,7 +156,7 @@ Hard routing rules:
 - If execution depends on currently visible unknown details, use screen_context first.
 - Current/latest/recent/source-grounded factual Q&A is handled by the DirectChatAgent before routing. Do not use browser automation for Q&A unless the user asks to open/click/fill a website.
 - Do not manufacture current/source-grounded factual answers without Tavily sources.
-- Capability contract: browser controls only the BrowserAgent-managed browser session. If the request needs a specific installed app, existing window, named profile, "my browser", or desktop-owned browser context, use cua_vision.
+- Capability contract: browser uses its managed session by default, or the user's selected existing tab when extension mode is configured. In extension mode, "my browser" web tasks use browser. Native app/window management and arbitrary profile switching still use cua_vision.
 - Known local files, folders, paths, and follow-up editor opens such as "open the file in VS Code" should use cua_cli when session context provides the path.
 - Requests to create a presentation, Word document, PDF, or spreadsheet use cua_cli, which runs the matching skill.
 - Preserve original wording in task/query; do not paraphrase away URLs, filenames, or entities.
