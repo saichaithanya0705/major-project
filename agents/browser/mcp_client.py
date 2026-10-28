@@ -2,12 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+
+
+class McpToolError(RuntimeError):
+    """The MCP server failed to execute an operation."""
+
+
+@dataclass(frozen=True)
+class McpToolResult:
+    text: str
+    is_error: bool = False
+    structured: dict | None = None
+
+    def require_success(self) -> "McpToolResult":
+        if self.is_error or self.text.lstrip().startswith("### Error"):
+            # Raw server errors may contain page contents or query strings.
+            raise McpToolError("Browser tool failed; inspect the selected tab and reconnect if needed.")
+        return self
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    return value.get(name, default) if isinstance(value, dict) else getattr(value, name, default)
 
 
 def parse_mcp_text_response(response: Any) -> str:
@@ -44,7 +67,16 @@ def parse_mcp_text_response(response: Any) -> str:
 
 
 class PlaywrightMcpClient:
-    def __init__(self, project_root: Path | None = None) -> None:
+    def __init__(self, project_root: Path | None = None, *, extension: bool = False,
+                 browser: str = "chrome", executable_path: str | None = None,
+                 headless: bool = False, timeout: float = 45.0) -> None:
+        if extension and browser not in {"chrome", "msedge"}:
+            raise ValueError("Official extension mode supports chrome or msedge channels.")
+        self.extension = extension
+        self.browser = browser
+        self.executable_path = executable_path
+        self.headless = headless
+        self.timeout = max(1.0, min(float(timeout), 120.0))
         self.project_root = (
             Path(project_root)
             if project_root is not None
@@ -53,6 +85,10 @@ class PlaywrightMcpClient:
         self._session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
         self._state_lock = asyncio.Lock()
+        self._owner_lock = asyncio.Lock()
+        self._owner: asyncio.Task | None = None
+        self._requests: asyncio.Queue = asyncio.Queue()
+        self._closing = False
 
     @property
     def integration_dir(self) -> Path:
@@ -71,15 +107,30 @@ class PlaywrightMcpClient:
     def is_installed(self) -> bool:
         return self.resolve_command().is_file()
 
+    def server_parameters(self, command: Path) -> StdioServerParameters:
+        args = ["--image-responses", "omit", "--codegen", "none"]
+        if self.extension:
+            args.extend(["--extension", "--browser", self.browser])
+        if self.executable_path:
+            args.extend(["--executable-path", self.executable_path])
+        if self.headless and not self.extension:
+            args.append("--headless")
+        cli = self.integration_dir / "node_modules" / "@playwright" / "mcp" / "cli.js"
+        executable = str(command)
+        if os.name == "nt" and cli.is_file():
+            executable = shutil.which("node") or "node"
+            args.insert(0, str(cli))
+        # Use the SDK's minimal inherited environment, plus optional pairing data.
+        token = os.getenv("PLAYWRIGHT_MCP_EXTENSION_TOKEN", "").strip()
+        environment = {"PLAYWRIGHT_MCP_EXTENSION_TOKEN": token} if token else None
+        return StdioServerParameters(command=executable, args=args,
+            cwd=str(self.integration_dir if self.integration_dir.is_dir() else self.project_root),
+            env=environment)
+
     async def _open_session(self, command: Path) -> tuple[ClientSession, AsyncExitStack]:
         exit_stack = AsyncExitStack()
         try:
-            cwd = self.integration_dir if self.integration_dir.is_dir() else self.project_root
-            server = StdioServerParameters(
-                command=str(command),
-                args=[],
-                cwd=str(cwd),
-            )
+            server = self.server_parameters(command)
             read_stream, write_stream = await exit_stack.enter_async_context(
                 stdio_client(server)
             )
@@ -108,6 +159,8 @@ class PlaywrightMcpClient:
             return session
 
     async def list_tools(self) -> list[Any]:
+        if self.extension or self._owner is not None:
+            return await self._owned_request("tools", None)
         session = await self.connect()
         return await self._list_tools_for_session(session)
 
@@ -117,9 +170,64 @@ class PlaywrightMcpClient:
         return list(tools or [])
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+        if self.extension or self._owner is not None:
+            return (await self.call_result(name, arguments)).require_success().text
         session = await self.connect()
         response = await session.call_tool(name, arguments)
         return parse_mcp_text_response(response)
+
+    async def call_result(self, name: str, arguments: dict[str, Any] | None = None) -> McpToolResult:
+        response = await self._owned_request("call", (name, arguments or {}))
+        structured = _field(response, "structuredContent")
+        return McpToolResult(parse_mcp_text_response(response), bool(_field(response, "isError", False)),
+                             structured if isinstance(structured, dict) else None)
+
+    async def tool_schemas(self) -> dict[str, dict]:
+        tools = await self._owned_request("tools", None)
+        return {self._tool_name(tool): _field(tool, "inputSchema", {}) for tool in tools}
+
+    async def _owned_request(self, operation: str, value: Any) -> Any:
+        async with self._owner_lock:
+            if self._closing:
+                raise McpToolError("Browser connection is closing.")
+            if self._owner is None or self._owner.done():
+                self._owner = asyncio.create_task(self._serve_requests(), name="jarvis-browser-mcp")
+            future = asyncio.get_running_loop().create_future()
+            self._requests.put_nowait((operation, value, future))
+        try:
+            return await asyncio.wait_for(future, timeout=self.timeout + 5)
+        except asyncio.TimeoutError as exc:
+            raise McpToolError("Browser connection timed out; outcome may be unknown. Reconnect before continuing.") from exc
+
+    async def _serve_requests(self) -> None:
+        # Opening and closing AnyIO's stdio scopes must happen in the SAME task.
+        current = None
+        try:
+            while True:
+                operation, value, current = await self._requests.get()
+                if current.cancelled():
+                    continue
+                try:
+                    async with asyncio.timeout(self.timeout):
+                        session = await self.connect()
+                        if operation == "tools":
+                            result = await self._list_tools_for_session(session)
+                        else:
+                            name, arguments = value
+                            result = await session.call_tool(name, arguments)
+                    if not current.done():
+                        current.set_result(result)
+                except Exception as exc:
+                    if not current.done():
+                        current.set_exception(McpToolError(f"Browser transport failed ({type(exc).__name__}); reconnect or check extension setup."))
+        finally:
+            if current is not None and not current.done():
+                current.cancel()
+            while not self._requests.empty():
+                _, _, pending = self._requests.get_nowait()
+                if not pending.done():
+                    pending.cancel()
+            await self._close_session()
 
     async def snapshot(self) -> str:
         return await self.call_tool("browser_snapshot")
@@ -133,6 +241,11 @@ class PlaywrightMcpClient:
         return str(value or "")
 
     async def health_check(self) -> bool:
+        if self.extension:
+            try:
+                return "browser_snapshot" in await self.tool_schemas()
+            except Exception:
+                return False
         if not self.is_installed():
             await self.close()
             return False
@@ -156,6 +269,21 @@ class PlaywrightMcpClient:
                 await exit_stack.aclose()
 
     async def close(self) -> None:
+        async with self._owner_lock:
+            self._closing = True
+            owner = self._owner
+            if owner is not None:
+                owner.cancel()
+        try:
+            if owner is not None:
+                await asyncio.gather(owner, return_exceptions=True)
+            else:
+                await self._close_session()
+        finally:
+            self._owner = None
+            self._closing = False
+
+    async def _close_session(self) -> None:
         async with self._state_lock:
             exit_stack = self._exit_stack
             self._session = None
