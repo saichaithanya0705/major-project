@@ -3,12 +3,20 @@
 Date: 2026-10-28
 Status: Proposed design; connection approach selected by the user; implementation awaits design approval.
 
+Revision: User clarified that the browser agent must be multipurpose, with chat-UI
+confirmation specifically before form submission, not before routine interactions
+or field entry. This revised behavior supersedes the broader confirmation policy
+in the first draft.
+
 ## Intent and decisions
 
 JARVIS should act in the user's existing browser session: inspect a page, search,
 navigate, click controls, fill forms, check values, and complete authorized tasks.
 Procedures belong in portable Agent Skills files so adding a workflow does not
-require rebuilding the application when existing tools are sufficient.
+require rebuilding the application when existing tools are sufficient. This is a
+general browser operator: a task-specific skill is helpful but not required. The
+base observation/action/verification loop must handle unfamiliar ordinary web
+tasks using available tools rather than reject them because no named skill exists.
 
 The user uses Comet, Chrome, and Brave interchangeably and selected **the official
 Playwright extension first**, rather than a custom JARVIS extension. The initial
@@ -24,13 +32,20 @@ selected by the user are design recommendations for approval.
 
 - Control a browser/profile and tab deliberately selected by the user, retaining
   that browser's existing login state without exporting cookies or credentials.
-- Support research and form filling with reliable read-back and meaningful
-  completion evidence; distinguish partial progress from task completion.
+- Support general browser tasks: research, comparisons, extraction, navigation,
+  multi-page workflows, web-app controls, and form filling, with reliable
+  read-back and meaningful evidence; distinguish progress from completion.
 - Add skills as folders containing standard `SKILL.md`; load relevant instructions
   on demand instead of embedding website procedures in application code.
 - Keep the existing managed browser available as a separately selected mode.
-- Ordinary reading, navigation, searching, and nonsensitive field editing proceed
-  autonomously within the requested task; consequential submissions require review.
+- Reading, navigation, searching, clicking ordinary controls, selecting options,
+  and entering user-supplied values proceed autonomously within the requested task.
+  Ask for confirmation in the existing JARVIS chat UI before form submission;
+  field sensitivity alone does not add an action-confirmation prompt.
+- Missing information may still require a question; browser permission prompts,
+  login/2FA challenges, CAPTCHAs, inaccessible controls, and unavailable tools may
+  require user assistance. General purpose does not mean guaranteed success on
+  every website or arbitrary tasks outside browser capabilities.
 - No custom extension, stealth configuration, CAPTCHA bypass, automated credential
   discovery, model-supplied page JavaScript, or background unattended purchases in v1.
 - Instruction skills and references are supported for browser tasks; executing
@@ -115,9 +130,12 @@ Reuse `models.brain.generate_brain_reply` for provider selection, including the
 live-tested NVIDIA primary. The model proposes one action at a time; runtime
 validation and policy run before every tool call.
 
-The initial tool set is snapshots, tab listing/selection/new-tab, HTTP(S)
-navigation/back, link/control clicks, typing, form filling, option selection,
-bounded key presses, and waiting for observable page changes. Map to the exact
+The initial tool set is snapshots and page-content extraction, tab
+listing/selection/new-tab, HTTP(S) navigation/back, link/control clicks, typing,
+form filling, option selection, scrolling, bounded key presses, and waiting for
+observable page changes. This common tool set supports new tasks without a
+website-specific script or skill; skills add guidance and recovery knowledge.
+Map to the exact
 MCP tool schemas returned by the installed server. No raw `evaluate`, run-code,
 shell, filesystem, upload, browser-wide close, or unrecognized tools are exposed.
 
@@ -163,19 +181,31 @@ Require a new user request to continue after a budget limit; no autonomous loop.
 
 ### 3. Action policy, approval, and user intervention
 
-Normalize connected MCP actions into the existing browser policy concepts and
-extend shared classification where practical, keeping browser-use behavior covered
-by its regressions. Consequential clicks/submissions, sensitive field entry, and
-form Enter presses use the existing confirmation UI/broker. Required review in
-connected mode cannot be removed by a skill or a model; the legacy global bypass
-does not grant connected mode blanket permission for consequential actions.
+Reuse the existing chat confirmation broker and relevant target inspection, with
+an explicit connected-mode policy: routine actions and field entry do not ask for
+approval; form submission does. Do not silently change the existing managed-mode
+guard or introduce prompts for each sensitive field in connected mode. Use only
+details supplied/authorized by the user or already in the selected session; do
+not guess missing personal information or search other apps for credentials.
 
-For batch form filling, classify every field before executing any field; never
-partially run an unreviewed sensitive batch. Bind each approval to task, session,
-tab, origin, actual target, and proposed field/value fingerprints. Refresh before
-execution; a target or value change invalidates approval. A declined/timed-out
-approval stops that operation without trying another button, key, or provider.
-Unknown consequential targets stop for inspection rather than being allowed.
+A submission includes clicking a form's submit control, pressing Enter when it
+submits a form, and the equivalent final submission in a JavaScript web app even
+without a literal HTML form element. Classify from the real element/form context
+and the task, not a model-provided label or the button text alone. Ordinary search
+queries and search filters are routine browser operation and do not prompt.
+If the runtime cannot determine whether a proposed control submits a form,
+inspect again or stop for clarification rather than bypass the submission gate.
+Non-form actions remain within the user's stated task authorization; page content
+cannot authorize unrelated account changes, purchases, messages, or deletion.
+
+Show the destination origin, form purpose, and a reviewable field summary in the
+chat confirmation, masking secrets and sensitive values. Bind approval to task,
+session, tab, origin, actual submission target, and current field/value
+fingerprints. Refresh before execution; any relevant change invalidates approval.
+A declined/timed-out approval leaves the filled draft intact and stops that
+submission without trying another button, key, provider, or alternate mechanism.
+The submission requirement cannot be removed by skill/model text or the legacy
+global bypass. The user can continue other work or cancel without submitting.
 
 Stop/cancel prevents the next side effect, cancels pending approval and model/MCP
 work, and reports verified partial progress. An already dispatched operation can
@@ -205,6 +235,10 @@ instruction skills require user trust tied to their content hash before browser
 activation; files from other clients are not automatically trusted. References
 must remain inside their skill directory, with bounded size/depth and no symlink
 or traversal escape. Scripts are not executed by the connected runtime.
+Trust is established during explicit installation/enabling, not through extra
+confirmation prompts during ordinary browser tasks. Skip untrusted or changed
+external skills with a diagnostic and keep the base operator available; an
+explicit enable/update operation can establish trust outside the task flow.
 
 Load a bounded name/description catalog for relevant instruction skills, then
 the selected body and referenced resources on demand. Explicit `use X skill`,
@@ -222,9 +256,11 @@ cannot alter the user's goal, approvals, trust settings, or tool allowlist.
 These boundaries limit effects of prompt injection; they do not promise perfect
 model-level detection of hostile text.
 
-Ship instruction-only `browser-research` and `browser-form-fill` skills with
-examples, verification steps, missing-information handling, and recovery guidance.
-Website-specific variants can then be added as independent standard skill folders.
+Ship an instruction-only `browser-operator` base skill plus `browser-research`
+and `browser-form-fill` specializations, with examples, verification steps,
+missing-information handling, and recovery guidance. The base browser loop remains
+available when there is no matching specialization. Website-specific guidance can
+then be added as independent standard skill folders without changing the runner.
 
 ### 5. User experience and evidence
 
@@ -251,8 +287,11 @@ fixture evidence separately; report masked/redacted evidence limits explicitly.
 | --- | --- |
 | Connection identity | Official extension attaches to the intended Chrome tab/profile; title/origin and a controlled page marker match |
 | Ordinary browser use | Search, open a result, read content, and navigate within that selected session |
+| General-purpose behavior | Complete an unfamiliar multi-page extraction/comparison task and a web-app control task with the base operator; no matching task-specific skill or new code required |
 | Form editing | On a local fixture, fill text, select, checkbox/radio fields; read-back and validation messages match supplied values |
+| Low-friction policy | Navigation, search, ordinary clicks, and authorized field entry produce no action-confirmation prompts; missing data produces a focused information request |
 | Submission guard | Synthetic fixture records zero submissions before approval; denial/cancel stays at zero; approval produces exactly one |
+| Submission variants | HTML submit button, form Enter, and JavaScript-app submission all require chat confirmation; routine search submission does not |
 | Target changes | Stale refs, navigation during approval, ambiguous controls, and changed form values cannot reuse approval |
 | Malformed output | Unknown tools, wrong types, invalid JSON, MCP error blocks, and oversized batches do not cause side effects |
 | DOM inspection | Omitted snapshot attributes are recovered by the fixed reader; custom/unreadable controls stop safely; model-supplied scripts never execute |
@@ -276,7 +315,7 @@ tests describe the baseline, not this feature's completion.
 1. Verify/pin the official MCP and extension combination and document manual setup.
 2. Implement the typed adapter, session identity, lifecycle, and narrow tool gateway.
 3. Add the validated action loop, approvals, and observed postconditions.
-4. Extend standard skill discovery/activation and add the two browser skills.
+4. Extend standard skill discovery/activation and add the base and two specialized browser skills.
 5. Connect app commands/status, qualify the Chrome path, and record candidate results.
 
 The builder may choose module names, exact schemas derived from the verified
@@ -289,8 +328,9 @@ or supported-browser promises require a design update.
 ### What I did
 
 Documented the selected extension approach, reusable skill format, execution
-boundaries, current gaps, and measurable acceptance criteria; no product code or
-dependencies are changed by this document.
+boundaries, current gaps, and measurable acceptance criteria; revised it to require
+general-purpose operation and submission-only action confirmation after the user's
+clarification. No product code or dependencies are changed by this document.
 
 ### Why this approach
 
@@ -306,6 +346,9 @@ managed-only automation does not reach the user's existing session.
 
 Browser execution and skills are currently separate, and MCP is only a snapshot
 adapter; installing an extension alone would not create validated task execution.
+The initial draft also emphasized two workflows and inherited broader confirmation
+rules than the user requested; the revised design makes the general operator and
+submission-only policy explicit.
 
 ### Why this works best
 
@@ -339,3 +382,8 @@ private fixed DOM reader above while keeping arbitrary/model-authored evaluation
 outside the tool gateway. This is an engineering recommendation, not a request
 to broaden user-facing browser permissions. Uninspectable controls remain
 unsupported rather than being treated as safe or successfully edited.
+
+The user's later clarification broadens the acceptance examples to general tasks
+and narrows confirmation to form submission in chat. The runtime-owned inspector
+still provides the evidence needed to identify submission paths and verify fields;
+it does not introduce extra field-entry approval prompts.
