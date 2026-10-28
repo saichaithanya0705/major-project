@@ -45,8 +45,8 @@ class ConfirmationBroker:
     def has_pending(self) -> bool:
         return self._pending is not None and not self._pending.done()
 
-    async def request(self, action: str) -> bool:
-        if not confirmations_enabled():
+    async def request(self, action: str, *, required: bool = False) -> bool:
+        if not required and not confirmations_enabled():
             return True
         if self.has_pending:
             # One question at a time; a second risky action while waiting is declined.
@@ -72,6 +72,11 @@ class ConfirmationBroker:
         assert self._pending is not None
         self._pending.set_result(bool(_YES.match(text or "")))
         return True
+
+    def cancel(self) -> None:
+        """Decline a pending review when the owning task is stopped."""
+        if self.has_pending:
+            self._pending.set_result(False)
 
 
 CONFIRMATIONS = ConfirmationBroker()
