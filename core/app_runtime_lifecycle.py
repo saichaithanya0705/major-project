@@ -109,15 +109,33 @@ def launch_electron_ui(
             message=f"Electron auto-launch skipped (missing UI directory): {ui_root}"
         )
 
-    npm_command = "npm.cmd" if os.name == "nt" else "npm"
-    npm_path = shutil.which(npm_command) or shutil.which("npm")
-    if not npm_path:
-        return ElectronLaunchOutcome(message="Electron auto-launch skipped (npm not found on PATH).")
-
     env = os.environ.copy()
+    # Packaged Electron apps must not inherit Node-only mode from a parent shell.
+    env.pop("ELECTRON_RUN_AS_NODE", None)
     settings_path = os.path.join(project_root, "settings.json")
     env["JARVIS_PROJECT_ROOT"] = str(Path(project_root).resolve())
     env["JARVIS_RUNTIME_STATE_PATH"] = get_runtime_state_path(settings_path)
+    executable_override = env.get("JARVIS_UI_EXECUTABLE", "").strip()
+    if executable_override:
+        executable = Path(executable_override)
+        if not executable.is_absolute():
+            executable = Path(ui_root) / executable
+        executable = executable.resolve()
+        if not executable.is_file():
+            raise ProcessStartError(
+                f"JARVIS_UI_EXECUTABLE is not a file: {executable}. "
+                "Set it to an enterprise-approved executable or unset it for npm run dev."
+            )
+        command = [str(executable)]
+        launch_message = f"Launching packaged JARVIS UI: {executable}"
+    else:
+        npm_command = "npm.cmd" if os.name == "nt" else "npm"
+        npm_path = shutil.which(npm_command) or shutil.which("npm")
+        if not npm_path:
+            return ElectronLaunchOutcome(message="Electron auto-launch skipped (npm not found on PATH).")
+        command = [npm_path, "run", "dev"]
+        launch_message = "Launching Electron UI via npm run dev..."
+
     electron_binary = os.path.join(
         ui_root,
         "node_modules",
@@ -139,17 +157,21 @@ def launch_electron_ui(
         handle = supervisor.start(
             ManagedProcessSpec(
                 label="electron-ui",
-                command=[npm_path, "run", "dev"],
+                command=command,
                 cwd=Path(ui_root),
                 env=env,
                 creationflags=creationflags,
                 start_new_session=start_new_session,
+                stop_process_tree=os.name == "nt",
             )
         )
     except ProcessStartError as exc:
+        if executable_override:
+            # Never silently try an unapproved runtime after an explicit override fails.
+            raise
         return ElectronLaunchOutcome(message=f"Electron auto-launch failed: {exc}")
 
-    return ElectronLaunchOutcome(handle=handle, message="Launching Electron UI...")
+    return ElectronLaunchOutcome(handle=handle, message=launch_message)
 
 
 def _capture_screen_size() -> tuple[int, int]:

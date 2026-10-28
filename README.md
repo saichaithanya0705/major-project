@@ -103,23 +103,36 @@ ollama serve
 ollama run qwen3.5:4b-q4_K_M "ready"
 ```
 
-2. Run the frontend visualization
-```
-cd ui
-npm run dev
-```
+2. Start the backend and UI together from the project root
 
-3. Run the main app from the project root with the project venv
-
-Windows:
+Windows (PowerShell):
 ```powershell
-.\.venv\Scripts\python.exe app.py
+.\start-dev.ps1
 ```
+
+The launcher uses `.venv\Scripts\python.exe` (or `.venv-1\Scripts\python.exe` if `.venv` is absent) without requiring activation. `app.py` starts the UI after its WebSocket server is ready and owns UI cleanup, including the npm/Electron process tree on Windows; keep this terminal open and press **Ctrl+C** to stop both. The launcher enables UI auto-launch for this run, even if `JARVIS_AUTO_LAUNCH_ELECTRON=0` was set in your shell, and restores that setting afterward.
+
+For a different Python environment, pass its interpreter explicitly:
+
+```powershell
+.\start-dev.ps1 -PythonCommand '.\.venv-1\Scripts\python.exe'
+```
+
+On managed Windows, use your enterprise-approved packaged UI:
+
+```powershell
+$env:JARVIS_UI_EXECUTABLE = 'C:\Path\To\JARVIS.exe'
+.\start-dev.ps1
+```
+
+When set, `JARVIS_UI_EXECUTABLE` is launched directly without requiring npm or the development Electron runtime. A missing path fails startup instead of falling back to another runtime. Otherwise the app runs `npm run dev` in `ui` (run `npm install` there once during setup); `JARVIS_ELECTRON_BINARY` remains available for an approved Electron runtime. Relative executable override paths resolve from `ui`. See [Electron on managed Windows](ui/ENTERPRISE_SIGNING.md) for signing requirements.
 
 macOS / Linux:
 ```bash
 .venv/bin/python app.py
 ```
+
+`app.py` also auto-launches the UI on these platforms. For backend-only work, run `app.py` directly with `JARVIS_AUTO_LAUNCH_ELECTRON=0`; `cd ui` followed by `npm run dev` remains available for UI-only work.
 
 ## Jarvis Commands
 

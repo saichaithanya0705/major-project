@@ -65,23 +65,33 @@ npm run package:win
 
 ## Launching A Trusted Native Electron Build
 
-If you already have a packaged and enterprise-approved executable, launch it with:
+For local development on Windows, start both `app.py` and the UI from the **project root** with one command:
+
+```powershell
+.\start-dev.ps1
+```
+
+The launcher prefers the project `.venv`, falls back to `.venv-1`, and accepts `-PythonCommand 'C:\Path\To\python.exe'` for another environment. The app starts the UI after the server is ready. Press **Ctrl+C** in that terminal to stop both, including the UI's child processes.
+
+If you already have a packaged and enterprise-approved executable, set it before launching:
 
 ```powershell
 $env:JARVIS_UI_EXECUTABLE = 'C:\Path\To\JARVIS.exe'
-cd ui
-npm run dev
+.\start-dev.ps1
 ```
+
+`app.py` launches this executable directly, so npm and `node_modules/electron` are not required for this UI path. It passes the project's runtime-state location to the packaged UI so both processes use the same backend connection settings. An explicit missing path fails startup; it does not fall back to an unsigned runtime. Use an absolute path where possible; relative override paths resolve from `ui`.
+
+Without `JARVIS_UI_EXECUTABLE`, the app uses the normal `npm run dev` flow in `ui`.
 
 If you have an enterprise-approved Electron runtime instead, use:
 
 ```powershell
 $env:JARVIS_ELECTRON_BINARY = 'C:\Path\To\electron.exe'
-cd ui
-npm run dev
+.\start-dev.ps1
 ```
 
-If you want to force a packaged native executable, set `JARVIS_UI_EXECUTABLE` before running `npm run dev`.
+For UI-only development, `cd ui` followed by `npm run dev` still honors both overrides. `JARVIS_UI_EXECUTABLE` takes precedence over `JARVIS_ELECTRON_BINARY`. To return to the default development runtime, remove the overrides with `Remove-Item Env:JARVIS_UI_EXECUTABLE, Env:JARVIS_ELECTRON_BINARY -ErrorAction SilentlyContinue`.
 
 ## What Will Not Fix This
 

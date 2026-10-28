@@ -33,6 +33,7 @@ class ManagedProcessSpec:
     creationflags: int = 0
     start_new_session: bool = False
     stop_timeout_seconds: float | None = None
+    stop_process_tree: bool = False
 
 
 @dataclass(frozen=True)
@@ -139,8 +140,14 @@ class ProcessSupervisor:
         try:
             returncode = process.poll()
             if returncode is None:
-                process.terminate()
-                returncode = process.wait(timeout=timeout)
+                if handle.spec.stop_process_tree:
+                    # Stop the tree while the parent still exists. Terminating an
+                    # npm wrapper first can orphan its Node/Electron descendants.
+                    forced = True
+                    returncode = self._force_stop(process, pid, timeout)
+                else:
+                    process.terminate()
+                    returncode = process.wait(timeout=timeout)
         except TimeoutExpired:
             forced = True
             returncode = self._force_stop(process, pid, timeout)

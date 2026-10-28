@@ -18,7 +18,10 @@ function normalizePathEnv(value) {
 
 function getExecutableOverride() {
   const appExecutable = normalizePathEnv(process.env.JARVIS_UI_EXECUTABLE);
-  if (appExecutable && fs.existsSync(appExecutable)) {
+  if (appExecutable) {
+    if (!fs.existsSync(appExecutable) || !fs.statSync(appExecutable).isFile()) {
+      throw new Error(`JARVIS_UI_EXECUTABLE is not a file: ${appExecutable}. Set it to an enterprise-approved executable or unset it for npm run dev.`);
+    }
     return { command: appExecutable, args: [], label: "packaged UI executable" };
   }
 
@@ -31,7 +34,13 @@ function getExecutableOverride() {
 }
 
 function launchElectron() {
-  const launchTarget = getExecutableOverride();
+  let launchTarget;
+  try {
+    launchTarget = getExecutableOverride();
+  } catch (error) {
+    console.error("[ui-launcher]", error?.message || error);
+    process.exit(1);
+  }
   console.warn(`[ui-launcher] Launching ${launchTarget.label}: ${launchTarget.command}`);
 
   let child;

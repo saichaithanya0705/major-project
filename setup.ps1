@@ -127,5 +127,5 @@ finally {
 }
 
 Write-Host "[setup] Done."
-Write-Host "[setup] Activate with: .\.venv\Scripts\Activate.ps1"
-Write-Host "[setup] Then run: .\.venv\Scripts\python.exe app.py"
+Write-Host "[setup] Start the backend and UI with: .\start-dev.ps1"
+Write-Host "[setup] Managed Windows: set JARVIS_UI_EXECUTABLE to your enterprise-approved JARVIS.exe first (see ui/ENTERPRISE_SIGNING.md)."
