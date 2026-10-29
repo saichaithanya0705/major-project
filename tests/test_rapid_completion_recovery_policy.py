@@ -178,3 +178,12 @@ def test_cli_read_goal_ignores_dispatch_wording_but_keeps_requested_results():
         routing_result={"agent": "cua_cli", "task": task},
         step_result=step, chain_steps=[step], routing_task_text=_routing_task_text,
     )
+
+
+def test_completed_browser_handoff_ignores_only_its_leading_dispatch_marker():
+    task = "open the chatgpt website and draft a question"
+    step = {"agent": "browser", "task": task, "success": True, "complete": True}
+    assert should_finish_after_successful_agent_step(
+        user_prompt="@browser " + task, routing_result={"agent": "browser", "task": task},
+        step_result=step, chain_steps=[step], routing_task_text=_routing_task_text,
+    )

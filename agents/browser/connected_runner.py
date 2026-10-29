@@ -14,7 +14,7 @@ from pathlib import Path
 import jsonschema
 
 from agents.browser.connected_gateway import AlreadyVerifiedWrite, BrowserInputRequired, ConnectedGateway, StalePageError, SelectedTabLostError, public_url
-from agents.browser.handoff_intent import BrowserHandoffIntent, parse_browser_handoff, parse_direct_url_handoff
+from agents.browser.handoff_intent import BrowserHandoffIntent, parse_browser_handoff, parse_direct_url_handoff, parse_browser_start_handoff
 from agents.browser.mcp_client import McpToolError
 from agents.skills.browser_skills import BrowserSkills
 from core.confirmations import CONFIRMATIONS
@@ -196,8 +196,8 @@ class ConnectedBrowserRunner:
         return observation
 
     async def _open_owned_tab(self, handoff: BrowserHandoffIntent) -> str:
-        if handoff.tab_policy != "owned_url" or not handoff.direct_url:
-            raise McpToolError("A direct HTTP(S) link is required to open a new JARVIS browser tab.")
+        if handoff.tab_policy not in {"owned_url", "owned_start"}:
+            raise McpToolError("A navigation or research request is required to open a new JARVIS browser tab.")
         # connect() only lists shared tabs at this point; it does not inspect
         # their contents. The direct URL below is the user's own instruction.
         await self.connect()
@@ -231,8 +231,10 @@ class ConnectedBrowserRunner:
             handoff = (
                 parse_browser_handoff(source_task)
                 or parse_direct_url_handoff(source_task)
+                or parse_browser_start_handoff(source_task)
                 or parse_browser_handoff(task)
                 or parse_direct_url_handoff(task)
+                or parse_browser_start_handoff(task)
             )
             objective = handoff.task if handoff else task
             input_session = human.session_id if human else "__direct__"
@@ -278,7 +280,7 @@ class ConnectedBrowserRunner:
         # Fresh references and skill contents for each task, never replay old actions.
         observation = (
             await self._open_owned_tab(handoff)
-            if handoff and handoff.tab_policy == "owned_url"
+            if handoff and handoff.tab_policy in {"owned_url", "owned_start"}
             else await self.connect()
         )
         if self.state == "awaiting_tab_selection":

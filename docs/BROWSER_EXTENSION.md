@@ -2,7 +2,7 @@
 
 The browser operator can inspect pages, navigate, search, compare sources, work
 with web-app controls, and fill forms in an explicitly selected existing session
-or a new JARVIS-owned tab created from a user-provided HTTP(S) link.
+or a new JARVIS-owned tab for a supplied link, named website, or fresh search.
 Standard Agent Skills provide additional workflows; a dedicated skill is not
 required for an unfamiliar task. Chrome is the initial supported target for
 qualification. Brave and Comet remain compatibility candidates until tested.
@@ -27,6 +27,12 @@ HTTP(S) link. JARVIS opens that exact link in a new **Playwright · JARVIS** tab
 and starts work there. Existing/current-tab wording intentionally keeps the
 selection requirement: move that tab into the group, then choose its listed
 index before JARVIS reads it.
+
+For a named destination such as `@browser open the ChatGPT website`, JARVIS
+creates its own blank tab and navigates from there. A fresh research/search
+request can start the same way. You do not need to share an unrelated old tab
+or supply the full URL. Requests to use the current tab or fill an unspecified
+existing form still require deliberate tab selection.
 
 The current extension isolates clients into separate tab groups. JARVIS can see
 only tabs in **Playwright · JARVIS**. To share an existing tab, move/drag it into
@@ -74,6 +80,7 @@ for measured tests and remaining limits.
 | `use browser tab 0` | Deliberately select a tab by the index shown by the browser tools |
 | `@browser …` | Explicitly assign the request to the connected-browser operator; type `@` to choose it in chat or use the compact **@ Browser** control |
 | `https://… Open this sheet and count its rows` | Open the user-supplied link in a new JARVIS-owned tab, then perform the task |
+| `@browser open the ChatGPT website and draft a question` | Start an owned tab, navigate to the named site, and compose the draft; final submission still requires review |
 | `disconnect browser` | End JARVIS's connection while leaving your browser/tabs open |
 | `stop` / `cancel` / `stop browser` | Cancel active work and pending submission review |
 | `continue` | Inspect the current page and resume the retained objective |

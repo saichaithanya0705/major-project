@@ -29,9 +29,10 @@ ELEMENT_STATE = r"""async (element) => { /* JARVIS_ELEMENT_STATE */
  const scope = e.form || e.closest('form,[role="form"],[role="search"]');
  const sensitive = n => n.type === 'hidden' || /password|otp|one-time|card|cvv|cvc|ssn|aadhaar|passcode|pin\b/i.test(
    [n.type,n.name,n.id,n.autocomplete,n.getAttribute('aria-label')].join(' '));
+ const value = n => String(n.isContentEditable ? (n.innerText ?? n.textContent ?? '') : (n.value ?? ''));
  const label = n => (n.getAttribute('aria-label') || n.getAttribute('alt') || n.labels?.[0]?.innerText ||
-   n.innerText || n.getAttribute('placeholder') || n.name || n.id || n.tagName).slice(0,120);
- const allControls = scope ? Array.from(scope.querySelectorAll('input,textarea,select,button')) : [];
+   (!n.isContentEditable && n.innerText) || n.getAttribute('placeholder') || n.name || n.id || n.tagName).slice(0,120);
+ const allControls = scope ? Array.from(scope.querySelectorAll('input,textarea,select,button,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]')) : [];
  const controls = allControls.slice(0,100);
  const editable = controls.filter(n => !['hidden','submit','button','reset'].includes(n.type));
  const search = scope ? (scope.getAttribute('role') === 'search' ||
@@ -39,18 +40,18 @@ ELEMENT_STATE = r"""async (element) => { /* JARVIS_ELEMENT_STATE */
      n.type === 'search' || /^(q|query|search|search_query)$/i.test(n.name || n.id)))) :
    (e.type === 'search' || e.getAttribute('role') === 'searchbox');
  const fingerprint = async n => {
-   if (!sensitive(n) || !n.value) return null;
+   if (!sensitive(n) || !value(n)) return null;
    if (!globalThis.crypto?.subtle) return 'unavailable';
-   const bytes = new TextEncoder().encode("__JARVIS_APPROVAL_KEY__" + '\0' + String(n.value));
+   const bytes = new TextEncoder().encode("__JARVIS_APPROVAL_KEY__" + '\0' + value(n));
    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
  };
  const read = async n => ({name:label(n), sensitive:sensitive(n), fingerprint:await fingerprint(n),
-   value:sensitive(n) ? (n.value ? '[present]' : '') : String(n.value ?? '').slice(0,4096),
+   value:sensitive(n) ? (value(n) ? '[present]' : '') : value(n).slice(0,4096),
    checked:!!n.checked, selected:n.selectedOptions ? Array.from(n.selectedOptions).map(o=>o.value) : []});
  return {tag:e.tagName.toLowerCase(), type:e.type || '', role:e.getAttribute('role') || '',
-   label:label(e), value:sensitive(e) ? (e.value ? '[present]' : '') : String(e.value ?? '').slice(0,4096),
+   label:label(e), value:sensitive(e) ? (value(e) ? '[present]' : '') : value(e).slice(0,4096),
    sensitive:sensitive(e), fingerprint:await fingerprint(e), checked:!!e.checked, disabled:!!e.disabled,
-   readOnly:!!e.readOnly, editable:!!e.isContentEditable,
+   readOnly:!!e.readOnly, editable:!!e.isContentEditable, focused:e === document.activeElement,
    selected:e.selectedOptions ? Array.from(e.selectedOptions).map(o=>({value:o.value,text:o.text})) : [],
    valid:e.validity ? e.validity.valid : true,
    form:scope ? {id:scope.id || scope.getAttribute('aria-label') || 'form',
@@ -293,7 +294,7 @@ class ConnectedGateway:
         form = node.get("form") or {}
         if form.get("search") or (not form and node.get("search")):
             return False
-        if enter and node.get("tag") in {"input", "select", "button"} and form:
+        if enter and form and (node.get("tag") in {"input", "textarea", "select", "button"} or node.get("editable")):
             return True
         if node.get("tag") in {"button", "input"} and node.get("type") in {"submit", "image"} and form:
             return True
@@ -388,16 +389,19 @@ class ConnectedGateway:
         self._draft_refs.clear()
         return await self.observe()
 
-    async def open_owned_tab(self, url: str) -> str:
-        """Open a user-requested HTTP(S) URL as JARVIS's selected tab.
+    async def open_owned_tab(self, url: str | None = None) -> str:
+        """Open an owned HTTP(S) tab, or a blank start for named-site navigation.
 
         This is deliberately not exposed to the model.  It is a deterministic
-        consequence of the user's direct-link request, and the tab is selected
+        consequence of the user's navigation request, and the tab is selected
         before any page content is inspected.
         """
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-            raise McpToolError("JARVIS can open only a normal HTTP(S) link in a new browser tab.")
+        if url is None:
+            url = "about:blank"  # Runtime-only start page; never an arbitrary internal URL.
+        else:
+            parsed = urlsplit(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+                raise McpToolError("JARVIS can open only a normal HTTP(S) link in a new browser tab.")
         if not self._schemas:
             self._schemas = await self.client.tool_schemas()
         if "browser_tabs" not in self._schemas:
@@ -445,6 +449,15 @@ class ConnectedGateway:
         if name == "browser_type":
             self._editable(node)
             self._check_personal_value(node, args["text"])
+            if node.get("focused") is False:
+                # A real focus/click lets lazy web-app editors finish initialization.
+                # Do this before typing; a focus trap must never redirect the write.
+                await self._call("browser_click", {"target": target})
+                node = await self._inspect(target)
+                self._editable(node)
+                self._check_personal_value(node, args["text"])
+                if node.get("focused") is False:
+                    raise BrowserInputRequired("The page moved focus away from the requested field. Resolve the visible dialog or sign-in prompt, then continue; no text was entered.")
             inspected_fields.append(({"target":target,"value":args["text"]}, node))
         if name == "browser_select_option":
             self._editable(node, "combobox")

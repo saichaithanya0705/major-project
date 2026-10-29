@@ -17,7 +17,8 @@ class IncompleteStepRecoveryDecision:
 
 
 def _normalized_task_text(value: object) -> str:
-    return " ".join(str(value or "").split()).strip().lower()
+    text = " ".join(str(value or "").split()).strip().lower()
+    return re.sub(r"^@browser\b\s*", "", text)
 
 
 _TASK_TOKEN_RE = re.compile(r"[a-z0-9]+")

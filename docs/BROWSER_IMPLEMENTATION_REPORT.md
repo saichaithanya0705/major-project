@@ -1,5 +1,61 @@
 # Browser implementation and qualification — 2026-10-29
 
+## Named-site navigation and rich-text drafting
+
+### What I did
+
+Navigation and fresh search requests without literal URLs now start in an owned
+blank tab. The planner then resolves and opens the requested destination. Rich
+text editors use their rendered text for read-back and participate in form
+review. Completion matching ignores the leading `@browser` dispatch marker.
+
+### Why this approach
+
+Opening a destination grants creation of an owned tab without granting access
+to unrelated existing tabs. The same workflow supports named sites generally,
+without adding a ChatGPT-only URL shortcut.
+
+### Why not the alternative
+
+Requiring an old tab for a new destination repeats the reported setup dead end.
+Accepting a typing action without read-back would conceal incorrect field entry.
+
+### What was the issue / root cause
+
+Request `c6b765195e2f` connected but stopped at tab selection because "ChatGPT
+website" was not a literal HTTP(S) URL. The first live draft replay then exposed
+a separate reader defect: contenteditable elements were accepted for typing but
+their value was read only from `.value`, which rich-text divs do not provide.
+The completion comparison also treated the dispatch marker as part of the goal.
+
+### Why this works best
+
+The runtime creates the blank tab before model control, then uses the existing
+HTTP(S) navigation validation. Fixed DOM readers verify rich text, including it
+in approval fingerprints. Existing-tab and existing-control requests retain
+their selection behavior. Form submission continues to require chat review.
+The installed ChatGPT page also required dismissing its optional sign-in overlay
+and focusing its lazily initialized composer before typing. The operator skill
+now describes that readiness step, and typing focuses an unfocused target before
+writing, refusing to proceed if the page redirects focus elsewhere. Enter in a
+textarea or rich editor inside a form remains subject to submission review.
+
+### Other valid patterns
+
+A maintained site-name catalog could skip the initial blank page, but requires
+updates for each destination. The planner already has validated navigation tools
+and can use them on an owned start page.
+
+Qualification: the broad suite passed **815 tests, 2 skipped**. The final
+installed-Chrome replay opened ChatGPT from the named-site request, entered
+"What is the news on Arnab cyclone?", verified the draft, and logged
+`request_completed` with one browser delegation in **38.2 seconds**. Send was
+not pressed. This qualifies opening and drafting on this session, not ChatGPT's
+answer accuracy or guaranteed availability. A final focused regression also
+checks that a field changing to a personal-data field during focus cannot
+receive an assumed value.
+The final focused run passed **71 checks**, including that focus-change guard.
+
 ## Screen explanation completion correction
 
 ### What I did

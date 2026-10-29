@@ -1,6 +1,7 @@
 """Connected-runner regression tests for owned direct-link tabs."""
 
 import json
+import pytest
 from pathlib import Path
 
 from agents.browser.mcp_client import McpToolResult
@@ -80,3 +81,34 @@ async def test_current_tab_request_never_creates_an_owned_tab() -> None:
 
     assert client.tab_new_calls == []
     assert result["result"]["awaiting_input"]
+
+
+@pytest.mark.parametrize("task", [
+    "@browser open the chatgpt website and give a prompt what si the news on arnab cycloen",
+    "open the chatgpt website and draft a question",
+    "@browser search for the latest cyclone news",
+])
+async def test_new_site_or_research_starts_without_an_existing_shared_page(task):
+    client = HandoffClient()
+    result = await ConnectedBrowserRunner(client, decide=_done).execute(task)
+    assert client.tab_new_calls == [{"action": "new", "url": "about:blank"}]
+    assert result["success"] and result["complete"]
+
+
+async def test_named_site_can_navigate_and_enter_a_prompt_from_blank_start():
+    client = HandoffClient()
+    client.snapshot = '- textbox "Prompt" [ref=e1]'
+    client.nodes["e1"] = {"tag": "textarea", "type": "textarea", "label": "Prompt", "value": "", "form": None}
+    proposals = iter([
+        {"tool": "browser_navigate", "arguments": {"url": "https://chatgpt.com/"}},
+        {"tool": "browser_type", "arguments": {"target": "e1", "text": "What is the news on Arnab cyclone?", "submit": False}},
+        {"done": True, "summary": "Opened ChatGPT and entered the draft.", "evidence": ["Prompt"]},
+    ])
+    async def decide(_system, _user):
+        return json.dumps(next(proposals))
+    result = await ConnectedBrowserRunner(client, decide=decide).execute(
+        "@browser open the chatgpt website and give a prompt what si the news on arnab cycloen"
+    )
+    assert result["success"] and result["complete"]
+    assert client.nodes["e1"]["value"] == "What is the news on Arnab cyclone?"
+    assert [name for name, _ in client.effects] == ["browser_navigate", "browser_type"]

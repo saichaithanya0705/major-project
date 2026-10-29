@@ -7,12 +7,12 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 
-BrowserTabPolicy = Literal["owned_url", "current", "selected_or_ask"]
+BrowserTabPolicy = Literal["owned_url", "owned_start", "current", "selected_or_ask"]
 
 
 @dataclass(frozen=True, slots=True)
 class BrowserHandoffIntent:
-    """A leading ``@browser`` request and the tab policy it explicitly permits."""
+    """A browser objective and the tab ownership policy its request permits."""
 
     task: str
     direct_url: str | None
@@ -22,9 +22,21 @@ class BrowserHandoffIntent:
 _HANDOFF = re.compile(r"^\s*@browser\b\s*(.+?)\s*$", re.IGNORECASE | re.DOTALL)
 _HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _CURRENT_TAB = re.compile(
-    r"\b(?:current|already[ -]?open|this|shared)\s+(?:browser\s+)?(?:tab|page|website|webpage)\b",
+    r"\b(?:current|existing|already[ -]?open|this|shared)\s+(?:browser\s+)?(?:tab|page|website|webpage|site)\b",
     re.IGNORECASE,
 )
+_NEW_NAVIGATION = re.compile(
+    r"^\s*(?:please\s+)?(?:open|visit|go\s+to|navigate\s+to|search|research|look\s+up)\b", re.I,
+)
+_EXISTING_CONTROL = re.compile(r"\b(?:this|that|current|existing)\s+(?:form|menu|dialog|button|link|dropdown)\b", re.I)
+
+
+def _starts_new_navigation(task: str) -> bool:
+    if not _NEW_NAVIGATION.search(task) or _EXISTING_CONTROL.search(task):
+        return False
+    # Opening a control on an existing page is not opening a new destination.
+    first_goal = re.split(r"\b(?:and|then)\b", task, maxsplit=1, flags=re.I)[0]
+    return not re.search(r"\b(?:button|control|menu|dialog|dropdown|panel|settings|link)\b", first_goal, re.I)
 
 
 def _ordinary_http_url(task: str) -> str | None:
@@ -55,6 +67,8 @@ def parse_browser_handoff(text: str) -> BrowserHandoffIntent | None:
         policy: BrowserTabPolicy = "current"
     elif direct_url:
         policy = "owned_url"
+    elif _starts_new_navigation(task):
+        policy = "owned_start"
     else:
         policy = "selected_or_ask"
     return BrowserHandoffIntent(task=task, direct_url=direct_url, tab_policy=policy)
@@ -62,6 +76,16 @@ def parse_browser_handoff(text: str) -> BrowserHandoffIntent | None:
 
 def browser_handoff_request(text: str) -> bool:
     return parse_browser_handoff(text) is not None
+
+
+def parse_browser_start_handoff(text: str) -> BrowserHandoffIntent | None:
+    """Start standalone navigation/research without requiring an existing page."""
+    task = (text or "").strip()
+    if not task or _CURRENT_TAB.search(task) or _EXISTING_CONTROL.search(task):
+        return None
+    if _starts_new_navigation(task):
+        return BrowserHandoffIntent(task=task, direct_url=None, tab_policy="owned_start")
+    return None
 
 
 def parse_direct_url_handoff(text: str) -> BrowserHandoffIntent | None:
@@ -88,4 +112,5 @@ __all__ = [
     "browser_handoff_request",
     "parse_direct_url_handoff",
     "parse_browser_handoff",
+    "parse_browser_start_handoff",
 ]

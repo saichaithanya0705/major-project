@@ -49,6 +49,18 @@ def test_plain_language_without_a_url_does_not_change_tab_ownership() -> None:
     assert parse_direct_url_handoff("search for a good vegetarian lunch") is None
 
 
+def test_named_site_handoff_starts_its_own_tab_without_a_literal_url():
+    intent = parse_browser_handoff("@browser open the chatgpt website and give a prompt what si the news on arnab cycloen")
+    assert intent.tab_policy == "owned_start"
+    assert intent.direct_url is None
+
+
+def test_current_tab_and_unspecified_form_do_not_grant_a_new_tab():
+    assert parse_browser_handoff("@browser search the current tab for a title").tab_policy == "current"
+    assert parse_browser_handoff("@browser fill this form").tab_policy == "selected_or_ask"
+    assert parse_browser_handoff("@browser open the details button").tab_policy == "selected_or_ask"
+
+
 def test_explicit_handoff_overrides_an_ambiguous_router_reply(monkeypatch) -> None:
     monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
 

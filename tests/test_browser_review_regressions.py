@@ -47,6 +47,79 @@ console.log(JSON.stringify({sensitiveChanged:JSON.stringify(a)!==JSON.stringify(
     assert "first-private-value" not in result.stdout and "second-private-value" not in result.stdout
 
 
+def test_actual_reader_reads_rich_text_editor_and_includes_it_in_form_review():
+    script = r"""
+const fn = eval('(' + JSON.parse(process.argv[1]) + ')');
+globalThis.location = {href:'https://chat.example/'};
+const editor = {isConnected:true,isContentEditable:true,tagName:'DIV',id:'prompt-textarea',
+  innerText:'What is the news on Arnab cyclone?',textContent:'What is the news on Arnab cyclone?',
+  getAttribute:()=>null,closest:()=>form,labels:[]};
+const form = {id:'composer',method:'post',getAttribute:()=>null,
+  querySelectorAll(selector){return selector.includes('contenteditable') ? [editor] : [];}};
+globalThis.document = {activeElement:editor};
+(async()=>console.log(JSON.stringify(await fn(editor))))();
+"""
+    result = subprocess.run([shutil.which("node") or "node", "-e", script, json.dumps(ELEMENT_STATE)], capture_output=True, text=True, check=True)
+    data = json.loads(result.stdout)
+    assert data["editable"] and data["value"] == "What is the news on Arnab cyclone?"
+    assert data["label"] == "prompt-textarea"
+    assert data["form"]["values"][0]["value"] == data["value"]
+
+
+async def test_typing_focuses_an_unfocused_editor_before_the_write():
+    from tests.test_connected_browser_gateway import Browser, gateway_class
+    class FocusBrowser(Browser):
+        async def call_result(self, name, arguments=None):
+            result = await super().call_result(name, arguments)
+            if name == "browser_click":
+                self.nodes[arguments["target"]]["focused"] = True
+            return result
+    client = FocusBrowser()
+    client.nodes["e1"].update(label="Prompt", focused=False)
+    async def decline(_): return False
+    gateway = gateway_class()(client, decline)
+    await gateway.observe()
+    await gateway.act("browser_type", {"target": "e1", "text": "draft", "submit": False})
+    assert [name for name, _ in client.effects] == ["browser_click", "browser_type"]
+    assert client.nodes["e1"]["value"] == "draft"
+
+
+async def test_focus_change_cannot_turn_an_edit_into_an_assumed_personal_value():
+    from tests.test_connected_browser_gateway import Browser, gateway_class
+    from agents.browser.connected_gateway import BrowserInputRequired
+    class ChangingBrowser(Browser):
+        async def call_result(self, name, arguments=None):
+            result = await super().call_result(name, arguments)
+            if name == "browser_click":
+                self.nodes[arguments["target"]].update(focused=True, type="email", label="Email")
+            return result
+    client = ChangingBrowser()
+    client.nodes["e1"].update(label="Prompt", focused=False)
+    async def decline(_): return False
+    gateway = gateway_class()(client, decline)
+    await gateway.observe()
+    with pytest.raises(BrowserInputRequired):
+        await gateway.act("browser_type", {"target": "e1", "text": "assumed@example.test"})
+    assert [name for name, _ in client.effects] == ["browser_click"]
+
+
+@pytest.mark.parametrize("tag,editable", [("textarea", False), ("div", True)])
+async def test_chat_editor_enter_cannot_bypass_submission_review(tag, editable):
+    from tests.test_connected_browser_gateway import Browser, gateway_class
+    from agents.browser.mcp_client import McpToolError
+    client = Browser()
+    client.nodes["e1"].update(tag=tag, role="textbox", editable=editable, label="Prompt")
+    reviews = []
+    async def decline(description):
+        reviews.append(description)
+        return False
+    gateway = gateway_class()(client, decline)
+    await gateway.observe()
+    with pytest.raises(McpToolError, match="declined"):
+        await gateway.act("browser_press_key", {"key": "Enter"})
+    assert len(reviews) == 1 and not client.effects
+
+
 async def test_submit_label_alone_cannot_prove_task_completion(tmp_path):
     client = Client(tmp_path)
     finish = {"done":True,"summary":"Application submitted successfully", "evidence":["Submit"]}
