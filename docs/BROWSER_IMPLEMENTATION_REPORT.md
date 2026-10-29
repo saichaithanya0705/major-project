@@ -21,6 +21,13 @@ dependencies (20). Browser questions return to chat without another planning ste
 See [raw chat qualification](ADVERSARIAL_CHAT_REPORT.md) for internal system-policy
 changes and the test-event leak that explained unexpected visible CLI messages.
 
+A final chat rehearsal caught invisible deterministic connection/status/stop
+replies: they used a specialist trace source filtered by the renderer. Those final
+replies now use the main chat response channel, covered by an app-handler
+regression that failed before the correction. Broadening the renderer's source
+allowlist would also expose routine specialist traces, so the fix is at the
+final-response producer.
+
 ## Why this approach
 
 An owned MCP session supplies browser primitives while the gateway validates

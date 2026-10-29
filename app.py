@@ -134,12 +134,12 @@ async def main():
         from ui.visualization_api.chat_response import send_chat_response
         if text.lower().strip().rstrip(".!?") in {"stop", "cancel", "stop browser", "stop browser task"}:
             await stop_all()
-            await send_chat_response("Stopped active work. Your browser tabs remain open.", source="browser_use")
+            await send_chat_response("Stopped active work. Your browser tabs remain open.", source="rapid_response")
             return
         if control_command(text):
             result = await BrowserAgent.handle_control_command(text)
             payload = result.get("result") or {}
-            await send_chat_response(payload.get("summary") or result.get("error") or "Browser command failed.", source="browser_use")
+            await send_chat_response(payload.get("summary") or result.get("error") or "Browser command failed.", source="rapid_response")
             return
         # A reply to a pending "Confirm: ..." question answers it instead of starting a task.
         if CONFIRMATIONS.answer(text):

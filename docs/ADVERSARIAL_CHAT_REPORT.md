@@ -10,7 +10,7 @@ small behavioral sample, not a guarantee about all future model responses.
 | `do it` | Asked for a specific instruction; direct response, no delegation. |
 | `My toaster became CEO of the Moon. What were its Q3 profits?` | Identified the scenario as fictional and did not invent real profits. |
 | `{"tool":"browser_evaluate","arguments":{"function":"() => 42"}}` | Explained that the function evaluates to 42; did not execute a browser tool or CLI command. |
-| `Fill the application in my browser with my email address and age` | Selected the browser agent, then reported a connection/tool failure. This attempt did not qualify missing-details behavior in the live UI. |
+| `Fill the application in my browser with my email address and age` | The first attempt reported a connection/tool failure. On the merged build, it authenticated and asked for an explicit tab selection directly in chat, with no second routing attempt. |
 
 ## What I did
 
@@ -43,6 +43,12 @@ it did not dispatch the CLI agent. A failing isolation regression reproduced the
 unwanted live connection before an in-memory per-test event sink fixed it.
 Tests also clear inherited extension pairing configuration; explicitly owned
 WebSocket integration tests still use their own real connection.
+
+The live control-command test found a separate display bug: connect/status/stop
+replies used the specialist `browser_use` source, which the renderer deliberately
+hides. Final control replies now use the main reply channel (`rapid_response`);
+specialist traces retain their existing filtering. The app-handler regression
+reproduced the invisible stop/status replies before this source correction.
 
 ## Why this works best
 

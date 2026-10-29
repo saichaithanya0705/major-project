@@ -158,13 +158,24 @@ async def test_chat_stop_is_handled_before_a_confirmation_answer(monkeypatch):
     async def noop(*_args, **_kwargs): pass
     monkeypatch.setattr(app.CLIAgent, "stop_all_running_processes", noop)
     from ui.visualization_api import chat_response
-    monkeypatch.setattr(chat_response, "send_chat_response", noop)
+    replies = []
+    async def record_response(text, source="rapid_response"):
+        replies.append({"text":text,"source":source})
+    async def control(_cls, _text):
+        return {"success":True,"result":{"summary":"Browser is ready."}}
+    monkeypatch.setattr(chat_response, "send_chat_response", record_response)
+    monkeypatch.setattr(BrowserAgent, "handle_control_command", classmethod(control))
     task = asyncio.create_task(app.main())
     try:
         await asyncio.wait_for(ready.wait(), 5)
         await handlers["on_overlay_input"]("stop")
         assert ("stop", None) in calls
         assert ("answer", "stop") not in calls
+        await handlers["on_overlay_input"]("browser status")
+        # Final control replies use the same visible chat channel as the main agent.
+        # The renderer deliberately hides specialist status/trace sources.
+        assert len(replies) == 2 and all(reply["source"] == "rapid_response" for reply in replies)
+        assert replies[-1]["text"] == "Browser is ready."
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
