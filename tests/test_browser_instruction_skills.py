@@ -95,11 +95,19 @@ def test_folder_name_and_full_description_are_validated(tmp_path):
     assert skills.errors and "browser-custom" not in skills.catalog("browser")
 
 
-def test_browser_task_activates_base_then_relevant_bundled_specialization():
+def test_task_activation_loads_base_and_relevant_bundled_specialization():
     root = Path(__file__).resolve().parents[1]
-
     instructions = loader(root, root / "nonexistent-home").activate_for_task(
         "Fill this application form with the details I provide"
     )
 
     assert list(instructions) == ["browser-operator", "browser-form-fill"]
+
+
+def test_task_activation_does_not_load_a_specialization_for_an_unrelated_task():
+    root = Path(__file__).resolve().parents[1]
+    instructions = loader(root, root / "nonexistent-home").activate_for_task(
+        "Navigate this unfamiliar product settings page"
+    )
+
+    assert list(instructions) == ["browser-operator"]

@@ -1576,6 +1576,37 @@ kbd {
   color: var(--text-muted);
 }
 
+#browser-mention-menu {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  overflow: hidden;
+}
+
+#browser-mention-option {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 12px;
+}
+
+#browser-mention-option span {
+  color: var(--text-muted);
+}
+
+#browser-mention-option:hover,
+#browser-mention-option:focus-visible {
+  background: rgba(127, 157, 138, 0.16);
+}
+
 #command-send {
   width: 44px;
   height: 44px;
@@ -1600,6 +1631,25 @@ kbd {
   display: inline-flex;
   align-items: flex-end;
   gap: 10px;
+}
+
+#browser-mention {
+  height: 32px;
+  align-self: center;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: rgba(29, 35, 43, 0.94);
+  border-color: rgba(151, 163, 176, 0.26);
+  font-size: 11px;
+}
+
+#browser-mention:hover {
+  color: var(--text);
+  border-color: rgba(151, 179, 162, 0.48);
 }
 
 #command-voice {
@@ -1703,6 +1753,7 @@ kbd {
 }
 
 #command-voice:disabled,
+#browser-mention:disabled,
 #command-send:disabled,
 #command-input:disabled,
 #chat-new:disabled,
@@ -1718,6 +1769,7 @@ kbd {
 }
 
 #command-input:focus-visible,
+#browser-mention:focus-visible,
 #chat-guidance-toggle:focus-visible,
 #chat-settings-toggle:focus-visible,
 #chat-history:focus-visible,

@@ -1,4 +1,4 @@
-"""Connected-runner regression tests for `@browser` tab bootstrap."""
+"""Connected-runner regression tests for owned direct-link tabs."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,6 @@ from pathlib import Path
 from agents.browser.mcp_client import McpToolResult
 from agents.browser.connected_runner import ConnectedBrowserRunner
 from tests.test_connected_browser_gateway import Browser
-
 
 class HandoffClient(Browser):
     extension = True
@@ -28,7 +27,10 @@ class HandoffClient(Browser):
             if action == "new":
                 self.tab_new_calls.append(dict(args))
                 self.tabs.append(("Owned fixture", args["url"]))
-            elif action == "select":
+                self.selected_index = len(self.tabs) - 1
+                self.url = args["url"]
+                self.tab_id = "jarvis-owned-tab"
+            if action == "select":
                 self.selected_index = args["index"]
                 self.url = self.tabs[self.selected_index][1]
             lines = "\n".join(
@@ -45,7 +47,7 @@ async def _done(_system: str, _user: str) -> str:
     )
 
 
-async def test_direct_url_creates_and_selects_one_owned_tab_before_planning() -> None:
+async def test_explicit_link_creates_one_owned_tab_before_planning() -> None:
     client = HandoffClient()
 
     result = await ConnectedBrowserRunner(client, decide=_done).execute(
@@ -53,6 +55,18 @@ async def test_direct_url_creates_and_selects_one_owned_tab_before_planning() ->
     )
 
     assert client.tab_new_calls == [{"action": "new", "url": "https://example.test/form"}]
+    assert client.selected_index == 1
+    assert result["success"] and result["complete"]
+
+
+async def test_plain_link_creates_one_owned_tab_before_planning() -> None:
+    client = HandoffClient()
+
+    result = await ConnectedBrowserRunner(client, decide=_done).execute(
+        "Open https://docs.google.com/spreadsheets/d/demo and count its rows"
+    )
+
+    assert client.tab_new_calls == [{"action": "new", "url": "https://docs.google.com/spreadsheets/d/demo"}]
     assert client.selected_index == 1
     assert result["success"] and result["complete"]
 

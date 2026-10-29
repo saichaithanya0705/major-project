@@ -19,6 +19,9 @@ import { shouldDisplayReplyInChat } from './modules/chat_reply_policy.mjs';
 const commandInput = document.getElementById('command-input');
 const commandSend = document.getElementById('command-send');
 const commandVoice = document.getElementById('command-voice');
+const browserMention = document.getElementById('browser-mention');
+const browserMentionMenu = document.getElementById('browser-mention-menu');
+const browserMentionOption = document.getElementById('browser-mention-option');
 const chatMessages = document.getElementById('chat-messages');
 const chatStatus = document.getElementById('chat-status');
 const chatStatusPhase = document.getElementById('chat-status-phase');
@@ -76,6 +79,7 @@ const MAX_TERMINAL_SUMMARY_SOURCE_CHARS = 2200;
 const MAX_TERMINAL_SUMMARY_CHARS = 360;
 const DEFAULT_INPUT_PLACEHOLDER = 'Describe the next task…';
 const ARCHIVED_INPUT_PLACEHOLDER = 'Archived chats are read-only. Start a new chat to continue.';
+const BROWSER_MENTION_PREFIX = '@browser';
 const VOICE_MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
 const RESTORE_CHAT_SYMBOL = '↩';
 const DELETE_CHAT_SYMBOL = '🗑';
@@ -910,6 +914,31 @@ function focusCommandInput() {
   commandInput.focus();
   const end = commandInput.value.length;
   commandInput.setSelectionRange(end, end);
+}
+
+function browserMentionQueryActive() {
+  const value = commandInput?.value || '';
+  return /^\s*@[a-z]*$/i.test(value) && !/^\s*@browser\b/i.test(value);
+}
+
+function updateBrowserMentionMenu() {
+  if (!browserMentionMenu || !commandInput) return;
+  const visible = browserMentionQueryActive();
+  browserMentionMenu.hidden = !visible;
+  commandInput.setAttribute('aria-expanded', visible ? 'true' : 'false');
+}
+
+function insertBrowserMention() {
+  if (!commandInput || commandInput.disabled) return;
+  const value = commandInput.value;
+  const partial = /^\s*@[a-z]*/i.exec(value);
+  if (partial) {
+    commandInput.value = `${BROWSER_MENTION_PREFIX} ${value.slice(partial[0].length).trimStart()}`;
+  } else {
+    commandInput.value = `${BROWSER_MENTION_PREFIX} ${value.trimStart()}`;
+  }
+  commandInput.dispatchEvent(new Event('input', { bubbles: true }));
+  focusCommandInput();
 }
 
 function scrollMessagesToBottom() {
@@ -3370,19 +3399,35 @@ function submitCommand() {
   focusCommandInput();
 }
 
-commandInput?.addEventListener('input', resizeInput);
+commandInput?.addEventListener('input', () => {
+  resizeInput();
+  updateBrowserMentionMenu();
+});
 commandInput?.addEventListener('keydown', (event) => {
+  if (!browserMentionMenu?.hidden && (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey) || (event.key === 'Enter' && !event.shiftKey))) {
+    event.preventDefault();
+    insertBrowserMention();
+    return;
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     submitCommand();
     return;
   }
   if (event.key === 'Escape') {
+    if (!browserMentionMenu?.hidden) {
+      event.preventDefault();
+      browserMentionMenu.hidden = true;
+      commandInput?.setAttribute('aria-expanded', 'false');
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     handleEscapeKey();
   }
 });
+browserMention?.addEventListener('click', insertBrowserMention);
+browserMentionOption?.addEventListener('click', insertBrowserMention);
 commandVoice?.addEventListener('click', () => {
   void toggleVoiceRecording();
 });

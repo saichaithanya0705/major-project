@@ -388,6 +388,26 @@ class ConnectedGateway:
         self._draft_refs.clear()
         return await self.observe()
 
+    async def open_owned_tab(self, url: str) -> str:
+        """Open a user-requested HTTP(S) URL as JARVIS's selected tab.
+
+        This is deliberately not exposed to the model.  It is a deterministic
+        consequence of the user's direct-link request, and the tab is selected
+        before any page content is inspected.
+        """
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise McpToolError("JARVIS can open only a normal HTTP(S) link in a new browser tab.")
+        if not self._schemas:
+            self._schemas = await self.client.tool_schemas()
+        if "browser_tabs" not in self._schemas:
+            raise McpToolError("This Playwright connection cannot create a browser tab.")
+        await self._call("browser_tabs", {"action": "new", "url": url})
+        self._tab_identity = await self._read_identity()
+        self._identity_lost = False
+        self._draft_refs.clear()
+        return await self.observe()
+
     async def act(self, name: str, arguments: dict) -> str:
         self._check_stop()
         arguments = self._canonical(arguments)

@@ -14,7 +14,7 @@ from pathlib import Path
 import jsonschema
 
 from agents.browser.connected_gateway import AlreadyVerifiedWrite, BrowserInputRequired, ConnectedGateway, StalePageError, SelectedTabLostError, public_url
-from agents.browser.handoff_intent import BrowserHandoffIntent, parse_browser_handoff
+from agents.browser.handoff_intent import BrowserHandoffIntent, parse_browser_handoff, parse_direct_url_handoff
 from agents.browser.mcp_client import McpToolError
 from agents.skills.browser_skills import BrowserSkills
 from core.confirmations import CONFIRMATIONS
@@ -195,25 +195,18 @@ class ConnectedBrowserRunner:
         self.state = "ready"
         return observation
 
-    async def _bootstrap_owned_tab(self, handoff: BrowserHandoffIntent) -> str:
-        """Create/select one user-requested URL before the model sees page data."""
-        if handoff.direct_url is None:
-            raise McpToolError("A direct browser handoff requires an ordinary HTTP(S) URL.")
-        self._selected_tab = False
+    async def _open_owned_tab(self, handoff: BrowserHandoffIntent) -> str:
+        if handoff.tab_policy != "owned_url" or not handoff.direct_url:
+            raise McpToolError("A direct HTTP(S) link is required to open a new JARVIS browser tab.")
+        # connect() only lists shared tabs at this point; it does not inspect
+        # their contents. The direct URL below is the user's own instruction.
         await self.connect()
-        gateway = self.gateway
-        if gateway is None:
-            raise McpToolError("Browser pairing did not create a usable session.")
-        await gateway._call("browser_tabs", {"action": "new", "url": handoff.direct_url})
-        await gateway.list_tabs()
-        matching = [
-            index
-            for index, (_title, url) in gateway._tab_entries.items()
-            if url == handoff.direct_url
-        ]
-        if not matching:
-            raise McpToolError("JARVIS opened the requested tab but could not select it safely.")
-        return await self.select_tab(matching[-1])
+        if self.gateway is None:
+            raise McpToolError("The browser did not establish a controllable session.")
+        observation = await self.gateway.open_owned_tab(handoff.direct_url)
+        self._selected_tab = True
+        self.state = "ready"
+        return observation
 
     def _result(self, summary: str, *, complete=False, error: str | None = None) -> dict:
         gateway = self.gateway
@@ -234,9 +227,14 @@ class ConnectedBrowserRunner:
             return self._result("Provide a browser task of at most 12,000 characters.", error="Invalid browser task.")
         async with self._lock:
             human = current_user_input()
-            source_task = human.text if human is not None else task
-            handoff = parse_browser_handoff(source_task)
-            objective = handoff.task if handoff is not None else task
+            source_task = human.text if human else task
+            handoff = (
+                parse_browser_handoff(source_task)
+                or parse_direct_url_handoff(source_task)
+                or parse_browser_handoff(task)
+                or parse_direct_url_handoff(task)
+            )
+            objective = handoff.task if handoff else task
             input_session = human.session_id if human else "__direct__"
             if input_session != self._input_session:
                 self._provided_input = ""
@@ -279,12 +277,12 @@ class ConnectedBrowserRunner:
     async def _run(self, task: str, handoff: BrowserHandoffIntent | None = None) -> dict:
         # Fresh references and skill contents for each task, never replay old actions.
         observation = (
-            await self._bootstrap_owned_tab(handoff)
-            if handoff is not None and handoff.tab_policy == "owned_url"
+            await self._open_owned_tab(handoff)
+            if handoff and handoff.tab_policy == "owned_url"
             else await self.connect()
         )
         if self.state == "awaiting_tab_selection":
-            self.pending_handoff_task = task if handoff is not None else ""
+            self.pending_handoff_task = task if handoff else ""
             return self._result(observation)
         self.pending_handoff_task = ""
         history = []

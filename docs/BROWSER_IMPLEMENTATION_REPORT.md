@@ -1,5 +1,52 @@
 # Browser implementation and qualification — 2026-10-29
 
+## Direct-link handoff update
+
+### What I did
+
+Added an explicit `@browser` composer mention and a deterministic direct-link
+handoff. A normal HTTP(S) link now opens in a new JARVIS-owned extension tab;
+an existing/current tab still requires the user's explicit group selection.
+
+### Why this approach
+
+The handoff parser separates explicit `@browser` routing from direct-link tab
+ownership, so ordinary chat routing remains unchanged while the runner can act
+on a link only after the browser route is selected. The model never receives a
+pre-selection capability to inspect or choose unrelated tabs.
+
+### Why not the alternative
+
+Reusing the first shared tab would repeat the observed failure: an unrelated
+Google Search tab becomes a blocker and users must repeat a direct URL request.
+Automatically reading any existing tab would violate the extension's tab-group
+sharing boundary.
+
+### What was the issue / root cause
+
+The connected runner always called `connect()`, which stopped at tab selection
+even when the user had already supplied an unambiguous URL. The earlier router
+recognized browser-shaped prompts but did not encode user-granted tab ownership.
+
+### Why this works best
+
+The runtime creates and selects an owned tab from the user URL before it reads
+content, while current-tab requests retain deliberate selection. It activates
+the general browser skill plus at most one trusted relevant specialization; all
+existing action validation and submission review remain unchanged.
+
+### Other valid patterns
+
+An extension button could choose a particular existing tab, or a CDP profile
+could grant broader control, but both add a browser permission/control surface.
+The current pattern is smaller, works with the official extension, and keeps
+form submission confirmation in chat.
+
+Live qualification on 2026-10-29 used a temporary unique localhost page through
+the installed Chrome extension: the direct-link runner completed successfully,
+reported the owned page URL, and closed exactly one matching test tab. The broad
+regression suite then passed **778 tests with 2 skips** in 47.93 seconds.
+
 ## What I did
 
 Implemented a general browser operator using the official Playwright extension,

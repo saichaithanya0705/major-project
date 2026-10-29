@@ -1,7 +1,8 @@
 # Use JARVIS in your browser
 
 The browser operator can inspect pages, navigate, search, compare sources, work
-with web-app controls, and fill forms in an explicitly selected existing session.
+with web-app controls, and fill forms in an explicitly selected existing session
+or a new JARVIS-owned tab created from a user-provided HTTP(S) link.
 Standard Agent Skills provide additional workflows; a dedicated skill is not
 required for an unfamiliar task. Chrome is the initial supported target for
 qualification. Brave and Comet remain compatibility candidates until tested.
@@ -20,6 +21,12 @@ qualification. Brave and Comet remain compatibility candidates until tested.
    connection prompt in Chrome, selecting the browser tab you intend to share.
 4. Choose the intended tab with **use browser tab N**, using the returned list.
    Verify JARVIS's reported tab title and URL, then give your task.
+
+You do not need to select an old tab when the request itself contains a normal
+HTTP(S) link. JARVIS opens that exact link in a new **Playwright · JARVIS** tab
+and starts work there. Existing/current-tab wording intentionally keeps the
+selection requirement: move that tab into the group, then choose its listed
+index before JARVIS reads it.
 
 The current extension isolates clients into separate tab groups. JARVIS can see
 only tabs in **Playwright · JARVIS**. To share an existing tab, move/drag it into
@@ -65,12 +72,17 @@ for measured tests and remaining limits.
 | `connect browser` | Authenticate through the official extension and list tabs for explicit selection |
 | `browser status` | Show connection state and selected tab title/URL, excluding URL query data |
 | `use browser tab 0` | Deliberately select a tab by the index shown by the browser tools |
+| `@browser …` | Explicitly assign the request to the connected-browser operator; type `@` to choose it in chat or use the compact **@ Browser** control |
+| `https://… Open this sheet and count its rows` | Open the user-supplied link in a new JARVIS-owned tab, then perform the task |
 | `disconnect browser` | End JARVIS's connection while leaving your browser/tabs open |
 | `stop` / `cancel` / `stop browser` | Cancel active work and pending submission review |
 | `continue` | Inspect the current page and resume the retained objective |
 
 Examples:
 
+- `@browser https://docs.google.com/spreadsheets/d/... Open this sheet and count the used rows.`
+- `https://example.com/form Fill the visible draft with the details I provide; do not submit.`
+- `@browser read the current browser tab and summarize it.`
 - “Read the current tab, extract its main points, and give me the source URL.”
 - “Compare these products using their specifications and linked reports.”
 - “Fill this application with the details I provide and leave it as a draft.”
@@ -133,8 +145,9 @@ Edits require re-enabling for subsequent tasks. An active task keeps pinned
 content. Untrusted/changed skills are skipped with diagnostics, while the base
 operator remains usable. Existing CLI/document skill behavior is preserved.
 
-The browser starts with a small relevant skill catalog and activates instructions
-when needed; the explicit forms `use browser-project-review skill`,
+The browser always activates the vetted `browser-operator` instructions and,
+when relevant, one trusted specialized workflow before the model plans actions.
+It retains a small relevant skill catalog for later activation; the explicit forms `use browser-project-review skill`,
 `/browser-project-review`, and `skill:browser-project-review` are supported.
 New workflows using existing primitives need no app rebuild or restart between
 tasks. A new low-level capability still needs code and validation.
