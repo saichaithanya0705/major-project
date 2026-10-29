@@ -93,3 +93,13 @@ def test_folder_name_and_full_description_are_validated(tmp_path):
     path.write_text(path.read_text().replace("name: browser-custom", "name: different-name"), encoding="utf-8")
     skills = loader(tmp_path, tmp_path / "home")
     assert skills.errors and "browser-custom" not in skills.catalog("browser")
+
+
+def test_browser_task_activates_base_then_relevant_bundled_specialization():
+    root = Path(__file__).resolve().parents[1]
+
+    instructions = loader(root, root / "nonexistent-home").activate_for_task(
+        "Fill this application form with the details I provide"
+    )
+
+    assert list(instructions) == ["browser-operator", "browser-form-fill"]

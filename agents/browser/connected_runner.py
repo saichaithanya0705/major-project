@@ -14,6 +14,7 @@ from pathlib import Path
 import jsonschema
 
 from agents.browser.connected_gateway import AlreadyVerifiedWrite, BrowserInputRequired, ConnectedGateway, StalePageError, SelectedTabLostError, public_url
+from agents.browser.handoff_intent import BrowserHandoffIntent, parse_browser_handoff
 from agents.browser.mcp_client import McpToolError
 from agents.skills.browser_skills import BrowserSkills
 from core.confirmations import CONFIRMATIONS
@@ -95,6 +96,7 @@ class ConnectedBrowserRunner:
         self._selected_tab = False
         self._input_session = None
         self._provided_input = ""
+        self.pending_handoff_task = ""
 
     async def _brain_decide(self, system: str, user: str) -> str:
         from agents.skills.brain_bridge import _brain_model
@@ -159,6 +161,7 @@ class ConnectedBrowserRunner:
         self._selected_tab = False
         self._input_session = None
         self._provided_input = ""
+        self.pending_handoff_task = ""
 
     async def connect(self) -> str:
         self._stopped = False
@@ -192,6 +195,26 @@ class ConnectedBrowserRunner:
         self.state = "ready"
         return observation
 
+    async def _bootstrap_owned_tab(self, handoff: BrowserHandoffIntent) -> str:
+        """Create/select one user-requested URL before the model sees page data."""
+        if handoff.direct_url is None:
+            raise McpToolError("A direct browser handoff requires an ordinary HTTP(S) URL.")
+        self._selected_tab = False
+        await self.connect()
+        gateway = self.gateway
+        if gateway is None:
+            raise McpToolError("Browser pairing did not create a usable session.")
+        await gateway._call("browser_tabs", {"action": "new", "url": handoff.direct_url})
+        await gateway.list_tabs()
+        matching = [
+            index
+            for index, (_title, url) in gateway._tab_entries.items()
+            if url == handoff.direct_url
+        ]
+        if not matching:
+            raise McpToolError("JARVIS opened the requested tab but could not select it safely.")
+        return await self.select_tab(matching[-1])
+
     def _result(self, summary: str, *, complete=False, error: str | None = None) -> dict:
         gateway = self.gateway
         if gateway:
@@ -211,20 +234,23 @@ class ConnectedBrowserRunner:
             return self._result("Provide a browser task of at most 12,000 characters.", error="Invalid browser task.")
         async with self._lock:
             human = current_user_input()
+            source_task = human.text if human is not None else task
+            handoff = parse_browser_handoff(source_task)
+            objective = handoff.task if handoff is not None else task
             input_session = human.session_id if human else "__direct__"
             if input_session != self._input_session:
                 self._provided_input = ""
                 self._input_session = input_session
-            self._provided_input = (self._provided_input + "\n" + (human.text if human else task))[-24000:]
+            self._provided_input = (self._provided_input + "\n" + source_task)[-24000:]
             self._task = asyncio.current_task()
             self._stopped = False
             self.awaiting_input = False
-            self.last_objective = task
+            self.last_objective = objective
             self.last_progress = []
             try:
                 async with asyncio.timeout(ACTIVE_SECONDS) as active_timeout:
                     self._active_timeout = active_timeout
-                    return await self._run(task)
+                    return await self._run(objective, handoff)
             except TimeoutError:
                 if self._active_timeout and self._active_timeout.expired():
                     self.state = "stopped"
@@ -250,23 +276,24 @@ class ConnectedBrowserRunner:
                 self._task = None
                 self._active_timeout = None
 
-    async def _run(self, task: str) -> dict:
+    async def _run(self, task: str, handoff: BrowserHandoffIntent | None = None) -> dict:
         # Fresh references and skill contents for each task, never replay old actions.
-        observation = await self.connect()
+        observation = (
+            await self._bootstrap_owned_tab(handoff)
+            if handoff is not None and handoff.tab_policy == "owned_url"
+            else await self.connect()
+        )
         if self.state == "awaiting_tab_selection":
+            self.pending_handoff_task = task if handoff is not None else ""
             return self._result(observation)
+        self.pending_handoff_task = ""
         history = []
         gateway = self.gateway
         gateway.user_input = self._provided_input
         self.state = "running"
         root = getattr(self.client, "project_root", Path(__file__).resolve().parents[2])
         skills = BrowserSkills(root)
-        instructions = {}
-        if "browser-operator" in skills.entries:
-            instructions["browser-operator"] = skills.activate("browser-operator")
-        explicit = skills.explicit_name(task)
-        if explicit:
-            instructions[explicit] = skills.activate(explicit)
+        instructions = skills.activate_for_task(task)
         correction = ""
         invalid = stale = 0
         started = time.monotonic()
