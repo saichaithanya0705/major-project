@@ -1,4 +1,4 @@
-# Live readiness report - 2026-10-28
+# Live readiness report - 2026-10-29
 
 ## What I did
 
@@ -14,6 +14,8 @@ that it was clearly audible. Browser and screen-agent tests followed.
 | NVIDIA Bolt arithmetic | Correct answer, `42` | 1.05 s direct API |
 | NVIDIA Lightning arithmetic | Correct answer, `42` | 1.08 s direct API; 1.66 s app adapter |
 | NVIDIA routing | Valid routing object through the actual adapter | 4.16 s initial; 1.16 s in app |
+| NVIDIA router follow-up | Lightning returned valid browser routes after strict tool-name normalization | 1.39-1.75 s live routes |
+| Connected Chrome browser agent | Official extension paired, explicitly selected an owned local test tab, inspected it through the NVIDIA planner, and verified a two-field edit with zero submissions | 3.6 s pairing; 7.8 s read; 16.3 s verified edit |
 | Physical microphone capture | Recognizable user speech in a 9.98 s clip | Capture and transcription passed |
 | Microphone transcription through the app | `Jarvis what is seventeen plus twenty five?` | 2.17 s on the final app run |
 | Submitted voice command | `Seventeen plus twenty five is forty-two.` | 1.97 s after submission |
@@ -45,7 +47,7 @@ The local, ignored configuration now selects:
 
 ```dotenv
 ROUTER_PROVIDER=nvidia
-NVIDIA_ROUTER_MODEL=nvidia/nemotron-3.5-bolt-e4b
+NVIDIA_ROUTER_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 NVIDIA_BRAIN_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 JARVIS_BRAIN_PRIMARY=nvidia
 JARVIS_BRAIN_ESCALATION=gemini,openrouter
@@ -72,6 +74,7 @@ order instead of adding minutes of waiting before an answer.
 | Local-first default referenced absent Nemotron; Ollama was stopped | Selected tested NVIDIA models in local configuration; recorded local mode as unavailable |
 | Old NVIDIA credential failed authorization; the prior model then returned account-specific 404 with the new key | Read back the replacement credential and selected models that passed inference |
 | NVIDIA router spent its small token budget on reasoning and returned no final content | Disable thinking for NVIDIA routing and text-brain requests |
+| NVIDIA Lightning returned declared tool names such as `invoke_cua_cli` in the `agent` field | Map only the six declared router tool names to their validated internal route names; unknown tool-like values still fail closed |
 | NVIDIA was not a selectable chat-brain provider | Added it to the existing provider interface and configuration validation |
 | Structured brain output was accepted without parsing | Require a JSON object and fall through to another provider on malformed output |
 | Software names such as Python and Node caused factual source questions to be treated as shell tasks | Distinguish software subjects from execution/local-state intent; preserve execution routing |
@@ -91,11 +94,12 @@ The NVIDIA requests use the documented
 The changes preserve the current runtime boundaries and keep provider logic,
 action validation, and annotation scheduling independently testable. New
 regressions were first observed failing, then passed after their root-cause
-changes. Final verification after the backup-model and socket-log changes
-passed **651 tests with one native-symlink privilege skip**, including the
-rendered UI harness, in 77.77 seconds. A preceding run had one Windows-aborted
-loopback connection in the fake ChatGPT server; that test passed alone and the
-complete rerun passed. JavaScript syntax and Git whitespace checks also passed.
+changes. The current router compatibility regression passed alongside the
+provider and parser suites; the current project-interpreter sweep completed
+**765 passing tests with two environmental skips**. One requires Windows native
+symlink privilege and the other requires the optional Python Playwright package
+for a rendered UI test; neither skip covers the installed-extension checks.
+JavaScript syntax and Git whitespace checks also passed.
 
 Live responses and private voice/screenshot evidence are kept locally under
 ignored `evals/results/live-readiness-20261028/`. They are test evidence, not
@@ -115,7 +119,9 @@ still require evaluation; returned citations alone do not establish correctness.
   availability is not guaranteed by an API key or catalog listing.
 - Managed browser open/search passed. The follow-on extension operator has now
   qualified the installed Chrome session, verified form entry/submission review,
-  and NVIDIA-backed multipage research; see
+  and NVIDIA-backed multipage research; the current Lightning router follow-up
+  also paired the live extension, selected an owned tab, inspected it, and
+  verified a local two-field edit with no submission. See
   [the browser implementation report](BROWSER_IMPLEMENTATION_REPORT.md).
   Brave/Comet and arbitrary websites remain unqualified.
 - For the demo, launch with `./start-dev.ps1`, rehearse the exact prompts on

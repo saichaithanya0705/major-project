@@ -105,6 +105,12 @@ facts, overly small evidence arrays, and a correction budget consumed by earlier
 repaired actions. References are normalized and revalidated; historical facts
 exclude old references; bounded evidence remains checked against observations.
 
+The current NVIDIA Lightning router emitted the declared tool name
+`invoke_cua_cli` in its `agent` field instead of the internal `cua_cli` name.
+The typed decision boundary now translates only the six declared router tool
+names before validation; arbitrary `invoke_*` strings remain invalid. This
+preserves the allowlist while keeping the live NVIDIA provider compatible.
+
 Full-suite qualification also encountered a transient Windows denial of atomic
 credential-file replacement. Private writes now retry only Windows access/sharing
 denials, at most four attempts over 175 milliseconds of backoff. Persistent errors
@@ -175,11 +181,14 @@ hashes, tool names and argument keys, excluding page bodies and field values.
 
 The pre-review installed-session rehearsal passed eight checks (62.485 seconds),
 and the review-fix rehearsal passed twelve (193.688 seconds). After the live
-personal-input, repeated-edit and main-decision fixes, the complete suite passed **765 tests,
-with 1 skip**, in 51.65 seconds, including the rendered UI test using installed
-Chrome. The skip is the native Windows symlink test, which requires account
-privileges unavailable here. Earlier Windows file-sharing, loopback-connection
-and timing failures were retained; launcher/UI deadlines were not relaxed.
+personal-input, repeated-edit and main-decision fixes, the earlier complete suite
+passed **765 tests, with 1 skip**, in 51.65 seconds, including the rendered UI
+test using installed Chrome. The current project-interpreter sweep also completed
+all 765 passing tests; it has two environmental skips: native Windows symlink
+privilege and an optional Python Playwright dependency for a rendered UI test.
+Neither skip covers the installed-extension qualification. Earlier Windows
+file-sharing, loopback-connection and timing failures were retained; launcher/UI
+deadlines were not relaxed.
 
 The final review is complete; consequential findings have reproducing regression
 tests and were fixed in one pass. The deferred minor is surfacing skipped or
@@ -197,3 +206,14 @@ single fourteen-pass run. Failed runs remain in the local evidence directory.
 Live extension/provider availability still requires rehearsal before the
 presentation. A timed-out or potentially submitted request is never replayed
 automatically to obtain a passing result.
+
+### 2026-10-29 provider and Chrome follow-up
+
+NVIDIA Lightning routed two explicit browser requests to `browser` in 1.39 and
+1.64 seconds after the closed tool-name compatibility repair. The real official
+Chrome extension then authenticated, opened and explicitly selected an owned
+local fixture tab, completed a read-only inspection through the NVIDIA browser
+planner, and verified Full name and Email read-back after a synthetic local
+two-field edit. The edit sent no submission (`submission_count: 0`). The
+separate test form is disposable and contains no user data; live browser tabs
+still require intentional sharing into the extension group.
