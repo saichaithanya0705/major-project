@@ -7,6 +7,10 @@
 Included the `jarvis` explanation agent in the existing successful single-step
 completion policy and added a regression using a router that always repeats the
 same screen request. Updated the earlier visual-routing test to expect one call.
+The live NVIDIA replay also paraphrased the request, defeating word-based task
+coverage. Initial screen-explanation routes now preserve the original human
+request in both the executed query and completion bookkeeping, using the existing
+visual-request classifier. Multi-step execution requests retain delegated tasks.
 
 ### Why this approach
 
@@ -27,6 +31,7 @@ the same delegation before displaying the misleading six-step stop message.
 ### Why this works best
 
 The completed answer is returned before the router can repeat the same task.
+Regressions cover both verbatim and paraphrased router tasks.
 Failed, explicitly incomplete, and partial-task results still require normal
 handling; the existing loop limit remains unchanged.
 
@@ -35,6 +40,11 @@ handling; the existing loop limit remains unchanged.
 A structured goal-completion decision from the main model could support more
 complex chains, but would add another model call and require output validation.
 The existing deterministic policy is sufficient for this single-step defect.
+
+Validation: **786 tests passed, 2 skipped**. A live replay of the original
+question through the restarted chat server with NVIDIA routing and Gemini vision
+logged `request_completed`, one router decision, one agent step, zero loop guards,
+and `fast_finish=True`.
 
 ## Direct-link handoff update
 

@@ -41,6 +41,7 @@ from models.rapid_orchestrator_contracts import (
     RapidRouteResult,
 )
 from models.routing_payload_parser import BlockedStepSignature, ScreenContextPayload
+from models.routing.routing_question_policy import is_visual_explanation_request
 from models.rapid_step_execution_runtime import execute_delegated_step
 
 
@@ -207,6 +208,15 @@ async def run_rapid_request(
                     },
                 )
                 routing_result = recovery_route
+
+        if (
+            not chain_steps
+            and routing_result.get("agent") == "jarvis"
+            and is_visual_explanation_request(user_prompt)
+        ):
+            # The explanation is the whole request, not a router-authored subtask.
+            # Preserve the human goal in both execution and completion bookkeeping.
+            routing_result = {**routing_result, "task": user_prompt, "query": user_prompt}
 
         orchestration_plan = plan_from_route(user_prompt, routing_result, max_parallel=1)
         orchestration_task = orchestration_plan.tasks[0]

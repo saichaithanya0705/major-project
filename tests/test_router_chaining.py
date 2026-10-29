@@ -8,6 +8,7 @@ Usage:
 import asyncio
 import os
 import sys
+import pytest
 from typing import Any
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -92,7 +93,11 @@ async def test_chains_multiple_agents_then_finishes() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
-async def test_completed_screen_explanation_finishes_before_router_can_repeat(monkeypatch) -> None:
+@pytest.mark.parametrize("delegated_task", [
+    "Analyze the screen and tell me what do u see?",
+    "what do you see on my screen?",
+])
+async def test_completed_screen_explanation_finishes_before_router_can_repeat(monkeypatch, delegated_task) -> None:
     prompt = "Analyze the screen and tell me what do u see?"
     answer = "I see a document beside the JARVIS chat window."
     routed = []
@@ -105,12 +110,13 @@ async def test_completed_screen_explanation_finishes_before_router_can_repeat(mo
 
         async def route_request(self, router_prompt):
             routed.append(router_prompt)
-            return {"agent": "jarvis", "task": prompt}
+            return {"agent": "jarvis", "task": delegated_task}
 
     async def explain_screen(model, routing_result, jarvis_model, **kwargs):
         executed.append(routing_result)
+        assert routing_result["query"] == prompt
         # The real explanation agent omits complete on a successful response.
-        return {"agent": "jarvis", "task": prompt, "success": True,
+        return {"agent": "jarvis", "task": routing_result["task"], "success": True,
                 "message": answer, "source": "jarvis"}
 
     monkeypatch.setattr(model_module, "GeminiModel", RepeatingRouter)
