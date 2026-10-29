@@ -120,17 +120,21 @@ def apply_routing_guardrails(
 
     original_route = _route_payload_copy(routing_result)
     from agents.browser.connected_control import connected_session_request, extension_mode, native_browser_request
+    agent = str(routing_result.get("agent") or "").strip().lower()
+    # A pending browser question supplies context; it cannot turn the main
+    # conversational agent's reply/clarification into a delegated action.
+    if extension_mode() and agent == "direct":
+        return _unchanged(routing_result)
     if connected_session_request(user_prompt):
         return _rewritten({"agent": "browser", "task": user_prompt},
                           rewritten_from=original_route, reason="connected_browser_session")
     if extension_mode() and native_browser_request(user_prompt) and str(routing_result.get("agent")) == "browser":
         return _rewritten({"agent": "cua_vision", "task": user_prompt},
                           rewritten_from=original_route, reason="browser_needs_desktop_control_surface")
-    agent = str(routing_result.get("agent") or "").strip().lower()
     execution_request = is_execution_request(user_prompt)
 
     resume_route = build_browser_resume_route(user_prompt)
-    if resume_route:
+    if resume_route and (not extension_mode() or agent == "browser"):
         return _rewritten(
             resume_route,
             rewritten_from=original_route,

@@ -74,17 +74,28 @@ hides. Final control replies now use the main reply channel (`rapid_response`);
 specialist traces retain their existing filtering. The app-handler regression
 reproduced the invisible stop/status replies before this source correction.
 
+A later final-main test found a distinct, real override: after the browser asked
+for missing data, the main model selected a direct reply for `do it`, but the
+pending-browser resume rule changed it into a browser delegation. No CLI ran,
+and the personal-value check still paused safely. Extension-mode guards now
+preserve main-agent replies and unrelated specialist choices. Browser resume
+context augments an explicit resume request instead of every follow-up; a newly
+delegated browser goal is preserved. Reproducing tests cover vague input,
+gibberish, thanks, a clarification for a browser request, a new CLI goal and a new
+browser goal, while explicit browser continuation still works.
+
 ## Why this works best
 
 The tests can no longer present fixture events as real user activity. The shared
 policy improves ordinary interpretation, while schema checks and submission
-approval remain runtime responsibilities. Current routing still selects agents:
-this change does not introduce a new main-controller architecture.
+approval remain runtime responsibilities. The main conversational model chooses
+a reply, clarification or typed delegation; pending specialist state cannot
+silently turn its reply into an action. The existing routing call supplies this
+decision; no second model approval call was added.
 
 ## Other valid patterns
 
-A conversational main agent could choose either a reply, a clarification, or a
-typed delegation to a specialist, followed by the existing validated dispatcher.
-That is a reasonable future architecture; the fast router could supply advice.
-It requires separate design and evaluation of context, cancellation, latency and
-delegation failures, and was not needed to repair the observed fixture leak.
+A separate planner with its own persistent tool history could replace the
+current decision contract. That would require additional evaluation of context,
+cancellation, latency and delegation failures. The current fix preserves the
+main agent's decision at the dispatcher boundary without another model round trip.

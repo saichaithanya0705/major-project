@@ -124,8 +124,50 @@ def test_resume_does_not_duplicate_router_expansion(monkeypatch):
     runner.last_objective = "Fill the application draft"
     runner.awaiting_input = True
     monkeypatch.setattr(BrowserAgent, "_connected_runner", runner, raising=False)
-    expanded = BrowserAgent.resolve_resume_task("Use Demo as the name")
+    expanded = BrowserAgent.resolve_resume_task("continue")
     assert BrowserAgent.resolve_resume_task(expanded) == expanded
+
+
+def test_waiting_for_input_does_not_rewrite_a_new_delegated_browser_goal(monkeypatch):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+    runner = Runner()
+    runner.last_objective = "Fill the old application"
+    runner.awaiting_input = True
+    monkeypatch.setattr(BrowserAgent,"_connected_runner",runner,raising=False)
+    assert BrowserAgent.resolve_resume_task("Search the browser for Python documentation") is None
+
+
+@pytest.mark.parametrize("text", ["do it", "blorp invisible sandwich", "thanks", "Fill this form in my browser"])
+def test_pending_browser_input_cannot_override_the_main_reply_choice(monkeypatch,text):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+    runner = Runner()
+    runner.last_objective = "Fill my email in the application"
+    runner.awaiting_input = True
+    monkeypatch.setattr(BrowserAgent,"_connected_runner",runner,raising=False)
+    route = {"agent":"direct","response_text":"What email address should I use?"}
+    result = apply_routing_guardrails(user_prompt=text,routing_result=route,latest_screen_context=None)
+    assert result.route == route
+
+
+def test_explicit_browser_continue_still_resumes_pending_work(monkeypatch):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+    runner = Runner()
+    runner.last_objective = "Fill the application draft"
+    runner.awaiting_input = True
+    monkeypatch.setattr(BrowserAgent,"_connected_runner",runner,raising=False)
+    result = apply_routing_guardrails(user_prompt="continue",routing_result={"agent":"browser","task":"continue"},latest_screen_context=None)
+    assert result.route["agent"] == "browser" and "application draft" in result.route["task"]
+
+
+def test_pending_browser_question_cannot_capture_a_new_main_selected_task(monkeypatch):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+    runner = Runner()
+    runner.last_objective = "Fill the application"
+    runner.awaiting_input = True
+    monkeypatch.setattr(BrowserAgent,"_connected_runner",runner,raising=False)
+    route = {"agent":"cua_cli","task":"Run python --version"}
+    result = apply_routing_guardrails(user_prompt="Run python --version",routing_result=route,latest_screen_context=None)
+    assert result.route == route
 
 
 async def test_chat_stop_is_handled_before_a_confirmation_answer(monkeypatch):

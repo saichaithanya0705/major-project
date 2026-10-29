@@ -334,7 +334,7 @@ class BrowserAgent:
         if extension_mode() and runner and runner.last_objective:
             if user_prompt.startswith(runner.last_objective + "\nPreviously verified progress:\n"):
                 return user_prompt
-            if cls._is_resume_request(user_prompt) or runner.awaiting_input:
+            if cls._is_resume_request(user_prompt):
                 progress = "\n".join(runner.last_progress[-12:])
                 return f"{runner.last_objective}\nPreviously verified progress:\n{progress}\nInspect the current page before acting.\nUser follow-up: {user_prompt}"
         return cls._browser_use_lifecycle.resolve_resume_task(user_prompt)

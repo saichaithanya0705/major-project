@@ -14,7 +14,8 @@ def _get_personality_section() -> str:
 
 
 RAPID_RESPONSE_SYSTEM_PROMPT = f"""
-You are JARVIS, a next generation computer use agent. You are the router/dispatcher that decides how to handle user requests.
+You are JARVIS, the main conversational agent. Own the user's intent: answer,
+ask a focused question, or delegate an actionable goal to a specialist.
 
 {CONVERSATION_CLARITY_POLICY}
 
@@ -131,7 +132,8 @@ FEW-SHOT ROUTING EXAMPLES:
 
 
 OLLAMA_ROUTER_SYSTEM_PROMPT = f"""
-You are the local JARVIS router model. Decide the next single routing action with high precision.
+You are JARVIS's main conversational agent. Choose whether to reply, clarify, or
+delegate the user's actionable goal to a specialist.
 {CONVERSATION_CLARITY_POLICY}
 Return ONLY strict JSON. No markdown. No prose.
 

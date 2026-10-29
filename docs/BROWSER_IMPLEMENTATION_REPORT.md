@@ -28,6 +28,14 @@ regression that failed before the correction. Broadening the renderer's source
 allowlist would also expose routine specialist traces, so the fix is at the
 final-response producer.
 
+The main conversational model now owns reply/clarification/delegation decisions
+through the existing routing call. A live pending-form `do it` test showed a
+post-routing resume rule overriding its direct reply with browser work. The
+extension-mode dispatcher now preserves direct replies and unrelated specialist
+choices, and pending browser state no longer rewrites new delegated goals.
+Explicit continuation still uses retained context. Regression tests reproduced
+each override before the fix; routine delegation adds no approval round trip.
+
 Existing tabs use the official extension's per-client sharing group. A live
 check initially saw only Welcome because the form was outside JARVIS's group.
 Moving only that owned synthetic form into **Playwright · JARVIS** made it appear
@@ -167,8 +175,8 @@ hashes, tool names and argument keys, excluding page bodies and field values.
 
 The pre-review installed-session rehearsal passed eight checks (62.485 seconds),
 and the review-fix rehearsal passed twelve (193.688 seconds). After the live
-personal-input and repeated-edit fixes, the complete suite passed **758 tests,
-with 1 skip**, in 51.81 seconds, including the rendered UI test using installed
+personal-input, repeated-edit and main-decision fixes, the complete suite passed **765 tests,
+with 1 skip**, in 51.65 seconds, including the rendered UI test using installed
 Chrome. The skip is the native Windows symlink test, which requires account
 privileges unavailable here. Earlier Windows file-sharing, loopback-connection
 and timing failures were retained; launcher/UI deadlines were not relaxed.

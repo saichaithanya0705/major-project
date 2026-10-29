@@ -143,11 +143,12 @@ async def test_browser_question_returns_to_chat_without_replanning():
     from models.orchestrator_adapters import plan_from_route
     from models.rapid_step_execution_runtime import execute_delegated_step
     replies = []
+    history = []
     async def step(**kwargs):
         return {"agent":"browser","task":"Fill the application", "success":True,"complete":False,
             "message":"Choose a browser tab first.","source":"browser_use", "metadata":{"awaiting_input":True}}
     deps = SimpleNamespace(run_routed_agent_step=step, prepare_vision_screenshot=None,
-        record_step_context=lambda *_:None, append_rapid_history=lambda *_:None,
+        record_step_context=lambda *_:None, append_rapid_history=lambda *args:history.append(args),
         log_assistant_event=lambda *_,**__:None, clean_text=lambda value,*_:str(value),
         routing_task_text=lambda route:route["task"], finalize_direct_response_text=lambda **kwargs:kwargs["text"],
         router_tool_map={"direct_response":lambda **kwargs:replies.append(kwargs["text"])})
@@ -156,3 +157,4 @@ async def test_browser_question_returns_to_chat_without_replanning():
     result=await execute_delegated_step(model=object(),user_prompt="Fill the application",routing_result=route,
         orchestration_plan=plan,orchestration_task=plan.tasks[0],chain_steps=[],jarvis_model="test",request_id="test",deps=deps)
     assert result.disposition == "awaiting_input" and replies == ["Choose a browser tab first."]
+    assert sum(role == "assistant" and text == "Choose a browser tab first." for role,text,_ in history) == 1
