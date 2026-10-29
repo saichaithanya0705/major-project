@@ -40,7 +40,11 @@ async def test_invented_age_and_name_are_blocked_without_matching_url_digits(tmp
     run = ConnectedBrowserRunner(client,decide=decisions(
         {"tool":"browser_type","arguments":{"target":"e1","text":"25"}}))
     result = await run.execute("Fill my details on http://127.0.0.1:12588/form")
-    assert result["result"]["awaiting_input"] and not client.effects
+    # The user-directed link may create JARVIS's owned tab, but the invented
+    # personal value must still be blocked before a field-write action.
+    assert result["result"]["awaiting_input"]
+    assert [name for name, _ in client.effects] == ["browser_tabs"]
+    assert client.nodes["e1"]["value"] == ""
 
 
 async def test_router_cannot_authorize_an_invented_personal_value(tmp_path):
