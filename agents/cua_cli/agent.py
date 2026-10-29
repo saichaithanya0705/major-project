@@ -304,7 +304,7 @@ class CLIAgent:
     @staticmethod
     def _prepare_retry_task(task: str) -> str:
         instruction = (
-            "Your previous response incorrectly refused execution. "
+            "Your previous response did not provide verified execution evidence. "
             "You MUST execute the task now using your shell and file tools. "
             "Do not provide a 'run this in terminal' suggestion. "
             "Return what you executed and outcome."
@@ -608,7 +608,8 @@ class CLIAgent:
             if (
                 response.success
                 and not response.tool_calls
-                and self._looks_like_execution_refusal(response.output)
+                and (self._task_requests_terminal_execution(task)
+                     or self._looks_like_execution_refusal(response.output))
             ):
                 # Retry once with stronger execution-only instructions.
                 retry_task = self._prepare_retry_task(task)
@@ -618,6 +619,10 @@ class CLIAgent:
                     status_callback=status_callback,
                     tool_context_task=task,
                 )
+            if response.success and not response.tool_calls and self._task_requests_terminal_execution(task):
+                response.success = False
+                response.error = "The CLI returned no execution evidence for the requested terminal task."
+                response.output = ""
             return await self._finalize_cli_response(task, response)
         except asyncio.TimeoutError:
             return {
@@ -759,6 +764,8 @@ class CLIAgent:
             stderr=asyncio.subprocess.PIPE,
             cwd=invocation.cwd,
             env=invocation.env,
+            # CLI initialization and file/tool events can exceed asyncio's 64 KB default.
+            limit=4 * 1024 * 1024,
         )
         self._register_foreground_process(session_id, process, task)
 

@@ -165,6 +165,7 @@ async def await_foreground_process_operation(
         operation=operation,
         cleanup=cleanup,
         terminate=lambda: terminate_process_tree({"pid": process.pid}),
+        terminate_on_error=True,
     )
 
 

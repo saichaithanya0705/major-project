@@ -70,6 +70,16 @@ _TASK_TOKEN_STOPWORDS = frozenset(
         "would",
         "www",
         "you",
+        "use",
+        "cli",
+        "agent",
+        "terminal",
+        "actual",
+        "actually",
+        "tell",
+        "u",
+        "their",
+        "file",
     }
 )
 _TASK_TOKEN_SYNONYMS = {
@@ -122,7 +132,13 @@ def _canonical_task_token(token: str) -> str:
 
 def _meaningful_task_tokens(value: object) -> set[str]:
     tokens: set[str] = set()
-    for raw_token in _TASK_TOKEN_RE.findall(_normalized_task_text(value)):
+    # Dispatch phrasing and a no-file-edits constraint are not extra task goals.
+    # Keep requested outputs/actions so a completed subtask cannot cover email,
+    # browser navigation, or another unfinished part of a multi-step request.
+    normalized = re.sub(r"\bdo not (?:modify|change|edit|write) (?:any )?files\b", "", _normalized_task_text(value))
+    for raw_token in _TASK_TOKEN_RE.findall(normalized):
+        if raw_token in _TASK_TOKEN_STOPWORDS:
+            continue
         token = _canonical_task_token(raw_token)
         if len(token) < 2 or token in _TASK_TOKEN_STOPWORDS:
             continue
@@ -273,6 +289,21 @@ def should_finish_after_successful_agent_step(
     agent = str(step_result.get("agent") or routing_result.get("agent") or "").strip().lower()
     if agent not in {"browser", "cua_cli", "cua_vision", "jarvis"}:
         return False
+
+    if agent == "cua_cli":
+        from agents.cua_cli.direct_command_policy import extract_safe_direct_command
+
+        requested_command = extract_safe_direct_command(user_prompt)
+        if requested_command:
+            for receipt in step_result.get("tool_calls") or []:
+                if not isinstance(receipt, Mapping) or receipt.get("status") != "success":
+                    continue
+                parameters = receipt.get("parameters")
+                if not isinstance(parameters, Mapping):
+                    continue
+                executed = extract_safe_direct_command("", explicit_command=str(parameters.get("command") or ""))
+                if executed and executed.argv == requested_command.argv:
+                    return True
 
     requested = _normalized_task_text(user_prompt)
     if not requested:

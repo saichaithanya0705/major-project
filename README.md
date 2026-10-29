@@ -217,7 +217,7 @@ python -m evals.scorecard --mode run --only pptx-deck,chat-fact --trials 1
 
 ## CLI agent and coding delegation
 
-The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai) with a local model, and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Each CLI uses its own login; Jarvis never reads or reuses their credentials.
+The CLI agent runs shell and desktop tasks on [opencode](https://opencode.ai), and hands coding tasks (bugs, refactors, tests, features) to a stronger coding CLI you are already signed in to. Without an explicit model override, opencode uses the configured NVIDIA API key and `NVIDIA_CLI_MODEL` (falling back to `NVIDIA_BRAIN_MODEL`); otherwise it uses the local Ollama default. Coding CLIs use their own login; Jarvis never reads or reuses their credentials. Claude task subprocesses use only their built-in tools, without inherited MCP servers.
 
 | Backend | Install | Used for |
 | --- | --- | --- |
@@ -232,7 +232,9 @@ Every backend gets the same deny rules: `rm -rf`/`rm -r`, `Remove-Item`, `git pu
 
 ```
 # .env (all optional)
-JARVIS_OPENCODE_MODEL = "ollama/nemotron-3.5-bolt"   # provider/model for opencode
+# Optional: force a specific provider/model instead of automatic selection.
+# JARVIS_OPENCODE_MODEL = "ollama/nemotron-3.5-bolt"
+# NVIDIA_CLI_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 JARVIS_CODING_BACKENDS = "claude,codex,copilot,opencode"
 JARVIS_CODING_DELEGATION = "auto"   # "off" runs coding tasks on opencode too

@@ -213,6 +213,26 @@ def test_opencode_fails_fast_when_ollama_is_down(monkeypatch) -> None:
     backend.invocation(BackendRequest(prompt="x", cwd="/w", model="openai/gpt-5"))
 
 
+def test_opencode_uses_configured_nvidia_without_changing_explicit_model(monkeypatch):
+    monkeypatch.delenv("JARVIS_OPENCODE_MODEL", raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", "fixture-key-not-a-secret")
+    monkeypatch.setenv("NVIDIA_CLI_MODEL", "nvidia/test-model")
+    backend = OpencodeBackend()
+    assert backend.default_model() == "nvidia/nvidia/test-model"
+    config = backend.build_config(BackendRequest(prompt="x", cwd="/work"))
+    provider = config["provider"]["nvidia"]
+    assert provider["options"]["apiKey"] == "{env:NVIDIA_API_KEY}"
+    assert provider["options"]["baseURL"] == "https://integrate.api.nvidia.com/v1"
+    assert "fixture-key-not-a-secret" not in json.dumps(config)
+    assert provider["models"]["nvidia/test-model"]["tool_call"] is True
+    monkeypatch.setenv("JARVIS_OPENCODE_MODEL", "ollama/explicit-model")
+    assert backend.default_model() == "ollama/explicit-model"
+
+
+def test_claude_task_does_not_inherit_unrelated_mcp_servers():
+    assert "--strict-mcp-config" in ClaudeCodeBackend().build_args(BackendRequest(prompt="x", cwd="/w"))
+
+
 def test_claude_codex_copilot_safety_flags() -> None:
     scoped = BackendRequest(prompt="x", cwd="/w")
     trusted = BackendRequest(prompt="x", cwd="/w", full_trust=True)
@@ -265,6 +285,13 @@ if mode == "tool_then_fail":
     print('{"type":"tool_use","part":{"type":"tool","tool":"bash","callID":"c1","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi"}}}')
     sys.stderr.write("Error: unauthorized\n")
     sys.exit(1)
+if mode == "large":
+    import json
+    print(json.dumps({"type":"ignored", "data":"x" * 200_000}))
+if mode == "oversized":
+    import json, time
+    print(json.dumps({"type":"ignored", "data":"x" * 5_000_000}), flush=True)
+    time.sleep(60)
 sys.stdout.write(pathlib.Path(sys.argv[3]).read_text(encoding="utf-8"))
 '''
 
@@ -329,6 +356,42 @@ async def test_cli_agent_never_reruns_a_task_after_tools_executed(tmp_path, monk
     assert not second_prompt.exists()
 
 
+async def test_cli_agent_reads_large_jsonl_events(tmp_path, monkeypatch):
+    script = tmp_path / "fake_cli.py"
+    script.write_text(_FAKE_CLI, encoding="utf-8")
+    backend = _ScriptedBackend("large", script, tmp_path / "prompt", "large")
+    monkeypatch.setattr(agent_module, "backend_chain_for_task", lambda task: [backend])
+    response = await CLIAgent()._run_cli("read fixture", timeout=10)
+    assert response.success is True
+    assert response.output == "All done: hello."
+
+
+async def test_oversized_event_rejects_and_reaps_real_subprocess(tmp_path, monkeypatch):
+    script = tmp_path / "fake_cli.py"
+    script.write_text(_FAKE_CLI, encoding="utf-8")
+    backend = _ScriptedBackend("oversized", script, tmp_path / "prompt", "oversized")
+    monkeypatch.setattr(agent_module, "backend_chain_for_task", lambda task: [backend])
+    launched = []
+    create = agent_module.asyncio.create_subprocess_exec
+
+    async def capture_process(*args, **kwargs):
+        process = await create(*args, **kwargs)
+        launched.append(process)
+        return process
+
+    monkeypatch.setattr(agent_module.asyncio, "create_subprocess_exec", capture_process)
+    try:
+        with pytest.raises(ValueError, match="limit"):
+            await CLIAgent()._run_cli("read fixture", timeout=10)
+        assert launched[0].returncode is not None
+        assert CLIAgent._active_foreground_processes == {}
+    finally:
+        for process in launched:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+
 async def test_cli_agent_reports_every_skipped_backend(monkeypatch, tmp_path) -> None:
     script = tmp_path / "fake_cli.py"
     script.write_text(_FAKE_CLI, encoding="utf-8")
@@ -340,3 +403,16 @@ async def test_cli_agent_reports_every_skipped_backend(monkeypatch, tmp_path) ->
     assert response.success is False
     assert response.error.startswith("No coding CLI could run this task."), response.error
     assert "missing is not installed" in response.error, response.error
+
+
+async def test_cli_rejects_terminal_claim_without_tool_evidence(monkeypatch):
+    calls = []
+    async def invented(*args, **kwargs):
+        calls.append(True)
+        return agent_module.CLIResponse(success=True, output="The total is 143.")
+    agent = CLIAgent()
+    monkeypatch.setattr(agent, "_run_cli", invented)
+    result = await agent.execute("Read the fixture using the terminal and calculate its sum")
+    assert result["success"] is False
+    assert "execution evidence" in result["error"].lower()
+    assert len(calls) == 2

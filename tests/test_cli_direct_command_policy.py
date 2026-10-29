@@ -29,6 +29,12 @@ def test_rejects_mutating_or_compound_commands() -> None:
     assert extract_safe_direct_command("command: rm -rf .") is None
 
 
+def test_natural_version_request_runs_the_real_executable():
+    command = extract_safe_direct_command("Run git --version in the terminal and report its actual output.")
+    assert command is not None
+    assert command.argv == ["git", "--version"]
+
+
 async def test_cli_agent_uses_direct_command_without_gemini_cli() -> None:
     agent = CLIAgent()
     calls = []

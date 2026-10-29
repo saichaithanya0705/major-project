@@ -99,7 +99,16 @@ class OpencodeBackend(CodingBackend):
         return super().resolve_executable()
 
     def default_model(self) -> str:
-        return super().default_model() or DEFAULT_OPENCODE_MODEL
+        explicit = super().default_model()
+        if explicit:
+            return explicit
+        if os.getenv("NVIDIA_API_KEY", "").strip():
+            model = (os.getenv("NVIDIA_CLI_MODEL", "").strip()
+                     or os.getenv("NVIDIA_BRAIN_MODEL", "").strip()
+                     or "nvidia/nemotron-3.5-lightning-30b-a3b")
+            # OpenCode uses provider/model; NVIDIA's model ID has its own namespace.
+            return f"nvidia/{model}"
+        return DEFAULT_OPENCODE_MODEL
 
     def invocation(self, request: BackendRequest) -> BackendInvocation:
         model = request.model or self.default_model()
@@ -130,6 +139,22 @@ class OpencodeBackend(CodingBackend):
                     "name": "Ollama (local)",
                     "options": {"baseURL": f"{ollama_base_url()}/v1"},
                     "models": {model_id: {"name": model_id, "tool_call": True}},
+                }
+            }
+            config["small_model"] = model
+        elif provider_id == "nvidia" and model_id:
+            endpoint = (os.getenv("NVIDIA_URL") or os.getenv("NVIDIA_CHAT_URL")
+                        or "https://integrate.api.nvidia.com/v1/chat/completions").rstrip("/")
+            base_url = endpoint.removesuffix("/chat/completions")
+            config["provider"] = {
+                "nvidia": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "NVIDIA",
+                    "options": {"baseURL": base_url, "apiKey": "{env:NVIDIA_API_KEY}"},
+                    "models": {model_id: {
+                        "name": model_id,
+                        "tool_call": True,
+                    }},
                 }
             }
             config["small_model"] = model

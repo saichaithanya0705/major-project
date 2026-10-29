@@ -73,6 +73,7 @@ class ClaudeCodeBackend(CodingBackend):
             "--output-format",
             "stream-json",
             "--verbose",
+            "--strict-mcp-config",
             "--permission-mode",
             "acceptEdits",
             "--allowedTools",

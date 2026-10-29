@@ -5,6 +5,7 @@ Checks for extracted CLI foreground runtime helpers.
 import asyncio
 import os
 import sys
+import pytest
 from types import SimpleNamespace
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -79,6 +80,27 @@ def test_await_foreground_process_operation_times_out_and_runs_cleanup() -> None
         assert process.wait_calls == 1, process.wait_calls
 
     asyncio.run(_run())
+
+
+async def test_foreground_reader_error_stops_process_and_cleans_up():
+    process = _FakeProcess()
+    terminated = []
+    cleaned = []
+
+    async def broken_reader():
+        raise ValueError("oversized event")
+
+    async def cleanup():
+        cleaned.append(True)
+
+    with pytest.raises(ValueError, match="oversized event"):
+        await await_foreground_process_operation(
+            process=process, timeout=1, operation=broken_reader(), cleanup=cleanup,
+            terminate_process_tree=lambda meta: terminated.append(meta["pid"]),
+        )
+    assert terminated == [process.pid]
+    assert cleaned == [True]
+    assert process.wait_calls == 1
 
 
 def test_run_direct_command_uses_foreground_operation_boundary(monkeypatch) -> None:

@@ -106,6 +106,10 @@ def extract_safe_direct_command(task: str, explicit_command: str | None = None) 
         if re.search(rf"\b{command_name}\b", text, flags=re.IGNORECASE):
             return DirectCommand(argv=[command_name], display=command_name, timeout_seconds=15)
 
+    version = re.search(r"\b(python|node|npm|git)\s+(--version|-v)(?=\s|[.,!?]|$)", text, flags=re.IGNORECASE)
+    if version:
+        return _from_command_text(version.group(0))
+
     lookup = re.search(
         rf"\b(?P<tool>nslookup|tracert)\s+(?P<host>{_HOST_PATTERN})\b",
         text,

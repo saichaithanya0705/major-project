@@ -151,3 +151,30 @@ def test_should_finish_after_successful_agent_step_uses_request_coverage() -> No
         ],
         routing_task_text=_routing_task_text,
     )
+
+
+def test_cli_command_receipt_finishes_despite_router_removing_chat_instructions():
+    step = {"agent": "cua_cli", "task": "run git --version in the terminal", "success": True,
+            "tool_calls": [{"tool_name": "run_shell_command", "status": "success",
+                            "parameters": {"command": "git --version"}, "result": "git version fixture"}]}
+    assert should_finish_after_successful_agent_step(
+        user_prompt="Use the CLI agent to run git --version in the terminal and report the actual output. Do not modify any files.",
+        routing_result={"agent": "cua_cli", "task": step["task"]}, step_result=step,
+        chain_steps=[step], routing_task_text=_routing_task_text,
+    )
+
+
+def test_cli_read_goal_ignores_dispatch_wording_but_keeps_requested_results():
+    prompt = ("Use the CLI agent to read fixture.json using the terminal. Report its probe value, "
+              "number of amounts, and their sum. Actually read the file; do not change files.")
+    task = "read fixture.json and report probe value, number of amounts, and their sum"
+    step = {"agent": "cua_cli", "task": task, "success": True}
+    assert should_finish_after_successful_agent_step(
+        user_prompt=prompt, routing_result={"agent": "cua_cli", "task": task},
+        step_result=step, chain_steps=[step], routing_task_text=_routing_task_text,
+    )
+    assert not should_finish_after_successful_agent_step(
+        user_prompt=prompt + " Then email the report to my professor.",
+        routing_result={"agent": "cua_cli", "task": task},
+        step_result=step, chain_steps=[step], routing_task_text=_routing_task_text,
+    )
