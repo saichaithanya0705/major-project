@@ -2,6 +2,8 @@
 import os
 import re
 
+from agents.browser.handoff_intent import browser_handoff_request
+
 
 def extension_mode() -> bool:
     return os.getenv("JARVIS_BROWSER_MODE", "managed").strip().lower() == "extension"

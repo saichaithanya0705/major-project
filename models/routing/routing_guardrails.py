@@ -13,6 +13,7 @@ from models.routing_payload_parser import (
 )
 
 GuardrailRewriteReason = Literal[
+    "explicit_browser_handoff",
     "connected_browser_session",
     "browser_resume",
     "screen_context_to_actionable_agent",
@@ -119,8 +120,16 @@ def apply_routing_guardrails(
         routing_task_text = routing_task_text or default_routing_task_text
 
     original_route = _route_payload_copy(routing_result)
+    from agents.browser.handoff_intent import parse_browser_handoff
     from agents.browser.connected_control import connected_session_request, extension_mode, native_browser_request
     agent = str(routing_result.get("agent") or "").strip().lower()
+    explicit_handoff = parse_browser_handoff(user_prompt)
+    if extension_mode() and explicit_handoff is not None:
+        return _rewritten(
+            {"agent": "browser", "task": explicit_handoff.task},
+            rewritten_from=original_route,
+            reason="explicit_browser_handoff",
+        )
     # A pending browser question supplies context; it cannot turn the main
     # conversational agent's reply/clarification into a delegated action.
     if extension_mode() and agent == "direct":
