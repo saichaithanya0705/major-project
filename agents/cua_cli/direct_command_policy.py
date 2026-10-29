@@ -9,6 +9,8 @@ about intent, tooling, and policy.
 from __future__ import annotations
 
 import re
+import os
+from core.local_inspection import is_local_process_inspection
 from dataclasses import dataclass
 
 
@@ -87,6 +89,20 @@ def _from_command_text(command: str) -> DirectCommand | None:
 def extract_safe_direct_command(task: str, explicit_command: str | None = None) -> DirectCommand | None:
     if explicit_command:
         return _from_command_text(explicit_command)
+
+    if os.name == "nt" and is_local_process_inspection(task):
+        script = (
+            "$items = @(Get-Process); "
+            "Write-Output ('Running processes: ' + $items.Count + '. Showing 30 largest by memory. CPU is cumulative seconds.'); "
+            "$items | Sort-Object WorkingSet64 -Descending | Select-Object -First 30 ProcessName,Id,"
+            "@{Name='RAM_MB';Expression={[math]::Round($_.WorkingSet64 / 1MB,1)}},"
+            "@{Name='CPU_seconds';Expression={[math]::Round($_.CPU,1)}} | "
+            "Format-Table -AutoSize | Out-String -Width 160"
+        )
+        return DirectCommand(
+            argv=["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            display="Get-Process (30 largest processes by memory)", timeout_seconds=15,
+        )
 
     text = " ".join(str(task or "").split()).strip()
     if not text or _has_shell_control(text):

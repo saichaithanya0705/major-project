@@ -5,6 +5,7 @@ Intent and deictic classification helpers for routing policy decisions.
 from __future__ import annotations
 
 import re
+from core.local_inspection import is_local_machine_state_request
 from typing import Callable
 
 TextPredicate = Callable[[str], bool]
@@ -243,6 +244,8 @@ def has_context_dependent_reference(text: str) -> bool:
     lowered = (text or "").lower().strip()
     if not lowered:
         return False
+    if is_local_machine_state_request(lowered):
+        return True
     if matches_any_marker(lowered, _CONTEXT_DEPENDENT_MARKERS):
         return True
     if not matches_any_marker(lowered, _BARE_DEICTIC_MARKERS):

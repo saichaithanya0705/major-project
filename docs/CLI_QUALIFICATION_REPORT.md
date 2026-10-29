@@ -62,3 +62,27 @@ The installed Claude CLI did not complete a separate 65-second probe. A repair
 to event transport does not prove that every installed backend is authenticated,
 available, or responsive. Synthetic fixture files and test subprocesses were
 removed after qualification.
+
+## Local-state routing correction
+
+The direct-chat fast path treated the word `current` as a web-source requirement
+before recognizing that the requested state belonged to the user's laptop.
+`core/local_inspection.py` now identifies device-state observations at the intent
+boundary. Those requests bypass direct chat and must use the CLI inspection
+surface. Instructional questions such as "How do I check processes?" and news
+questions remain eligible for direct chat or web sources.
+
+On Windows, process inspection uses a fixed read-only PowerShell command without
+model-authored shell input. It reports the total process count and the 30 largest
+processes by memory, with PID, memory in MB, and cumulative CPU seconds. It neither
+terminates processes nor reads their command lines. The new routing tests cover
+four local-state requests and four instructional/general-news requests. This is
+an application contract test, not an eight-example benchmark of model accuracy.
+
+Qualification after the correction: **804 passed, 2 skipped in 47.79 seconds**.
+The original question, "what r the current running processes on my laptop?",
+completed through the live chat server in **3.06 seconds** with exactly one
+`cua_cli` delegation, a successful `Get-Process` receipt, process-count output,
+and no `direct_chat` web route. This is one measured live run, not a latency SLA
+or an overall task-success percentage. Instructional and news-routing behavior
+was verified by the eight-case deterministic routing regression.

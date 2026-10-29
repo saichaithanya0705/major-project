@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from core.local_inspection import is_local_machine_state_request
 from typing import Callable, Literal
 
 from models.routing_payload_parser import (
@@ -13,6 +14,7 @@ from models.routing_payload_parser import (
 )
 
 GuardrailRewriteReason = Literal[
+    "local_machine_state_requires_inspection",
     "explicit_browser_handoff",
     "connected_browser_session",
     "browser_resume",
@@ -120,6 +122,12 @@ def apply_routing_guardrails(
         routing_task_text = routing_task_text or default_routing_task_text
 
     original_route = _route_payload_copy(routing_result)
+    if is_local_machine_state_request(user_prompt):
+        return _rewritten(
+            {"agent": "cua_cli", "task": user_prompt},
+            rewritten_from=original_route,
+            reason="local_machine_state_requires_inspection",
+        )
     from agents.browser.handoff_intent import parse_browser_handoff
     from agents.browser.connected_control import connected_session_request, extension_mode, native_browser_request
     agent = str(routing_result.get("agent") or "").strip().lower()
