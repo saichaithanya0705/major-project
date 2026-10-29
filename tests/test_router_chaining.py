@@ -92,6 +92,40 @@ async def test_chains_multiple_agents_then_finishes() -> None:
             model_module.ROUTER_TOOL_MAP["direct_response"] = original_direct_response
 
 
+async def test_completed_screen_explanation_finishes_before_router_can_repeat(monkeypatch) -> None:
+    prompt = "Analyze the screen and tell me what do u see?"
+    answer = "I see a document beside the JARVIS chat window."
+    routed = []
+    executed = []
+    replies = []
+
+    class RepeatingRouter:
+        def __init__(self, **kwargs):
+            pass
+
+        async def route_request(self, router_prompt):
+            routed.append(router_prompt)
+            return {"agent": "jarvis", "task": prompt}
+
+    async def explain_screen(model, routing_result, jarvis_model, **kwargs):
+        executed.append(routing_result)
+        # The real explanation agent omits complete on a successful response.
+        return {"agent": "jarvis", "task": prompt, "success": True,
+                "message": answer, "source": "jarvis"}
+
+    monkeypatch.setattr(model_module, "GeminiModel", RepeatingRouter)
+    monkeypatch.setattr(request_agent_step_runtime, "run_request_agent_step", explain_screen)
+    monkeypatch.setitem(model_module.ROUTER_TOOL_MAP, "direct_response",
+                        lambda **kwargs: replies.append(kwargs["text"]))
+    model_module.RAPID_SESSION_STATE.clear_history()
+    try:
+        await model_module.call_gemini(prompt, "rapid", "jarvis")
+        assert replies == [answer]
+        assert len(routed) == len(executed) == 1
+    finally:
+        model_module.RAPID_SESSION_STATE.clear_history()
+
+
 async def test_direct_response_preserves_full_assistant_message() -> None:
     original_model_cls = model_module.GeminiModel
     original_direct_response = model_module.ROUTER_TOOL_MAP.get("direct_response")
@@ -1068,7 +1102,7 @@ async def test_visual_question_uses_router_then_jarvis() -> None:
             "jarvis",
         )
         assert executed_agents == ["jarvis"], executed_agents
-        assert _VisualRouterModel.route_calls == 2, _VisualRouterModel.route_calls
+        assert _VisualRouterModel.route_calls == 1, _VisualRouterModel.route_calls
         assert direct_messages == ["The screen analysis is complete."], direct_messages
     finally:
         model_module.GeminiModel = original_model_cls

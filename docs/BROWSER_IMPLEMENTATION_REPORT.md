@@ -1,5 +1,41 @@
 # Browser implementation and qualification — 2026-10-29
 
+## Screen explanation completion correction
+
+### What I did
+
+Included the `jarvis` explanation agent in the existing successful single-step
+completion policy and added a regression using a router that always repeats the
+same screen request. Updated the earlier visual-routing test to expect one call.
+
+### Why this approach
+
+The policy already checks success, completion, and coverage of the original
+request. A full screen explanation can use the same final-response path.
+
+### Why not the alternative
+
+Increasing the six-round limit would allow more repeated requests after the
+screen answer was already available.
+
+### What was the issue / root cause
+
+The completion policy excluded `jarvis`. The live request `fd0637828d5d`
+successfully explained the screen twice, then spent four routing rounds rejecting
+the same delegation before displaying the misleading six-step stop message.
+
+### Why this works best
+
+The completed answer is returned before the router can repeat the same task.
+Failed, explicitly incomplete, and partial-task results still require normal
+handling; the existing loop limit remains unchanged.
+
+### Other valid patterns
+
+A structured goal-completion decision from the main model could support more
+complex chains, but would add another model call and require output validation.
+The existing deterministic policy is sufficient for this single-step defect.
+
 ## Direct-link handoff update
 
 ### What I did

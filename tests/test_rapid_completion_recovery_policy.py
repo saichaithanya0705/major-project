@@ -2,6 +2,7 @@
 
 import os
 import sys
+import pytest
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT_DIR)
@@ -15,6 +16,25 @@ from models.rapid_completion_recovery_policy import (
 
 def _routing_task_text(routing_result: dict[str, object]) -> str:
     return str(routing_result.get("task") or routing_result.get("query") or "")
+
+
+@pytest.mark.parametrize("success,complete,task,expected", [
+    (True, True, "Analyze the screen", True),
+    (False, True, "Analyze the screen", False),
+    (True, False, "Analyze the screen", False),
+    (True, True, "Read the title", False),
+])
+def test_screen_explanation_completion_requires_success_and_full_request(
+    success, complete, task, expected,
+):
+    step = {"agent": "jarvis", "task": task, "success": success, "complete": complete}
+    assert should_finish_after_successful_agent_step(
+        user_prompt="Analyze the screen",
+        routing_result={"agent": "jarvis", "task": task},
+        step_result=step,
+        chain_steps=[step],
+        routing_task_text=_routing_task_text,
+    ) is expected
 
 
 def test_find_latest_unresolved_incomplete_step_ignores_router_guard_and_resets_after_complete() -> None:
