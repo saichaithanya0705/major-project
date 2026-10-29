@@ -19,6 +19,20 @@ from models.routing_prompt_parser import extract_latest_request_from_router_prom
 from models.text_normalization import clean_text, format_direct_response_text
 
 
+# Some OpenAI-compatible providers return the declared function name in the
+# ``agent`` slot instead of the internal route name.  Keep this compatibility
+# boundary deliberately closed: only functions declared in function_calls.py
+# can be translated, and every other value remains an invalid route.
+_DECLARED_TOOL_AGENT_ALIASES = {
+    "direct_response": "direct",
+    "invoke_jarvis": "jarvis",
+    "invoke_browser": "browser",
+    "invoke_cua_cli": "cua_cli",
+    "invoke_cua_vision": "cua_vision",
+    "request_screen_context": "screen_context",
+}
+
+
 def looks_like_router_refusal(text: str) -> bool:
     lowered = (text or "").lower()
     patterns = (
@@ -69,6 +83,13 @@ def normalize_router_decision_payload(
     latest_request = extract_latest_request_from_router_prompt(prompt)
     if "tasks" in payload:
         return normalize_plan_decision_payload(payload, latest_request)
+
+    # Copy so provider output remains immutable in diagnostics.  This maps a
+    # known tool-style response before the typed route parser validates it.
+    payload = dict(payload)
+    agent = payload.get("agent")
+    if isinstance(agent, str):
+        payload["agent"] = _DECLARED_TOOL_AGENT_ALIASES.get(agent.strip().lower(), agent)
 
     normalized = normalize_route_decision_payload(
         payload,

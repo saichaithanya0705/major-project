@@ -15,6 +15,7 @@ sys.path.insert(0, ROOT_DIR)
 import models.router_runtime as router_runtime
 from models.router_runtime import route_request
 from models.router_runtime_contracts import RouterRequestContext
+from models.routing.routing_decision_policy import normalize_router_decision_payload
 
 
 class _BaseRouterModel:
@@ -69,6 +70,27 @@ class _InternalAttributeErrorFallbackModel(_BaseRouterModel):
 class _MissingOpenRouterContractModel(_BaseRouterModel):
     def _call_nvidia_router_sync(self, prompt: str):
         return {"agent": "direct", "response_text": "nvidia ok"}
+
+
+def test_router_normalizes_only_declared_tool_name_aliases() -> None:
+    route = normalize_router_decision_payload(
+        {"agent": "invoke_cua_cli", "task": "inspect the local project"},
+        "# User's Latest Request:\ninspect the local project",
+        provider_name="NVIDIA",
+    )
+
+    assert route == {"agent": "cua_cli", "task": "inspect the local project"}
+
+    try:
+        normalize_router_decision_payload(
+            {"agent": "invoke_untrusted_tool", "task": "do not run this"},
+            "# User's Latest Request:\nhello",
+            provider_name="NVIDIA",
+        )
+    except RuntimeError as exc:
+        assert "invalid agent 'invoke_untrusted_tool'" in str(exc)
+    else:
+        raise AssertionError("Unknown tool-like agent names must be rejected.")
 
 
 def test_router_records_provider_call_failure_in_request_scope_when_fallback_succeeds() -> None:
