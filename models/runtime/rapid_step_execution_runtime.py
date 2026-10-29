@@ -13,7 +13,7 @@ from models.routing_payload_parser import ScreenContextPayload
 from models.screen_context_execution_runtime import ScreenContextStepRequest, execute_screen_context_step
 
 
-DelegatedStepDisposition = Literal["continue", "failed", "fast_finish"]
+DelegatedStepDisposition = Literal["continue", "failed", "fast_finish", "awaiting_input"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +147,14 @@ async def execute_delegated_step(
             orchestration_plan=updated_plan,
             latest_screen_context=latest_screen_context,
         )
+
+    if step_result.get("success") and step_result.get("metadata", {}).get("awaiting_input") is True:
+        message = step_result.get("message", "")
+        _send_direct_response(deps, message)
+        deps.log_assistant_event("request_awaiting_input", request_id=request_id,
+            agent=str(step_result.get("agent") or ""), message=message, success=True)
+        return DelegatedStepExecutionResult(disposition="awaiting_input", step_result=step_result,
+            orchestration_plan=updated_plan, latest_screen_context=latest_screen_context)
 
     if should_finish_after_successful_agent_step(
         user_prompt=user_prompt,

@@ -13,12 +13,14 @@ from pathlib import Path
 
 import jsonschema
 
-from agents.browser.connected_gateway import ConnectedGateway, StalePageError, public_url
+from agents.browser.connected_gateway import ConnectedGateway, StalePageError, SelectedTabLostError, public_url
 from agents.browser.mcp_client import McpToolError
 from agents.skills.browser_skills import BrowserSkills
 from core.confirmations import CONFIRMATIONS
+from models.shared.conversation_policy import CONVERSATION_CLARITY_POLICY
 
 logger = logging.getLogger(__name__)
+ACTIVE_SECONDS = 120.0
 
 _DECISION = {"oneOf": [
     {"type": "object", "properties": {"tool": {"type": "string", "minLength": 1, "maxLength": 80},
@@ -32,7 +34,7 @@ _DECISION = {"oneOf": [
          "required": ["done", "summary", "evidence"], "additionalProperties": False},
 ]}
 
-_SYSTEM = """You operate the user's selected browser toward their stated objective.
+_SYSTEM = CONVERSATION_CLARITY_POLICY + "\n" + """You operate the user's selected browser toward their stated objective.
 Return exactly one JSON object: {"tool":"name","arguments":{...}} or
 {"done":true,"summary":"user-facing result","evidence":["short exact observed quote"]}.
 For an ACTION use only tool and arguments. A finish/question object has no tool.
@@ -76,6 +78,7 @@ def _reject_constant(_):
 class ConnectedBrowserRunner:
     def __init__(self, client, *, decide=None, confirm=None, status=None):
         self.client = client
+        self._active_timeout = None
         self.decide = decide or self._brain_decide
         self.confirm = confirm
         self.status = status
@@ -120,11 +123,17 @@ class ConnectedBrowserRunner:
     async def _confirm(self, description: str) -> bool:
         self.state = "awaiting_approval"
         await self._status("Review the form submission in chat.")
+        timer = self._active_timeout
+        remaining = max(0.0, timer.when() - asyncio.get_running_loop().time()) if timer and timer.when() is not None else None
+        if timer and remaining is not None:
+            timer.reschedule(None)
         try:
             if self.confirm:
                 return await self.confirm(description)
             return await CONFIRMATIONS.request(description, required=True)
         finally:
+            if timer and remaining is not None and not timer.expired():
+                timer.reschedule(asyncio.get_running_loop().time() + remaining)
             self.state = "running"
 
     def request_stop(self) -> bool:
@@ -149,12 +158,20 @@ class ConnectedBrowserRunner:
     async def connect(self) -> str:
         self._stopped = False
         self.state = "connecting"
+        previous = self.gateway
         self.gateway = ConnectedGateway(self.client, self._confirm, lambda: self._stopped)
-        if getattr(self.client, "extension", False) and os.getenv("PLAYWRIGHT_MCP_EXTENSION_TOKEN", "").strip() and not self._selected_tab:
+        if previous and self._selected_tab:
+            self.gateway._tab_identity = previous._tab_identity
+            self.gateway._identity_lost = previous._identity_lost
+        if getattr(self.client, "extension", False) and not self._selected_tab:
             tabs = await self.gateway.list_tabs()
             self.state = "awaiting_tab_selection"
             return "Browser authenticated. Choose a tab with 'use browser tab N' before page contents are read.\n" + tabs
-        observation = await self.gateway.observe()
+        try:
+            observation = await self.gateway.observe()
+        except SelectedTabLostError:
+            self._selected_tab = False
+            raise
         self._selected_tab = True
         self.state = "ready"
         return observation
@@ -176,6 +193,7 @@ class ConnectedBrowserRunner:
             self.last_progress = list(gateway.verified_steps)
         return {"success": error is None, "complete": complete, "error": error,
             "result": {"summary": summary, "mode": "playwright_extension", "complete": complete,
+                "awaiting_input": self.state in {"awaiting_input", "awaiting_tab_selection"},
                 "verified_steps": self.last_progress[-20:], "provider": self.provider,
                 "url": public_url(gateway.url) if gateway else ""}}
 
@@ -191,7 +209,15 @@ class ConnectedBrowserRunner:
             self.last_objective = task
             self.last_progress = []
             try:
-                return await self._run(task)
+                async with asyncio.timeout(ACTIVE_SECONDS) as active_timeout:
+                    self._active_timeout = active_timeout
+                    return await self._run(task)
+            except TimeoutError:
+                if self._active_timeout and self._active_timeout.expired():
+                    self.state = "stopped"
+                    return self._result("Browser active-time limit reached. An action already sent may have an unknown outcome; inspect before continuing.", error="Browser task limit reached.")
+                self.state = "failed"
+                return self._result("The browser model request timed out. Verified progress is retained; no unvalidated action was executed.", error="Browser model request timed out.")
             except asyncio.CancelledError:
                 self.state = "stopped"
                 return self._result("Browser task stopped. Verified progress is retained; say continue to inspect and resume.", error="Stopped by user.")
@@ -205,6 +231,7 @@ class ConnectedBrowserRunner:
                 return self._result(message, error=message)
             finally:
                 self._task = None
+                self._active_timeout = None
 
     async def _run(self, task: str) -> dict:
         # Fresh references and skill contents for each task, never replay old actions.
@@ -228,7 +255,7 @@ class ConnectedBrowserRunner:
         for step in range(20):
             if self._stopped:
                 raise McpToolError("Browser task stopped.")
-            remaining = 120 - (time.monotonic() - started - gateway.approval_wait)
+            remaining = ACTIVE_SECONDS - (time.monotonic() - started - gateway.approval_wait)
             if remaining <= 0:
                 break
             catalog = gateway.tool_catalog()
@@ -258,12 +285,21 @@ class ConnectedBrowserRunner:
                     available = " ".join(corpus.casefold().split())
                     if not proposal["evidence"] or any(" ".join(e.casefold().split()) not in available for e in proposal["evidence"]):
                         raise ValueError("evidence")
+                    positive_task = re.sub(r"\b(?:do not|don't|never|without)\s+(?:\w+\s+){0,2}(?:submit|send|fill|type|edit)\b", "", task, flags=re.I)
+                    requires_submission = bool(re.search(r"\bsubmit\b", positive_task, re.I))
+                    positive_summary = re.sub(r"\b(?:no\s+(?:forms?|messages?|orders?)\s+(?:(?:were|was)\s+)?|(?:was|were|have|has)\s+not\s+|not\s+)(?:submitted|sent|paid|purchased|booked)\b", "", proposal["summary"], flags=re.I)
+                    claims_submission = bool(re.search(r"\b(?:submitted|sent|paid|purchased|booked)\b", positive_summary, re.I))
+                    if (requires_submission or claims_submission) and not gateway.verified_submissions:
+                        raise ValueError("postcondition")
+                    if re.search(r"\b(?:fill|type|edit)\b", positive_task, re.I) and not gateway.verified_edits:
+                        raise ValueError("postcondition")
             except (ValueError, TypeError, jsonschema.ValidationError) as exc:
                 invalid += 1
                 if invalid > 2:
                     raise McpToolError("The model did not provide a valid action or observed completion evidence; no unvalidated action was executed.")
                 correction = ("Your completion evidence was not an exact quote. Copy short strings from available_evidence_quotes verbatim; put URLs and comparison prose in summary. Do not repeat finished browser actions."
-                    if str(exc) == "evidence" else "Return the documented JSON shape, using only available tools and exact observed completion evidence.")
+                    if str(exc) == "evidence" else "Required edit/submission postconditions are not verified. Do not claim completion or repeat a sent submission; use done:false to report uncertainty or request input."
+                    if str(exc) == "postcondition" else "Return the documented JSON shape, using only available tools and exact observed completion evidence.")
                 continue
             correction = ""
             if "tool" not in proposal:

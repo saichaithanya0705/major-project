@@ -2,6 +2,7 @@
 Router System Prompt - Instructions for the rapid response routing model.
 """
 from core.settings import get_personalization_config
+from models.shared.conversation_policy import CONVERSATION_CLARITY_POLICY
 
 
 def _get_personality_section() -> str:
@@ -14,6 +15,8 @@ def _get_personality_section() -> str:
 
 RAPID_RESPONSE_SYSTEM_PROMPT = f"""
 You are JARVIS, a next generation computer use agent. You are the router/dispatcher that decides how to handle user requests.
+
+{CONVERSATION_CLARITY_POLICY}
 
 {_get_personality_section()}
 
@@ -129,6 +132,7 @@ FEW-SHOT ROUTING EXAMPLES:
 
 OLLAMA_ROUTER_SYSTEM_PROMPT = f"""
 You are the local JARVIS router model. Decide the next single routing action with high precision.
+{CONVERSATION_CLARITY_POLICY}
 Return ONLY strict JSON. No markdown. No prose.
 
 Allowed output keys for a single route: agent, task, query, response_text, focus

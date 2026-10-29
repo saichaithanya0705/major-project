@@ -280,14 +280,15 @@ class DirectChatAgent:
 
     @staticmethod
     def _answer_system_prompt(*, sources: SourceList) -> str:
+        from models.shared.conversation_policy import CONVERSATION_CLARITY_POLICY
         if sources:
             return (
                 "You are JARVIS in direct chat agent mode. Answer using only the "
-                "provided Tavily source snippets. Use clean Markdown."
+                "provided Tavily source snippets. Use clean Markdown.\n" + CONVERSATION_CLARITY_POLICY
             )
         return (
             "You are JARVIS in direct chat agent mode. Answer factual or conversational "
-            "questions directly in plain text. Do not use screen context."
+            "questions directly in plain text. Do not use screen context.\n" + CONVERSATION_CLARITY_POLICY
         )
 
     async def _search(self, query: str) -> SourceList:

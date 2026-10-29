@@ -17,6 +17,12 @@
 <button type="submit">Send application</button></form></section>
 <section data-page="/app"><h1>Project board</h1><button type="button" id="details">Show details</button><p id="milestone" hidden>Milestone Polaris is due on Friday.</p>
 <label>Draft title <input name="draft_title" id="draft-title"></label><button type="button" id="spa-submit">Submit draft</button><p id="spa-result" aria-live="polite"></p></section>
+<section data-page="/edge-form"><h1>Submission boundary test</h1><form id="edge-form" method="post" action="/submit">
+<label>Application note <input type="search" name="application_note"></label>
+<label>Demo secret <input type="password" name="demo_passcode" value="synthetic-secret-one"></label>
+<input type="hidden" name="demo_csrf" value="synthetic-csrf">
+<input type="image" alt="Continue application" aria-label="Continue application" name="continue" formaction="/alternate-submit" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='45'%3E%3Crect width='180' height='45' fill='lightblue'/%3E%3Ctext x='5' y='28'%3EContinue application%3C/text%3E%3C/svg%3E">
+<button type="submit">Send edge form</button></form></section>
 </main><script>
 for(const section of document.querySelectorAll('[data-page]'))section.hidden=section.dataset.page!==location.pathname;
 document.querySelector('#details').onclick=()=>document.querySelector('#milestone').hidden=false;

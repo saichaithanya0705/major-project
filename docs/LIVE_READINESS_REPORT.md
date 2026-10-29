@@ -113,9 +113,11 @@ still require evaluation; returned citations alone do not establish correctness.
 - OpenRouter's old free model returned 404; its free router produced an empty
   short reply, and another free model was rate-limited. Free-provider
   availability is not guaranteed by an API key or catalog listing.
-- Managed browser open/search passed. Arbitrary multi-step interaction,
-  existing Chrome/Brave/Comet profiles, and form submissions are **not yet
-  qualified**; those are the follow-on browser enhancement.
+- Managed browser open/search passed. The follow-on extension operator has now
+  qualified the installed Chrome session, verified form entry/submission review,
+  and NVIDIA-backed multipage research; see
+  [the browser implementation report](BROWSER_IMPLEMENTATION_REPORT.md).
+  Brave/Comet and arbitrary websites remain unqualified.
 - For the demo, launch with `./start-dev.ps1`, rehearse the exact prompts on
   the presentation network, and qualify native annotation visibility before
   relying on that part of the presentation.

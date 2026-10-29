@@ -97,7 +97,16 @@ def _write_private(path: Path, payload: dict[str, Any]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
         os.chmod(temp_name, 0o600)
-        os.replace(temp_name, path)
+        for attempt in range(4):
+            try:
+                os.replace(temp_name, path)
+                break
+            except PermissionError as exc:
+                # Windows readers and scanners can briefly deny atomic replacement.
+                # Preserve the old file and fail normally if the denial persists.
+                if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 3:
+                    raise
+                time.sleep(0.025 * (2 ** attempt))
     except BaseException:
         Path(temp_name).unlink(missing_ok=True)
         raise

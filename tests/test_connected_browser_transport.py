@@ -76,6 +76,28 @@ async def test_cross_task_calls_close_owner_cleanly(tmp_path):
     assert client._session is None and client._exit_stack is None
 
 
+async def test_cancelled_request_cannot_dispatch_after_connect():
+    started, release = asyncio.Event(), asyncio.Event()
+    dispatched = []
+    class PendingSession(Session):
+        async def call_tool(self, name, args): dispatched.append(name); return {}
+    client = mcp_client.PlaywrightMcpClient()
+    async def connect():
+        started.set()
+        await release.wait()
+        return PendingSession()
+    client.connect = connect
+    task = asyncio.create_task(client.call_result("browser_click", {"target":"e1"}))
+    try:
+        await started.wait()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        release.set()
+        for _ in range(5): await asyncio.sleep(0)
+        assert not dispatched
+    finally: await client.close()
+
+
 def test_text_error_without_flag_is_not_success():
     result = mcp_client.McpToolResult("### Error\nTarget is closed", False, None)
     with pytest.raises(mcp_client.McpToolError):

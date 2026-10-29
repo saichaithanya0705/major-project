@@ -10,7 +10,7 @@ qualification. Brave and Comet remain compatibility candidates until tested.
 
 1. Install the official [Playwright Extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm)
    from Microsoft in the Chrome profile you want to use.
-2. Install this project's pinned MCP dependency once:
+2. Using Node.js 20 or newer, install this project's pinned MCP dependency once:
 
    ```powershell
    npm ci --prefix integrations/playwright_mcp
@@ -18,7 +18,8 @@ qualification. Brave and Comet remain compatibility candidates until tested.
 
 3. Start JARVIS normally and say/type **connect browser**. Complete the extension's
    connection prompt in Chrome, selecting the browser tab you intend to share.
-4. Verify JARVIS's reported tab title and URL, then give your task.
+4. Choose the intended tab with **use browser tab N**, using the returned list.
+   Verify JARVIS's reported tab title and URL, then give your task.
 
 `connect browser` selects extension mode for the running app. To retain that
 choice after restart, put `JARVIS_BROWSER_MODE=extension` in the local `.env`.
@@ -35,7 +36,7 @@ protocol error. Reinstall the lockfile after updating this project.
 
 The extension's status page provides `PLAYWRIGHT_MCP_EXTENSION_TOKEN` for local
 pairing. Copy the exact value into the ignored local `.env`; do not put it in a
-skill or commit it. With token pairing, JARVIS first lists tab titles and URLs,
+skill or commit it. After pairing, JARVIS first lists tab titles and URLs,
 then waits for **use browser tab N** before reading page contents. Browser-internal
 pages cannot be selected. `browser status` refreshes the tab indices.
 
@@ -54,7 +55,7 @@ for measured tests and remaining limits.
 
 | Message | Behavior |
 | --- | --- |
-| `connect browser` | Connect through the official extension and report the selected tab |
+| `connect browser` | Authenticate through the official extension and list tabs for explicit selection |
 | `browser status` | Show connection state and selected tab title/URL, excluding URL query data |
 | `use browser tab 0` | Deliberately select a tab by the index shown by the browser tools |
 | `disconnect browser` | End JARVIS's connection while leaving your browser/tabs open |

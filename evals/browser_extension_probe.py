@@ -20,7 +20,7 @@ from urllib.parse import parse_qs
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agents.browser.connected_gateway import ConnectedGateway, public_url
+from agents.browser.connected_gateway import ConnectedGateway, StalePageError, public_url
 from agents.browser.connected_runner import ConnectedBrowserRunner
 from agents.browser.mcp_client import PlaywrightMcpClient
 
@@ -53,6 +53,15 @@ def ref(gateway, role, label):
     if not match:
         raise RuntimeError(f"Fixture control not found: {role} {label}")
     return match.group(1)
+
+
+async def navigate_fixture(gateway, url):
+    """Only a rejected, unsent local GET navigation may refresh and retry."""
+    try:
+        return await gateway.act("browser_navigate", {"url":url})
+    except StalePageError:
+        await gateway.observe()
+        return await gateway.act("browser_navigate", {"url":url})
 
 
 async def research(client, base, results, check, runner=None):
@@ -89,8 +98,26 @@ async def run(args):
         executable_path=executable, browser=args.browser, timeout=120 if args.mode == "extension" else 45)
     server = thread = None
     started = time.monotonic()
+    results["tool_calls"] = []
+    original_call = client.call_result
+    async def measured_call(name, arguments=None):
+        call_started = time.monotonic()
+        entry = {"tool": name}
+        try:
+            response = await original_call(name, arguments)
+            entry["is_error"] = response.is_error
+            return response
+        except Exception as exc:
+            entry["error_type"] = type(exc).__name__
+            raise
+        finally:
+            entry["seconds"] = round(time.monotonic() - call_started, 3)
+            results["tool_calls"].append(entry)
+            print(json.dumps(entry), flush=True)
+    client.call_result = measured_call
     def check(name, condition):
         results["checks"].append({"name": name, "passed": bool(condition)})
+        print(json.dumps(results["checks"][-1]), flush=True)
         if not condition: raise RuntimeError("Check failed: " + name)
     try:
         if args.mode == "extension":
@@ -119,6 +146,7 @@ async def run(args):
         else:
             server, thread, submissions = fixture_server()
             base = f"http://127.0.0.1:{server.server_address[1]}"
+            results["fixture_origin"] = base
             approvals = []
             allow = False
             async def review(message):
@@ -159,17 +187,47 @@ async def run(args):
             await gateway.act("browser_click", {"target": ref(gateway,"button","Submit draft")})
             check("SPA submission reviewed exactly once", len(approvals) == 3 and len(submissions) == 2 and submissions[-1]["path"] == "/submit-draft")
             check("SPA result observed", "Draft received successfully" in gateway.observation())
+            await gateway.act("browser_navigate", {"url":base + "/edge-form"})
+            before = len(submissions)
+            await gateway.act("browser_click", {"target":ref(gateway,"button","Continue application")})
+            check("image submitter reviewed with its actual destination", len(submissions) == before + 1 and submissions[-1]["path"] == "/alternate-submit" and "/alternate-submit" in approvals[-1])
+            await gateway.act("browser_navigate", {"url":base + "/edge-form"})
+            before = len(approvals)
+            await gateway.act("browser_type", {"target":ref(gateway,"searchbox","Application note"), "text":"Synthetic application", "submit":True})
+            check("search input inside application requires submission review", len(approvals) == before + 1)
+            for label, mutation in [
+                ("sensitive-value change invalidates approval", "document.querySelector('[name=demo_passcode]').value='synthetic-secret-two'"),
+                ("submitter destination change invalidates approval", "document.querySelector('input[type=image]').formAction='/changed-destination'")]:
+                await navigate_fixture(gateway, base + "/edge-form")
+                before = len(submissions)
+                async def changed_review(_message):
+                    (await client.call_result("browser_evaluate", {"function":"() => { " + mutation + "; return true; }"})).require_success()
+                    return True
+                original_review = gateway.confirm
+                gateway.confirm = changed_review
+                blocked = False
+                try:
+                    await gateway.act("browser_click", {"target":ref(gateway,"button","Continue application")})
+                except RuntimeError as exc:
+                    if "changed" not in str(exc): raise
+                    blocked = True
+                finally: gateway.confirm = original_review
+                check(label, blocked and len(submissions) == before)
             if args.llm:
                 await research(client, base, results, check, runner)
-            if args.connected_fixture:
-                await gateway.list_tabs()
-                for index, (_,url) in gateway._tab_entries.items():
-                    if url.startswith(base + "/"):
-                        (await client.call_result("browser_tabs", {"action":"close", "index":index})).require_success()
         results["complete"] = True
     except Exception as exc:
         results["error"] = {"type": type(exc).__name__, "message": str(exc)[:400]}
     finally:
+        if args.connected_fixture and server:
+            try:
+                cleanup = ConnectedGateway(client, None)
+                await cleanup.list_tabs()
+                owned = [index for index,(_,url) in cleanup._tab_entries.items() if url.startswith(base + "/")]
+                for index in sorted(owned, reverse=True):
+                    (await client.call_result("browser_tabs", {"action":"close", "index":index})).require_success()
+            except Exception as exc:
+                results["cleanup_error"] = type(exc).__name__
         await client.close()
         if server:
             server.shutdown()

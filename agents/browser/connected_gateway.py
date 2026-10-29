@@ -9,6 +9,7 @@ import hashlib
 import copy
 import json
 import re
+import secrets
 import time
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -19,31 +20,49 @@ from agents.browser.mcp_client import McpToolError, McpToolResult
 
 
 PAGE_INFO = "() => { /* JARVIS_PAGE_INFO */ return {url: location.href, title: document.title}; }"
-ELEMENT_STATE = r"""(element) => { /* JARVIS_ELEMENT_STATE */
+# Fixed private metadata reader; never catalogued or authored by the model.
+# The pinned Playwright Page GUID survives navigation and changes on reconnect.
+PAGE_IDENTITY = "async (page) => ({tab_id: page._guid})"
+ELEMENT_STATE = r"""async (element) => { /* JARVIS_ELEMENT_STATE */
  const e = element || document.activeElement;
  if (!e || !e.isConnected) return null;
  const scope = e.form || e.closest('form,[role="form"],[role="search"]');
- const sensitive = n => /password|otp|one-time|card|cvv|cvc|ssn|aadhaar|passcode|pin\b/i.test(
+ const sensitive = n => n.type === 'hidden' || /password|otp|one-time|card|cvv|cvc|ssn|aadhaar|passcode|pin\b/i.test(
    [n.type,n.name,n.id,n.autocomplete,n.getAttribute('aria-label')].join(' '));
- const label = n => (n.getAttribute('aria-label') || n.labels?.[0]?.innerText ||
+ const label = n => (n.getAttribute('aria-label') || n.getAttribute('alt') || n.labels?.[0]?.innerText ||
    n.innerText || n.getAttribute('placeholder') || n.name || n.id || n.tagName).slice(0,120);
- const controls = scope ? Array.from(scope.querySelectorAll('input,textarea,select')).slice(0,30) : [];
+ const allControls = scope ? Array.from(scope.querySelectorAll('input,textarea,select,button')) : [];
+ const controls = allControls.slice(0,100);
  const editable = controls.filter(n => !['hidden','submit','button','reset'].includes(n.type));
- const search = e.type === 'search' || e.getAttribute('role') === 'searchbox' ||
-   scope?.getAttribute('role') === 'search' || (editable.length > 0 && editable.every(n =>
-     n.type === 'search' || /^(q|query|search|search_query)$/i.test(n.name || n.id)));
- const read = n => ({name:label(n), sensitive:sensitive(n),
+ const search = scope ? (scope.getAttribute('role') === 'search' ||
+   (String(scope.method || 'get').toLowerCase() === 'get' && editable.length > 0 && editable.every(n =>
+     n.type === 'search' || /^(q|query|search|search_query)$/i.test(n.name || n.id)))) :
+   (e.type === 'search' || e.getAttribute('role') === 'searchbox');
+ const fingerprint = async n => {
+   if (!sensitive(n) || !n.value) return null;
+   if (!globalThis.crypto?.subtle) return 'unavailable';
+   const bytes = new TextEncoder().encode("__JARVIS_APPROVAL_KEY__" + '\0' + String(n.value));
+   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+ };
+ const read = async n => ({name:label(n), sensitive:sensitive(n), fingerprint:await fingerprint(n),
    value:sensitive(n) ? (n.value ? '[present]' : '') : String(n.value ?? '').slice(0,4096),
    checked:!!n.checked, selected:n.selectedOptions ? Array.from(n.selectedOptions).map(o=>o.value) : []});
  return {tag:e.tagName.toLowerCase(), type:e.type || '', role:e.getAttribute('role') || '',
    label:label(e), value:sensitive(e) ? (e.value ? '[present]' : '') : String(e.value ?? '').slice(0,4096),
-   sensitive:sensitive(e), checked:!!e.checked, disabled:!!e.disabled,
+   sensitive:sensitive(e), fingerprint:await fingerprint(e), checked:!!e.checked, disabled:!!e.disabled,
    readOnly:!!e.readOnly, editable:!!e.isContentEditable,
    selected:e.selectedOptions ? Array.from(e.selectedOptions).map(o=>({value:o.value,text:o.text})) : [],
    valid:e.validity ? e.validity.valid : true,
    form:scope ? {id:scope.id || scope.getAttribute('aria-label') || 'form',
      action:scope.action || location.href, method:scope.method || '', search:!!search,
-     values:controls.map(read)} : null, search:!!search};
+     truncated:allControls.length > controls.length, values:await Promise.all(controls.map(read))} : null,
+   submission:scope ? (() => {
+     const submitter = ['submit','image'].includes(e.type) ? e : controls.find(n=>['submit','image'].includes(n.type) && !n.disabled);
+     const override = (attribute, property, fallback) => submitter?.getAttribute(attribute) != null ? submitter[property] : fallback;
+     return {action:override('formaction','formAction',scope.action || location.href),
+       method:override('formmethod','formMethod',scope.method || 'get'), target:override('formtarget','formTarget',scope.target || '_self'),
+       enctype:override('formenctype','formEnctype',scope.enctype || '')};
+   })() : null, search:!!search};
 }"""
 ACTIVE_STATE = ELEMENT_STATE.replace("(element) =>", "() =>").replace(
     "const e = element || document.activeElement;", "const e = document.activeElement;")
@@ -58,6 +77,10 @@ _KEYS = frozenset({"Enter", "Return", "Tab", "Shift+Tab", "Escape", "ArrowDown",
 
 
 class StalePageError(McpToolError):
+    pass
+
+
+class SelectedTabLostError(McpToolError):
     pass
 
 
@@ -92,6 +115,8 @@ class ConnectedGateway:
         self.url = ""
         self.title = ""
         self.verified_steps: list[str] = []
+        self.verified_edits: list[str] = []
+        self.verified_submissions: list[str] = []
         self.approval_wait = 0.0
         self._schemas: dict[str, dict] = {}
         self._raw_snapshot = ""
@@ -99,6 +124,9 @@ class ConnectedGateway:
         self._draft_refs: set[str] = set()
         self._secrets: set[str] = set()
         self._tab_entries: dict[int, tuple[str, str]] = {}
+        self._approval_key = secrets.token_hex(32)
+        self._tab_identity = None
+        self._identity_lost = False
 
     def _check_stop(self):
         if self.stopped():
@@ -106,13 +134,31 @@ class ConnectedGateway:
 
     async def _call(self, name, args=None) -> McpToolResult:
         self._check_stop()
+        if name != "browser_tabs" and self._tab_identity is not None:
+            await self._ensure_identity()
         return (await self.client.call_result(name, args or {})).require_success()
+
+    async def _read_identity(self) -> str:
+        self._check_stop()
+        state = _json_result((await self.client.call_result("browser_run_code_unsafe", {"code":PAGE_IDENTITY})).require_success())
+        identity = state.get("tab_id")
+        if not isinstance(identity, str) or not identity or len(identity) > 160:
+            raise McpToolError("The browser cannot identify the selected tab safely; reconnect and select it explicitly.")
+        return identity
+
+    async def _ensure_identity(self):
+        identity = await self._read_identity()
+        if self._identity_lost or (self._tab_identity is not None and identity != self._tab_identity):
+            self._identity_lost = True
+            raise SelectedTabLostError("The selected tab closed or the connection changed. Use browser status and explicitly select a tab again; no replacement page was read.")
+        self._tab_identity = identity
 
     async def _page(self) -> dict:
         return _json_result(await self._call("browser_evaluate", {"function": PAGE_INFO}))
 
     async def _inspect(self, target: str | None = None) -> dict:
-        args = {"function": ELEMENT_STATE, "target": target} if target else {"function": ACTIVE_STATE}
+        reader = (ELEMENT_STATE if target else ACTIVE_STATE).replace('__JARVIS_APPROVAL_KEY__', self._approval_key)
+        args = {"function": reader, "target": target} if target else {"function": reader}
         node = _json_result(await self._call("browser_evaluate", args))
         if not node.get("tag"):
             raise McpToolError("This control is not inspectable; user takeover is needed.")
@@ -123,6 +169,7 @@ class ConnectedGateway:
         return text.split("### Snapshot", 1)[-1].strip()
 
     async def observe(self) -> str:
+        await self._ensure_identity()
         if not self._schemas:
             self._schemas = await self.client.tool_schemas()
             if not {"browser_snapshot", "browser_evaluate"} <= self._schemas.keys():
@@ -235,15 +282,18 @@ class ConnectedGateway:
     @staticmethod
     def _submission(node: dict, *, enter=False) -> bool:
         form = node.get("form") or {}
-        if node.get("search") or form.get("search") or node.get("type") == "search":
+        if form.get("search") or (not form and node.get("search")):
             return False
         if enter and node.get("tag") in {"input", "select", "button"} and form:
             return True
-        if node.get("tag") in {"button", "input"} and node.get("type") == "submit" and form:
+        if node.get("tag") in {"button", "input"} and node.get("type") in {"submit", "image"} and form:
             return True
         return bool(node.get("tag") in {"button", "input", "a"} or node.get("role") == "button") and bool(_SUBMIT.search(str(node.get("label", ""))))
 
     async def _approval_state(self, node: dict) -> str:
+        form = node.get("form") or {}
+        if form.get("truncated") or any(isinstance(value, dict) and value.get("fingerprint") == "unavailable" for value in [node, *form.get("values", [])]):
+            raise McpToolError("This form cannot be fingerprinted completely; user takeover is needed.")
         drafts = []
         for ref in sorted(self._draft_refs):
             if ref not in self._refs:
@@ -259,7 +309,8 @@ class ConnectedGateway:
             if isinstance(value, dict):
                 shown = "[hidden]" if value.get("sensitive") else str(value.get("value", ""))[:80]
                 labels.append(f"{value.get('name', 'field')}: {shown}")
-        description = f"submit “{node.get('label', 'this form')}” on {urlsplit(self.url).hostname or 'the selected page'}"
+        destination = public_url((node.get("submission") or {}).get("action") or form.get("action") or self.url)
+        description = f"submit “{node.get('label', 'this form')}” to {destination}"
         if labels:
             description += "\n\nReview: " + "; ".join(labels)
         started = time.monotonic()
@@ -295,6 +346,8 @@ class ConnectedGateway:
         if urlsplit(entry[1]).scheme not in {"http","https"}:
             raise McpToolError("Choose a normal HTTP(S) test tab; browser-internal pages cannot be controlled.")
         await self._call("browser_tabs", {"action": "select", "index": index})
+        self._tab_identity = await self._read_identity()
+        self._identity_lost = False
         page = await self._page()
         if page.get("url") != entry[1]:
             raise StalePageError("The selected tab changed before inspection; choose it again.")
@@ -323,8 +376,10 @@ class ConnectedGateway:
             raise McpToolError("The selected control is disabled.")
         submit_after_type = name == "browser_type" and args.pop("submit", False)
         implicit_enter = name == "browser_press_key" and args["key"] in {"Enter", "Return"}
-        if node and name in {"browser_click", "browser_press_key"} and self._submission(node, enter=implicit_enter):
+        submitting = bool(node and name in {"browser_click", "browser_press_key"} and self._submission(node, enter=implicit_enter))
+        if submitting:
             await self._review(node, target)
+        before_submission = self.observation() if submitting else ""
         fields = args.get("fields", [])
         # Validate and inspect the entire batch before sending its first write.
         for field in fields:
@@ -339,6 +394,8 @@ class ConnectedGateway:
                 self._secrets.add(text)
         self._check_stop()
         await self._call(name, args)
+        if name == "browser_tabs" and args.get("action") == "new":
+            self._tab_identity = await self._read_identity()
         await self.observe()
         checks = fields or ([{"target": target, "value": args["text"]}] if name == "browser_type" else [])
         for field in checks:
@@ -365,6 +422,17 @@ class ConnectedGateway:
         label = str((node or {}).get("label", "page"))[:80]
         message = f"Verified {name.removeprefix('browser_')} on {urlsplit(self.url).hostname or 'selected tab'}: {label}"
         self.verified_steps.append(message)
+        if checks or name == "browser_select_option":
+            self.verified_edits.append(message)
+        if submitting:
+            observed = self.observation()
+            signals = re.findall(r"(?im)^.*\b(?:received successfully|submitted successfully|thank you|receipt|successfully sent|confirmation number|draft received|application received)\b[^\n]*", observed)
+            fresh_signals = [signal for signal in signals if signal not in before_submission]
+            if not fresh_signals:
+                raise McpToolError("Submission was sent, but acceptance could not be verified. Do not resend automatically; inspect the outcome first.")
+            proof = "Verified submission outcome: " + fresh_signals[0][:240]
+            self.verified_submissions.append(proof)
+            self.verified_steps.append(proof)
         if submit_after_type:
             return await self.act("browser_press_key", {"key": "Enter"})
         return message

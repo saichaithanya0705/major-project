@@ -100,7 +100,8 @@ def test_connected_session_tasks_route_to_browser(monkeypatch, task):
     assert result.route["agent"] == "browser"
 
 
-@pytest.mark.parametrize("task", ["Maximize my browser window", "Open Chrome with my work profile"])
+@pytest.mark.parametrize("task", ["Maximize my browser window", "Open Chrome with my work profile",
+    "Open Brave browser in a new window and search for cats", "Launch Comet", "Open a new Chrome window"])
 def test_native_window_and_profile_requests_still_use_desktop_control(monkeypatch, task):
     monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
     result = apply_routing_guardrails(user_prompt=task, routing_result={"agent": "browser", "task": task}, latest_screen_context=None)

@@ -26,6 +26,8 @@ class Browser:
         self.active = "e1"
         self.effects = []
         self.error = False
+        self.emit_receipt = True
+        self.tab_id = "test-tab-a"
 
     async def tool_schemas(self):
         def schema(props, required=()):
@@ -44,6 +46,8 @@ class Browser:
 
     async def call_result(self, name, arguments=None):
         args = arguments or {}
+        if name == "browser_run_code_unsafe":
+            return McpToolResult("### Result\n" + json.dumps({"tab_id":self.tab_id}))
         if name == "browser_tabs" and args.get("action") == "list":
             return McpToolResult("### Open tabs\n- 0: (current) [Application](https://forms.example/application)")
         if name == "browser_snapshot":
@@ -55,6 +59,8 @@ class Browser:
                 data = copy.deepcopy(self.nodes[args.get("target", self.active)])
             return McpToolResult("### Result\n" + json.dumps(data))
         self.effects.append((name, args))
+        if self.emit_receipt and not self.error and (name == "browser_click" or (name == "browser_press_key" and args["key"] in {"Enter","Return"})):
+            self.snapshot += f'\n- status "Application received successfully Receipt TEST-{len(self.effects)}"'
         if name == "browser_type":
             self.active = args["target"]
             self.nodes[self.active]["value"] = args["text"]
@@ -109,6 +115,20 @@ async def test_default_and_spa_submissions_are_reviewed(node):
     gateway, browser, asked = await ready()
     browser.nodes["e2"] = node
     await gateway.act("browser_click", {"target": "e2"})
+    assert len(asked) == 1
+
+
+async def test_image_submitter_requires_review():
+    gateway, browser, asked = await ready()
+    browser.nodes["e2"].update(tag="input", type="image", label="Continue")
+    await gateway.act("browser_click", {"target":"e2"})
+    assert len(asked) == 1
+
+
+async def test_search_input_does_not_exempt_an_application_form():
+    gateway, browser, asked = await ready()
+    browser.nodes["e1"].update(type="search", search=True)
+    await gateway.act("browser_press_key", {"key":"Enter"})
     assert len(asked) == 1
 
 

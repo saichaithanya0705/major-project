@@ -27,6 +27,7 @@ class RapidSourceRecord(TypedDict, total=False):
 
 
 class RapidStepMetadataPayload(TypedDict, total=False):
+    awaiting_input: bool
     traceback: str
     result: JsonValue | None
     tool_calls: list[RapidToolCallRecord]

@@ -155,8 +155,8 @@ async def _start_non_rapid_status(text: str, source: str):
     )
 
 
-async def _finish_non_rapid_status(message: str, success: bool, source: str):
-    done_text = "Task done" if success else "Task failed"
+async def _finish_non_rapid_status(message: str, success: bool, source: str, *, awaiting_input: bool = False):
+    done_text = "Waiting for your input" if awaiting_input else "Task done" if success else "Task failed"
     await _safe_ui_call(
         complete_status_bubble(
             message,
@@ -402,12 +402,14 @@ async def run_routed_agent_step(
             failure_fallback="Browser task failed.",
             failure_metadata={"result": execution.result_metadata},
         )
+        awaiting_input = isinstance(execution.result, Mapping) and execution.result.get("awaiting_input") is True
         await _finish_non_rapid_status(
             message,
             execution.success,
             source="browser_use",
+            awaiting_input=awaiting_input,
         )
-        return _step(
+        browser_step = _step(
             agent="browser",
             task=task,
             success=execution.success,
@@ -415,6 +417,9 @@ async def run_routed_agent_step(
             source="browser_use",
             complete=execution.complete if execution.complete is not None else True,
         )
+        if awaiting_input:
+            browser_step["metadata"] = {"awaiting_input":True}
+        return browser_step
 
     if agent_name == "cua_cli":
         await _start_non_rapid_status("Running CLI task...", source="cua_cli")

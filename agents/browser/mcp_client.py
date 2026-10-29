@@ -218,6 +218,8 @@ class PlaywrightMcpClient:
                 try:
                     async with asyncio.timeout(self.timeout):
                         session = await self.connect()
+                        if current.cancelled():
+                            continue
                         if operation == "tools":
                             result = await self._list_tools_for_session(session)
                         else:

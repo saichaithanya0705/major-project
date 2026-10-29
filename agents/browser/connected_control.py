@@ -20,6 +20,10 @@ def control_command(text: str):
 
 def native_browser_request(text: str) -> bool:
     value = text.lower()
+    if re.search(r"\b(?:open|launch|start)\s+(?:(?:a|the|my|new)\s+)*(?:chrome|brave|comet|edge)\b", value):
+        return True
+    if re.search(r"\bnew\s+(?:browser\s+)?window\b", value) and re.search(r"\b(browser|chrome|brave|comet|edge)\b", value):
+        return True
     return bool(re.search(r"\b(minimi[sz]e|maximi[sz]e|restore|focus window|switch window|work profile|personal profile|specific profile|browser profile)\b", value)
                 or ("profile" in value and re.search(r"\b(chrome|brave|comet|edge|browser)\b", value)))
 
