@@ -21,6 +21,13 @@ qualification. Brave and Comet remain compatibility candidates until tested.
 4. Choose the intended tab with **use browser tab N**, using the returned list.
    Verify JARVIS's reported tab title and URL, then give your task.
 
+The current extension isolates clients into separate tab groups. JARVIS can see
+only tabs in **Playwright · JARVIS**. To share an existing tab, move/drag it into
+that group in Chrome, say **browser status**, then select its listed index.
+If only Welcome appears, add the intended HTTP(S) tab to the group first.
+A tab belongs to one client group at a time; move it out to remove access.
+This is the [official extension's sharing model](https://github.com/microsoft/playwright/blob/main/packages/extension/README.md#multiple-clients).
+
 `connect browser` selects extension mode for the running app. To retain that
 choice after restart, put `JARVIS_BROWSER_MODE=extension` in the local `.env`.
 The default remains `managed`, which uses the existing separate browser.
@@ -76,6 +83,14 @@ question. Final form submission asks for review **in JARVIS's chat UI**; reply y
 to submit or decline/cancel to keep the filled draft. This includes form Enter
 and recognized JavaScript-app submission controls. Routine search submissions
 remain automatic. Changing the page/form during review invalidates that approval.
+
+Provide personal form values explicitly in your request or a follow-up. For
+recognized name, email, phone, age, address and sensitive fields, the runtime
+checks proposed values against the human's supplied text before any write,
+including whole batches and dropdown selection. Missing values ask a question;
+model-generated task text cannot authorize them. Automatic profile retrieval,
+derived/normalized personal values, and unfamiliar field labels need additional
+qualification; provide the desired literal value when asked.
 
 The operator verifies fields after writing and checks the resulting page after
 actions. A completion statement needs observed evidence. If an operation times

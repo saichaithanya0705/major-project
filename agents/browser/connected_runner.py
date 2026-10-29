@@ -13,11 +13,12 @@ from pathlib import Path
 
 import jsonschema
 
-from agents.browser.connected_gateway import ConnectedGateway, StalePageError, SelectedTabLostError, public_url
+from agents.browser.connected_gateway import AlreadyVerifiedWrite, BrowserInputRequired, ConnectedGateway, StalePageError, SelectedTabLostError, public_url
 from agents.browser.mcp_client import McpToolError
 from agents.skills.browser_skills import BrowserSkills
 from core.confirmations import CONFIRMATIONS
 from models.shared.conversation_policy import CONVERSATION_CLARITY_POLICY
+from models.shared.user_input_context import current_user_input
 
 logger = logging.getLogger(__name__)
 ACTIVE_SECONDS = 120.0
@@ -92,6 +93,8 @@ class ConnectedBrowserRunner:
         self.state = "disconnected"
         self.provider = ""
         self._selected_tab = False
+        self._input_session = None
+        self._provided_input = ""
 
     async def _brain_decide(self, system: str, user: str) -> str:
         from agents.skills.brain_bridge import _brain_model
@@ -154,6 +157,8 @@ class ConnectedBrowserRunner:
         self.state = "disconnected"
         self.awaiting_input = False
         self._selected_tab = False
+        self._input_session = None
+        self._provided_input = ""
 
     async def connect(self) -> str:
         self._stopped = False
@@ -166,7 +171,9 @@ class ConnectedBrowserRunner:
         if getattr(self.client, "extension", False) and not self._selected_tab:
             tabs = await self.gateway.list_tabs()
             self.state = "awaiting_tab_selection"
-            return "Browser authenticated. Choose a tab with 'use browser tab N' before page contents are read.\n" + tabs
+            return ("Browser authenticated. Only tabs in Chrome's 'Playwright · JARVIS' group are shared with JARVIS. "
+                    "To use an existing tab, move it into that group in Chrome, then say 'browser status'. "
+                    "Choose a listed HTTP(S) tab with 'use browser tab N' before page contents are read.\n" + tabs)
         try:
             observation = await self.gateway.observe()
         except SelectedTabLostError:
@@ -203,6 +210,12 @@ class ConnectedBrowserRunner:
         if not isinstance(task, str) or not task.strip() or len(task) > 12000:
             return self._result("Provide a browser task of at most 12,000 characters.", error="Invalid browser task.")
         async with self._lock:
+            human = current_user_input()
+            input_session = human.session_id if human else "__direct__"
+            if input_session != self._input_session:
+                self._provided_input = ""
+                self._input_session = input_session
+            self._provided_input = (self._provided_input + "\n" + (human.text if human else task))[-24000:]
             self._task = asyncio.current_task()
             self._stopped = False
             self.awaiting_input = False
@@ -221,6 +234,10 @@ class ConnectedBrowserRunner:
             except asyncio.CancelledError:
                 self.state = "stopped"
                 return self._result("Browser task stopped. Verified progress is retained; say continue to inspect and resume.", error="Stopped by user.")
+            except BrowserInputRequired as exc:
+                self.state = "awaiting_input"
+                self.awaiting_input = True
+                return self._result(str(exc))
             except McpToolError as exc:
                 self.state = "failed"
                 return self._result(str(exc), error=str(exc))
@@ -240,6 +257,7 @@ class ConnectedBrowserRunner:
             return self._result(observation)
         history = []
         gateway = self.gateway
+        gateway.user_input = self._provided_input
         self.state = "running"
         root = getattr(self.client, "project_root", Path(__file__).resolve().parents[2])
         skills = BrowserSkills(root)
@@ -347,6 +365,11 @@ class ConnectedBrowserRunner:
                 # Correction budget belongs to the next unfinished decision.
                 # The task still has a strict 20-decision/120-second ceiling.
                 invalid = 0
+            except AlreadyVerifiedWrite as exc:
+                invalid += 1
+                if invalid > 2:
+                    raise McpToolError("The model kept repeating a verified edit. Existing field values are retained; no duplicate edit was sent.")
+                correction = str(exc)
             except StalePageError:
                 stale += 1
                 if stale > 1 or gateway.approval_wait:

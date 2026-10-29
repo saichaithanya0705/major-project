@@ -231,6 +231,7 @@ async def test_pairing_token_lists_tabs_before_reading_private_pages(tmp_path, m
     run = runner_class()(client)
     message = await run.connect()
     assert run.state == "awaiting_tab_selection" and "0:" in message
+    assert "Playwright · JARVIS" in message and "move" in message.lower()
     assert client.tab_calls == ["list"] and not client.chosen
     await run.select_tab(0)
     assert run.state == "ready" and client.chosen

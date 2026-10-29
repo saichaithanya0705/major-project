@@ -84,6 +84,14 @@ class SelectedTabLostError(McpToolError):
     pass
 
 
+class BrowserInputRequired(McpToolError):
+    """A proposed personal value has no source in the human's supplied input."""
+
+
+class AlreadyVerifiedWrite(McpToolError):
+    """A repeated edit still matches a value this task has already verified."""
+
+
 def public_url(url: str) -> str:
     parsed = urlsplit(url)
     # Strip userinfo as well as query/fragment without changing IPv6 or ports.
@@ -109,8 +117,9 @@ def _json_result(result: McpToolResult) -> dict:
 
 
 class ConnectedGateway:
-    def __init__(self, client, confirm, stopped=lambda: False):
+    def __init__(self, client, confirm, stopped=lambda: False, *, user_input=""):
         self.client, self.confirm, self.stopped = client, confirm, stopped
+        self.user_input = user_input
         self.generation = 0
         self.url = ""
         self.title = ""
@@ -290,6 +299,31 @@ class ConnectedGateway:
             return True
         return bool(node.get("tag") in {"button", "input", "a"} or node.get("role") == "button") and bool(_SUBMIT.search(str(node.get("label", ""))))
 
+    def _check_personal_value(self, node: dict, value: str):
+        if not value or node.get("search") or (node.get("form") or {}).get("search"):
+            return
+        label = str(node.get("label", "field"))[:80]
+        descriptor = re.sub(r"[_-]+", " ", label)
+        personal = node.get("sensitive") or node.get("type") in {"email", "tel", "password"} or re.fullmatch(r"\s*name\s*[:*]?\s*", descriptor, re.I) or re.search(
+            r"\b(?:e ?mail|phone|mobile|telephone|age|date of birth|birth ?date|dob|full name|first name|last name|given name|family name|address|postcode|zip ?code|ssn|aadhaar|passport|password|passcode|card number|cvv|cvc)\b",
+            descriptor, re.I)
+        if not personal:
+            return
+        supplied = " ".join(self.user_input.split())
+        literal = " ".join(str(value).split())
+        if not re.search(r"(?<!\w)" + re.escape(literal) + r"(?!\w)", supplied, re.I):
+            raise BrowserInputRequired(f"What value should I use for “{label}”? I paused before entering an assumed personal value.")
+
+    @staticmethod
+    def _field_matches(node: dict, expected: str, kind="textbox") -> bool:
+        if kind in {"checkbox", "radio"}:
+            return bool(node.get("checked")) == (expected == "true")
+        if kind == "combobox":
+            return any(expected in {o.get("value"), o.get("text")} for o in node.get("selected", []))
+        if node.get("sensitive"):
+            return bool(node.get("value")) == bool(expected)
+        return str(node.get("value", "")) == expected
+
     async def _approval_state(self, node: dict) -> str:
         form = node.get("form") or {}
         if form.get("truncated") or any(isinstance(value, dict) and value.get("fingerprint") == "unavailable" for value in [node, *form.get("values", [])]):
@@ -382,12 +416,27 @@ class ConnectedGateway:
         before_submission = self.observation() if submitting else ""
         fields = args.get("fields", [])
         # Validate and inspect the entire batch before sending its first write.
+        inspected_fields = []
         for field in fields:
-            self._editable(await self._inspect(field["target"]), field["type"])
+            field_node = await self._inspect(field["target"])
+            self._editable(field_node, field["type"])
+            self._check_personal_value(field_node, field["value"])
+            inspected_fields.append((field, field_node))
         if name == "browser_type":
             self._editable(node)
+            self._check_personal_value(node, args["text"])
+            inspected_fields.append(({"target":target,"value":args["text"]}, node))
         if name == "browser_select_option":
             self._editable(node, "combobox")
+            for value in args["values"]:
+                self._check_personal_value(node, value)
+            if target in self._draft_refs and not node.get("sensitive") and set(args["values"]) == {v["value"] for v in node.get("selected", [])}:
+                raise AlreadyVerifiedWrite("These options are already selected and verified. Choose an unfinished step or finish using the verified evidence.")
+        if inspected_fields and not submit_after_type and all(
+            field["target"] in self._draft_refs and not current.get("sensitive") and
+            self._field_matches(current, field["value"], field.get("type", "textbox"))
+            for field,current in inspected_fields):
+            raise AlreadyVerifiedWrite("These fields already match the requested values and are verified. Choose an unfinished step or finish using the verified field evidence; do not repeat the edit.")
         for field in [args, *fields]:
             text = field.get("text") or field.get("value")
             if isinstance(text, str) and text:
@@ -398,22 +447,15 @@ class ConnectedGateway:
             self._tab_identity = await self._read_identity()
         await self.observe()
         checks = fields or ([{"target": target, "value": args["text"]}] if name == "browser_type" else [])
+        receipts = []
         for field in checks:
             current = await self._inspect(field["target"])
             expected = field["value"]
-            actual = current.get("value", "")
             kind = field.get("type", "textbox")
-            if kind in {"checkbox", "radio"}:
-                matches = bool(current.get("checked")) == (expected == "true")
-            elif kind == "combobox":
-                matches = any(expected in {o.get("value"), o.get("text")} for o in current.get("selected", []))
-            elif current.get("sensitive"):
-                matches = bool(actual) == bool(expected)
-            else:
-                matches = str(actual) == expected
-            if not matches:
+            if not self._field_matches(current, expected, kind):
                 raise McpToolError("Field read-back did not match; task remains incomplete.")
             self._draft_refs.add(field["target"])
+            receipts.append(f'Verified field "{str(current.get("label", "field")).strip()[:80]}": requested value matches read-back.')
         if name == "browser_select_option":
             current = await self._inspect(target)
             if set(args["values"]) != {v["value"] for v in current.get("selected", [])}:
@@ -422,6 +464,7 @@ class ConnectedGateway:
         label = str((node or {}).get("label", "page"))[:80]
         message = f"Verified {name.removeprefix('browser_')} on {urlsplit(self.url).hostname or 'selected tab'}: {label}"
         self.verified_steps.append(message)
+        self.verified_steps.extend(receipts)
         if checks or name == "browser_select_option":
             self.verified_edits.append(message)
         if submitting:

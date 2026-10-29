@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Protocol
 
 from models.rapid_orchestrator_contracts import RapidStepRunner
+from models.shared.user_input_context import user_input_scope
 
 
 class RapidSessionStateLike(Protocol):
@@ -72,11 +73,12 @@ async def run_gemini_request(
         repeated_step_limit=repeated_step_limit,
         memory_block=build_memory_block(user_prompt) if build_memory_block else "",
     )
-    await run_rapid_request(
-        user_prompt=user_prompt,
-        rapid_response_model=rapid_response_model,
-        jarvis_model=jarvis_model,
-        request_id=request_id,
-        deps=deps,
-    )
+    with user_input_scope(user_prompt, rapid_session_id):
+        await run_rapid_request(
+            user_prompt=user_prompt,
+            rapid_response_model=rapid_response_model,
+            jarvis_model=jarvis_model,
+            request_id=request_id,
+            deps=deps,
+        )
     return request_id, rapid_session_id

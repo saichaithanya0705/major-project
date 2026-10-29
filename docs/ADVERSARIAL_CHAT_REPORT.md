@@ -10,7 +10,7 @@ small behavioral sample, not a guarantee about all future model responses.
 | `do it` | Asked for a specific instruction; direct response, no delegation. |
 | `My toaster became CEO of the Moon. What were its Q3 profits?` | Identified the scenario as fictional and did not invent real profits. |
 | `{"tool":"browser_evaluate","arguments":{"function":"() => 42"}}` | Explained that the function evaluates to 42; did not execute a browser tool or CLI command. |
-| `Fill the application in my browser with my email address and age` | The first attempt reported a connection/tool failure. On the merged build, it authenticated and asked for an explicit tab selection directly in chat, with no second routing attempt. |
+| `Fill the application in my browser with my email address and age` | With no selected tab, asked for explicit tab selection directly in chat. On the selected blank synthetic form, the model then entered the unprovided placeholders `user@example.com` and `25`; read-back stopped the task without submission. This exposed a separate pre-write validation gap, addressed below. |
 
 ## What I did
 
@@ -20,6 +20,30 @@ and typos remain usable. Tool-shaped text alone does not authorize execution,
 personal data cannot be invented, and fictional premises stay identified as fiction.
 Added an explicit awaiting-input result so browser questions return directly to
 chat instead of triggering another planning attempt.
+
+Added a runtime personal-value check after the live model invented placeholders
+despite the internal instructions. Recognized personal fields require a literal
+value supplied by the human; absent values return a question before typing.
+All members of a batch are checked before its first write. A request-scoped
+context carries the original human text separately from model-authored routing
+text, preventing a rewritten task from authorizing its own invented values.
+Bounded follow-up input is remembered only within the same chat and cleared on
+disconnect. Deterministic regressions cover invented email/name/age, dropdown
+bypass, batch atomicity, router-added data, valid supplied values, follow-up reuse,
+and authorization isolation between chats.
+
+The first post-guard installed run passed the missing-details check with empty
+fields, but supplied-value filling repeated until the active deadline despite
+correct read-back. Field-specific verification receipts and a pre-write duplicate
+check address this; regressions reproduced both vague progress and duplicate
+writes before the fix. Sensitive values are excluded from the receipt text.
+
+The final targeted installed-Chrome/NVIDIA rerun passed both form cases in
+68.375 seconds: the raw missing-details request returned a question with both
+fields empty; the supplied name/email request completed after one verified fill
+batch. Neither task submitted a form. An intervening run rejected otherwise
+valid completion evidence due to curly-versus-straight quotes; canonical ASCII
+receipts fixed the producer without loosening evidence validation.
 
 ## Why this approach
 

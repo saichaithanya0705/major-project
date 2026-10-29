@@ -67,6 +67,9 @@ class Browser:
             for node in self.nodes.values():
                 if (node.get("form") or {}).get("id") == "application":
                     node["form"]["values"] = [["name", args["text"]]]
+        if name == "browser_fill_form":
+            for field in args["fields"]:
+                self.nodes[field["target"]]["value"] = field["value"]
         if name == "browser_navigate":
             self.url = args["url"]
         return McpToolResult("ok", self.error)
@@ -78,7 +81,7 @@ async def ready(browser=None, confirm=None):
     async def approve(message):
         asked.append(message)
         return True
-    gateway = gateway_class()(browser, confirm=confirm or approve, stopped=lambda: False)
+    gateway = gateway_class()(browser, confirm=confirm or approve, stopped=lambda: False, user_input="Use Demo User as the name")
     await gateway.observe()
     return gateway, browser, asked
 
