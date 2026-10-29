@@ -23,6 +23,7 @@ class Runner:
         return {"success": True, "complete": False, "error": None, "result": {"summary": "Need one field", "complete": False}}
 
     async def connect(self): self.state = "ready"; return "Chosen tab"
+    async def select_tab(self, index): self.calls.append(f"selected:{index}"); self.state = "ready"; return "Chosen tab"
     async def disconnect(self): self.state = "disconnected"
     def request_stop(self): self.calls.append("stopped"); return True
 
@@ -57,6 +58,18 @@ async def test_control_commands_are_deterministic_and_status_hides_query(monkeyp
     assert "hidden" not in str(status)
     await BrowserAgent.handle_control_command("disconnect browser")
     assert runner.state == "disconnected"
+
+
+async def test_explicit_tab_selection_resumes_the_waiting_browser_handoff(monkeypatch):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+    runner = Runner()
+    runner.pending_handoff_task = "read the current tab and summarize it"
+    monkeypatch.setattr(BrowserAgent, "_get_connected_runner", classmethod(lambda cls: runner), raising=False)
+
+    result = await BrowserAgent.handle_control_command("use browser tab 0")
+
+    assert runner.calls == ["selected:0", "read the current tab and summarize it"]
+    assert result["result"]["summary"] == "Need one field"
 
 
 async def test_required_submission_review_crosses_real_chat_websocket(monkeypatch):
@@ -98,6 +111,19 @@ def test_connected_session_tasks_route_to_browser(monkeypatch, task):
     monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
     result = apply_routing_guardrails(user_prompt=task, routing_result={"agent": "cua_vision", "task": task}, latest_screen_context=None)
     assert result.route["agent"] == "browser"
+
+
+def test_explicit_browser_mention_routes_clean_objective_to_browser(monkeypatch):
+    monkeypatch.setenv("JARVIS_BROWSER_MODE", "extension")
+
+    result = apply_routing_guardrails(
+        user_prompt="@browser read the current tab and summarize it",
+        routing_result={"agent": "direct", "response_text": "I would answer this directly."},
+        latest_screen_context=None,
+    )
+
+    assert result.route == {"agent": "browser", "task": "read the current tab and summarize it"}
+    assert result.rewrite_reason == "explicit_browser_handoff"
 
 
 @pytest.mark.parametrize("task", ["Maximize my browser window", "Open Chrome with my work profile",

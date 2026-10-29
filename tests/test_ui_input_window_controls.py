@@ -220,3 +220,19 @@ def test_history_header_button_reuses_history_action_boundary() -> None:
     assert "chatHistoryButton?.setAttribute('aria-expanded', 'true')" in input_window_js
     assert "chatHistoryButton?.setAttribute('aria-expanded', 'false')" in input_window_js
     assert input_window_js.count("openHistoryFromAction();") == 2
+
+
+def test_composer_offers_an_accessible_browser_mention_without_changing_plain_prompts() -> None:
+    input_html = (ROOT_DIR / "ui" / "input.html").read_text(encoding="utf-8")
+    input_window_js = (ROOT_DIR / "ui" / "input_window.js").read_text(encoding="utf-8")
+    input_window_css = (ROOT_DIR / "ui" / "input_window.css").read_text(encoding="utf-8")
+
+    assert 'id="browser-mention"' in input_html
+    assert 'id="browser-mention-menu"' in input_html
+    assert 'role="listbox"' in input_html
+    assert 'id="browser-mention-option"' in input_html
+    assert "const BROWSER_MENTION_PREFIX = '@browser'" in input_window_js
+    assert "function insertBrowserMention()" in input_window_js
+    assert "function updateBrowserMentionMenu()" in input_window_js
+    assert "browserMentionMenu.hidden" in input_window_js
+    assert "#browser-mention-menu" in input_window_css

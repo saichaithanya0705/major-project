@@ -142,10 +142,20 @@
                 autocomplete="off"
                 spellcheck="false"
                 aria-describedby="chat-composer-hint chat-status-detail"
+                aria-controls="browser-mention-menu"
+                aria-expanded="false"
               ></textarea>
+              <div id="browser-mention-menu" role="listbox" aria-label="Browser mentions" hidden>
+                <button id="browser-mention-option" type="button" role="option" aria-selected="false">
+                  <strong>@browser</strong><span>Use JARVIS's connected browser</span>
+                </button>
+              </div>
               <div id="chat-composer-hint" hidden></div>
             </div>
             <div id="composer-actions">
+              <button id="browser-mention" type="button" aria-label="Add browser mention" title="Use the connected browser">
+                <span aria-hidden="true">@</span><span>Browser</span>
+              </button>
               <button id="command-voice" type="button" aria-label="Record voice command" aria-pressed="false" title="Record voice command">
                 <svg class="command-icon voice-icon-mic" viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M10 3.75a2.5 2.5 0 0 1 2.5 2.5v4.5a2.5 2.5 0 0 1-5 0v-4.5a2.5 2.5 0 0 1 2.5-2.5Z"></path>

@@ -1,5 +1,4 @@
-"""Parse explicit user-authored browser handoffs without inspecting page text."""
-
+"""Parse explicit browser handoffs and direct user-authored links."""
 from __future__ import annotations
 
 import re
@@ -65,9 +64,28 @@ def browser_handoff_request(text: str) -> bool:
     return parse_browser_handoff(text) is not None
 
 
+def parse_direct_url_handoff(text: str) -> BrowserHandoffIntent | None:
+    """Return a deterministic tab policy for a normal browser task with a URL.
+
+    This remains separate from :func:`parse_browser_handoff`: routing uses the
+    latter to reserve the explicit ``@browser`` marker, while the connected
+    runner uses this helper after browser routing has already been chosen.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    task = text.strip()
+    if _CURRENT_TAB.search(task):
+        return BrowserHandoffIntent(task=task, direct_url=None, tab_policy="current")
+    direct_url = _ordinary_http_url(task)
+    if direct_url is None:
+        return None
+    return BrowserHandoffIntent(task=task, direct_url=direct_url, tab_policy="owned_url")
+
+
 __all__ = [
     "BrowserHandoffIntent",
     "BrowserTabPolicy",
     "browser_handoff_request",
+    "parse_direct_url_handoff",
     "parse_browser_handoff",
 ]

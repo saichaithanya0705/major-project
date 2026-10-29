@@ -161,6 +161,10 @@ class BrowserAgent:
                     return {"success": False, "complete": False, "error": "Stop the active browser task before changing the connection or tab."}
                 if action == "select":
                     await runner.select_tab(index)
+                    pending_task = str(getattr(runner, "pending_handoff_task", "") or "").strip()
+                    if pending_task:
+                        runner.pending_handoff_task = ""
+                        return await runner.execute(pending_task)
                 else:
                     connection = await runner.connect()
                     if runner.state == "awaiting_tab_selection":

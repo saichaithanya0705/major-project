@@ -170,6 +170,28 @@ class BrowserSkills:
         entry = self._registry().explicit_skill(task)
         return entry.name if entry else None
 
+    def activate_for_task(self, task: str) -> dict[str, str]:
+        """Load the general contract and, at most, one matching trusted workflow.
+
+        Selection is deterministic and only activates skills that passed normal
+        discovery, trust, and digest checks. The model may still activate a
+        different catalogued skill later when the current page requires it.
+        """
+        instructions: dict[str, str] = {}
+        if "browser-operator" in self.entries:
+            instructions["browser-operator"] = self.activate("browser-operator")
+        registry = self._registry()
+        selected = registry.explicit_skill(task)
+        if selected is None:
+            selected = next(
+                (entry for entry in registry.relevant_skills(task, limit=5)
+                 if entry.name != "browser-operator"),
+                None,
+            )
+        if selected is not None and selected.name not in instructions:
+            instructions[selected.name] = self.activate(selected.name)
+        return instructions
+
     def activate(self, name: str) -> str:
         if name not in self.active:
             entry = self.entries.get(name)
